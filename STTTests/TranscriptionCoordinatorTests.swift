@@ -11,11 +11,14 @@ final class TranscriptionCoordinatorTests: XCTestCase {
 
     // MARK: - Helpers
 
+    // Uses a hardcoded locale so makeSUT stays synchronous — avoids calling the
+    // now-async SpeechRecognitionService.resolveLocale() in a non-async context.
+    // Factory closures are @MainActor to match TranscriptionCoordinator's requirements.
     private func makeSUT(
-        captureFactory: @escaping () -> any AudioInputProvider = { MockAudioInputProvider() },
-        fileFactory: @escaping (URL) -> any AudioInputProvider = { _ in MockAudioInputProvider() }
+        captureFactory: @MainActor @escaping () -> any AudioInputProvider = { MockAudioInputProvider() },
+        fileFactory: @MainActor @escaping (URL) -> any AudioInputProvider = { _ in MockAudioInputProvider() }
     ) -> (TranscriptionCoordinator, MockTranscriptionDelegate) {
-        let locale = SpeechRecognitionService.resolveLocale()
+        let locale = Locale(identifier: "en-IN")
         let recognitionService = SpeechRecognitionService(locale: locale)
         let coordinator = TranscriptionCoordinator(
             sessionManager: AudioSessionManager(),
@@ -53,7 +56,8 @@ final class TranscriptionCoordinatorTests: XCTestCase {
             XCTFail("Expected fileNotFound error")
         } catch TranscriptionError.fileNotFound(let url) {
             XCTAssertEqual(url.lastPathComponent, missingURL.lastPathComponent)
-        } catch TranscriptionError.microphonePermissionDenied, TranscriptionError.speechRecognitionPermissionDenied {
+        } catch TranscriptionError.microphonePermissionDenied,
+                TranscriptionError.speechRecognitionPermissionDenied {
             // Acceptable in simulator — permissions may not be granted
         } catch {
             XCTFail("Unexpected error: \(error)")
@@ -69,12 +73,10 @@ final class TranscriptionCoordinatorTests: XCTestCase {
             return MockAudioInputProvider()
         })
 
-        // Will fail at permission request in test environment — that's fine.
-        // We just verify factory is invoked before permissions are checked.
         _ = try? await coordinator.startLiveTranscription()
 
         // On simulator the factory may not be reached if permissions fail first.
-        // We verify the coordinator's state transitions instead.
+        // We verify the coordinator reached a valid state.
         let validStates: [TranscriptionState] = [
             .requestingPermissions, .preparingAudio, .transcribing,
             .failed(.microphonePermissionDenied), .failed(.speechRecognitionPermissionDenied)
@@ -83,28 +85,20 @@ final class TranscriptionCoordinatorTests: XCTestCase {
     }
 
     func testFileTranscriptionUsesFileFactory() async {
-        var fileFactoryCalled = false
-        let (coordinator, _) = makeSUT(fileFactory: { url in
-            fileFactoryCalled = true
-            return MockAudioInputProvider()
-        })
+        let (coordinator, _) = makeSUT(fileFactory: { _ in MockAudioInputProvider() })
 
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(UUID().uuidString).wav")
 
-        // Create minimal WAV so fileNotFound isn't thrown
-        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
-        if let file = try? AVAudioFile(forWriting: tempURL, settings: format.settings) {
-            _ = file // empty file is enough for the exists check
-        }
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 16000,
+            channels: 1,
+            interleaved: false
+        )!
+        _ = try? AVAudioFile(forWriting: tempURL, settings: format.settings)
 
         _ = try? await coordinator.transcribeFile(at: tempURL)
-
-        // Factory should have been called since the file exists
-        if FileManager.default.fileExists(atPath: tempURL.path) {
-            // May still not reach factory if permissions fail first — acceptable
-        }
-
         try? FileManager.default.removeItem(at: tempURL)
     }
 
@@ -149,7 +143,7 @@ final class TranscriptionCoordinatorTests: XCTestCase {
         ]
 
         for error in errors {
-            XCTAssertNotNil(error.errorDescription, "Error should have a description: \(error)")
+            XCTAssertNotNil(error.errorDescription)
             XCTAssertFalse(error.errorDescription!.isEmpty)
         }
     }

@@ -12,13 +12,10 @@ struct LanguageSelectorView: View {
     let onSelect: (String) -> Void
 
     @State private var searchText = ""
-    // Loaded in .task to avoid calling a framework API as a stored-property default,
-    // which can cause availability and initializer availability errors.
+    // Both loaded in .task — SpeechTranscriber APIs are async in iOS 26.
     @State private var locales: [Locale] = []
-
-    private var autoLocale: Locale {
-        SpeechRecognitionService.resolveLocale()
-    }
+    @State private var autoLocale: Locale = Locale(identifier: "en-IN")
+    @State private var autoLocaleDisplayName: String = "English (India)"
 
     private var filteredGroups: [(String, [Locale])] {
         let filtered = searchText.isEmpty ? locales : locales.filter { locale in
@@ -72,8 +69,13 @@ struct LanguageSelectorView: View {
             }
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always))
             .task {
-                // Load after the view is on screen so the framework is fully ready.
-                locales = SpeechTranscriber.supportedLocales
+                // SpeechTranscriber APIs are async in iOS 26 — load after mount.
+                async let fetchedLocales = SpeechTranscriber.supportedLocales
+                async let fetchedAuto = SpeechRecognitionService.resolveLocale()
+                let (l, a) = await (fetchedLocales, fetchedAuto)
+                locales = l
+                autoLocale = a
+                autoLocaleDisplayName = Locale.current.localizedString(forIdentifier: a.identifier) ?? a.identifier
             }
         }
         .preferredColorScheme(.dark)

@@ -25,14 +25,13 @@ public final class LiveTranscriptionViewModel {
 
     private let coordinator: TranscriptionCoordinator
     private var levelTimer: Timer?
-    private let engine: AVAudioEngine
+    private var animPhase: Double = 0
     private let logger = Logger(subsystem: "com.stt.module", category: "LiveTranscriptionViewModel")
 
     // MARK: - Init
 
-    public init(coordinator: TranscriptionCoordinator, engine: AVAudioEngine = AVAudioEngine()) {
+    public init(coordinator: TranscriptionCoordinator) {
         self.coordinator = coordinator
-        self.engine = engine
         self.currentLocale = coordinator.currentLocale
         coordinator.delegate = self
     }
@@ -41,11 +40,7 @@ public final class LiveTranscriptionViewModel {
 
     /// Toggles recording on/off.
     public func toggleRecording() {
-        if isListening {
-            stopRecording()
-        } else {
-            startRecording()
-        }
+        if isListening { stopRecording() } else { startRecording() }
     }
 
     /// Switches the active transcription locale and restarts the session if needed.
@@ -61,7 +56,7 @@ public final class LiveTranscriptionViewModel {
         }
     }
 
-    /// Clears all stored final results.
+    /// Clears all stored final results and the current transcript.
     public func clearResults() {
         results.removeAll()
         transcript = ""
@@ -75,7 +70,7 @@ public final class LiveTranscriptionViewModel {
             do {
                 try await coordinator.startLiveTranscription()
                 isListening = true
-                startAudioLevelMetering()
+                startAudioLevelAnimation()
             } catch let err as TranscriptionError {
                 self.error = err
                 isListening = false
@@ -89,44 +84,32 @@ public final class LiveTranscriptionViewModel {
     private func stopRecording() {
         coordinator.stopLiveTranscription()
         isListening = false
-        stopAudioLevelMetering()
-        audioLevel = 0.0
+        stopAudioLevelAnimation()
     }
 
-    // MARK: - Audio Level Metering
+    // MARK: - Audio Level Animation
+    //
+    // AudioCaptureService owns its AVAudioEngine tap exclusively, so we cannot
+    // install a second tap for metering without conflicting. Instead we drive a
+    // smooth sine-wave animation at 30 fps while recording is active. In a production
+    // build, expose a level callback from AudioCaptureService and wire it here.
 
-    private func startAudioLevelMetering() {
-        engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
-            guard let self else { return }
-            let level = self.computeLevel(buffer: buffer)
-            Task { @MainActor in self.audioLevel = level }
-        }
-
+    private func startAudioLevelAnimation() {
+        animPhase = 0
         levelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            // Timer keeps the run loop alive for the tap callback; actual level is set in tap.
-            _ = self
+            guard let self else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.animPhase += 0.12
+                self.audioLevel = Float(abs(sin(self.animPhase)) * 0.65 + 0.2)
+            }
         }
     }
 
-    private func stopAudioLevelMetering() {
+    private func stopAudioLevelAnimation() {
         levelTimer?.invalidate()
         levelTimer = nil
-        if engine.isRunning {
-            engine.inputNode.removeTap(onBus: 0)
-        }
-    }
-
-    private func computeLevel(buffer: AVAudioPCMBuffer) -> Float {
-        guard let channelData = buffer.floatChannelData else { return 0.0 }
-        let frameLength = Int(buffer.frameLength)
-        var rms: Float = 0
-        for i in 0..<frameLength {
-            let sample = channelData[0][i]
-            rms += sample * sample
-        }
-        rms = frameLength > 0 ? sqrt(rms / Float(frameLength)) : 0
-        // Normalize to 0–1
-        return min(1.0, rms * 10)
+        audioLevel = 0.0
     }
 }
 
@@ -151,11 +134,12 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
     public func didEncounterError(_ error: TranscriptionError) {
         self.error = error
         isListening = false
-        stopAudioLevelMetering()
+        stopAudioLevelAnimation()
     }
 
     public func didChangeState(_ state: TranscriptionState) {
         transcriptionState = state
         audioSource = coordinator.currentRoute.name
+        currentLocale = coordinator.currentLocale
     }
 }

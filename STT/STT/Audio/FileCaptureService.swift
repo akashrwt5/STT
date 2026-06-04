@@ -42,7 +42,6 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
     /// Opens the file and begins streaming converted buffers.
     ///
     /// - Returns: An `AsyncStream` that yields buffers until EOF or `stop()` is called.
-    /// - Note: The stream yields synchronously from a detached task to avoid blocking callers.
     public func start() -> AsyncStream<AnalyzerInput> {
         isCancelled = false
         state = .preparing
@@ -72,9 +71,7 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw TranscriptionError.fileNotFound(fileURL)
         }
-
         let file = try AVAudioFile(forReading: fileURL)
-        // Target mono Float32 at the file's native sample rate.
         guard let format = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: file.fileFormat.sampleRate,
@@ -97,19 +94,15 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
 
         do {
             let file = try AVAudioFile(forReading: fileURL)
-            let outputFormat: AVAudioFormat
-            do {
-                outputFormat = try resolveOutputFormat()
-            } catch {
-                state = .failed(error)
+            guard let outputFormat = try? resolveOutputFormat() else {
+                state = .failed(TranscriptionError.unsupportedAudioFormat(file.fileFormat.description))
                 return
             }
 
-            let converter: AVAudioConverter?
             let needsConversion = file.processingFormat != outputFormat
+            let converter: AVAudioConverter?
             if needsConversion {
                 guard let conv = AVAudioConverter(from: file.processingFormat, to: outputFormat) else {
-                    logger.error("Cannot create AVAudioConverter for this file format.")
                     state = .failed(TranscriptionError.unsupportedAudioFormat(file.processingFormat.description))
                     return
                 }
@@ -119,8 +112,6 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
             }
 
             state = .active
-            var accumulatedFrames: AVAudioFramePosition = 0
-            let sampleRate = outputFormat.sampleRate
 
             while file.framePosition < file.length && !isCancelled {
                 guard let inputBuffer = AVAudioPCMBuffer(
@@ -128,19 +119,15 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
                     frameCapacity: readBufferSize
                 ) else { break }
 
-                do {
-                    try file.read(into: inputBuffer)
-                } catch {
-                    logger.warning("File read ended: \(error)")
-                    break
-                }
+                do { try file.read(into: inputBuffer) } catch { break }
 
                 let outputBuffer: AVAudioPCMBuffer
                 if let conv = converter {
                     guard let converted = AVAudioPCMBuffer(
                         pcmFormat: outputFormat,
                         frameCapacity: AVAudioFrameCount(
-                            Double(inputBuffer.frameLength) * outputFormat.sampleRate / file.processingFormat.sampleRate
+                            Double(inputBuffer.frameLength)
+                                * outputFormat.sampleRate / file.processingFormat.sampleRate
                         ) + 1
                     ) else { break }
 
@@ -149,24 +136,17 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
                         outStatus.pointee = .haveData
                         return inputBuffer
                     }
-
-                    if status == .error || conversionError != nil {
-                        logger.error("Conversion error: \(String(describing: conversionError))")
-                        break
-                    }
+                    if status == .error || conversionError != nil { break }
                     outputBuffer = converted
                 } else {
                     outputBuffer = inputBuffer
                 }
 
-                let startTime = Double(accumulatedFrames) / sampleRate
-                accumulatedFrames += AVAudioFramePosition(outputBuffer.frameLength)
-                let input = outputBuffer.analyzerInput(bufferStartTime: startTime)
-                continuation.yield(input)
+                continuation.yield(outputBuffer.analyzerInput())
             }
 
             state = isCancelled ? .stopped : .idle
-            logger.info("FileCaptureService finished streaming. Total frames: \(accumulatedFrames)")
+            logger.info("FileCaptureService finished streaming.")
         } catch {
             logger.error("FileCaptureService failed: \(error)")
             state = .failed(error)

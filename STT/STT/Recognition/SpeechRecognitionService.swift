@@ -23,11 +23,6 @@ public final class SpeechRecognitionService: @unchecked Sendable {
 
     public weak var delegate: SpeechRecognitionServiceDelegate?
 
-    /// All locales supported by the on-device recognizer.
-    public var availableLocales: [Locale] {
-        SpeechTranscriber.supportedLocales
-    }
-
     // MARK: - Private
 
     private var analyzer: SpeechAnalyzer?
@@ -38,7 +33,6 @@ public final class SpeechRecognitionService: @unchecked Sendable {
 
     // MARK: - Init
 
-    /// - Parameter locale: Initial locale. Use `resolveLocale(userOverride:)` from the coordinator.
     public init(locale: Locale) {
         self.currentLocale = locale
     }
@@ -48,16 +42,14 @@ public final class SpeechRecognitionService: @unchecked Sendable {
     /// Begins transcribing audio from the given provider.
     ///
     /// - Parameter provider: Any `AudioInputProvider` — mic or file.
-    /// - Throws: `TranscriptionError.deviceNotSupported` if the device cannot run on-device STT.
     /// - Throws: `TranscriptionError.localeNotSupported` if the locale has no model.
     /// - Throws: `TranscriptionError.analyzerFailed` if the analyzer cannot start.
     public func startTranscribing(from provider: any AudioInputProvider) async throws {
-        guard SpeechTranscriber.supportsDevice() else {
-            throw TranscriptionError.deviceNotSupported
-        }
+        let resolvedLocale = try await resolveTranscriberLocale(currentLocale)
 
-        let resolvedLocale = try resolveTranscriberLocale(currentLocale)
-        let transcriber = SpeechTranscriber(locale: resolvedLocale)
+        // `SpeechTranscriber(locale:preset:)` — preset `.default` selects the system's
+        // recommended recognition profile. Use `.dictation` if you need punctuation insertion.
+        let transcriber = SpeechTranscriber(locale: resolvedLocale, preset: .default)
         self.transcriber = transcriber
 
         let analyzer = SpeechAnalyzer(modules: [transcriber])
@@ -68,25 +60,33 @@ public final class SpeechRecognitionService: @unchecked Sendable {
         analysisTask = Task { [weak self] in
             guard let self else { return }
             do {
-                async let _ = analyzer.start(inputSequence: audioStream)
-
-                for await result in transcriber.results {
-                    guard !Task.isCancelled else { break }
-
-                    let transcriptionResult = TranscriptionResult(
-                        text: result.text,
-                        isFinal: result.isFinal,
-                        locale: self.currentLocale,
-                        confidence: result.confidence.map { Float($0) }
-                    )
-
-                    await MainActor.run {
-                        if result.isFinal {
-                            self.delegate?.recognitionService(self, didReceiveFinalResult: transcriptionResult)
-                        } else {
-                            self.delegate?.recognitionService(self, didReceivePartialResult: transcriptionResult)
+                // Run the analyzer and result iteration concurrently.
+                // `analyzer.start(inputSequence:)` feeds audio; `transcriber.results`
+                // is the async property that vends the recognition output stream.
+                try await withThrowingTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        try await analyzer.start(inputSequence: audioStream)
+                    }
+                    // `transcriber.results` is an async property in iOS 26 —
+                    // must be awaited before iterating.
+                    let resultStream = await transcriber.results
+                    for await result in resultStream {
+                        guard !Task.isCancelled else { break }
+                        let transcriptionResult = TranscriptionResult(
+                            text: result.text,
+                            isFinal: result.isFinal,
+                            locale: self.currentLocale,
+                            confidence: result.confidence.map { Float($0) }
+                        )
+                        await MainActor.run {
+                            if result.isFinal {
+                                self.delegate?.recognitionService(self, didReceiveFinalResult: transcriptionResult)
+                            } else {
+                                self.delegate?.recognitionService(self, didReceivePartialResult: transcriptionResult)
+                            }
                         }
                     }
+                    group.cancelAll()
                 }
             } catch {
                 logger.error("Analysis task failed: \(error)")
@@ -100,21 +100,24 @@ public final class SpeechRecognitionService: @unchecked Sendable {
     }
 
     /// Stops transcription and cancels any in-flight analysis task.
+    ///
+    /// `SpeechAnalyzer` has no explicit `stop()` method — stopping the input stream and
+    /// cancelling the analysis task is the correct teardown sequence.
     public func stopTranscribing() async {
         analysisTask?.cancel()
+        await analysisTask?.value
         analysisTask = nil
-        await analyzer?.stop()
         analyzer = nil
         transcriber = nil
         logger.info("SpeechRecognitionService stopped.")
     }
 
-    /// Switches to a new locale by tearing down and reinitializing the transcriber.
+    /// Switches to a new locale by updating the stored locale for the next session.
     ///
     /// - Parameter identifier: BCP-47 locale identifier (e.g. "en-IN", "hi-IN").
     /// - Throws: `TranscriptionError.localeNotSupported` if no matching model exists.
     public func switchLocale(to identifier: String) async throws {
-        let newLocale = try resolveTranscriberLocale(Locale(identifier: identifier))
+        let newLocale = try await resolveTranscriberLocale(Locale(identifier: identifier))
         currentLocale = newLocale
         logger.info("Locale switched to: \(newLocale.identifier)")
     }
@@ -123,9 +126,12 @@ public final class SpeechRecognitionService: @unchecked Sendable {
 
     /// Resolves the best supported locale equivalent to the given candidate.
     ///
+    /// `SpeechTranscriber.supportedLocale(equivalentTo:)` is `async` in iOS 26 because
+    /// it may trigger model availability checks.
+    ///
     /// - Throws: `TranscriptionError.localeNotSupported` if no match found.
-    private func resolveTranscriberLocale(_ candidate: Locale) throws -> Locale {
-        if let match = SpeechTranscriber.supportedLocale(equivalentTo: candidate) {
+    private func resolveTranscriberLocale(_ candidate: Locale) async throws -> Locale {
+        if let match = await SpeechTranscriber.supportedLocale(equivalentTo: candidate) {
             return match
         }
         throw TranscriptionError.localeNotSupported(candidate.identifier)
@@ -137,33 +143,32 @@ public final class SpeechRecognitionService: @unchecked Sendable {
 extension SpeechRecognitionService {
     /// Resolves the best locale for the current device context.
     ///
-    /// Priority: user override → device locale → device language component → en-IN fallback.
+    /// `async` because `SpeechTranscriber.supportedLocales` and
+    /// `supportedLocale(equivalentTo:)` are async in iOS 26.
     ///
-    /// - Parameter userOverride: BCP-47 identifier stored in `UserDefaults`, if any.
-    /// - Returns: A `Locale` guaranteed to be supported by `SpeechTranscriber`.
-    public static func resolveLocale(userOverride: String? = nil) -> Locale {
+    /// Priority: user override → device locale → device language → en-IN fallback.
+    public static func resolveLocale(userOverride: String? = nil) async -> Locale {
         // 1. User-selected language
         if let override = userOverride,
-           let supported = SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: override)) {
+           let supported = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: override)) {
             return supported
         }
 
         // 2. Device locale
-        if let deviceMatch = SpeechTranscriber.supportedLocale(equivalentTo: Locale.current) {
+        if let deviceMatch = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current) {
             return deviceMatch
         }
 
         // 3. Language component only
+        let allLocales = await SpeechTranscriber.supportedLocales
         if let langCode = Locale.current.language.languageCode?.identifier,
-           let langMatch = SpeechTranscriber.supportedLocales.first(where: {
-               $0.language.languageCode?.identifier == langCode
-           }) {
+           let langMatch = allLocales.first(where: { $0.language.languageCode?.identifier == langCode }) {
             return langMatch
         }
 
         // 4. Fallback to en-IN
-        return SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: "en-IN"))
-            ?? SpeechTranscriber.supportedLocales.first
+        return await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: "en-IN"))
+            ?? allLocales.first
             ?? Locale(identifier: "en-IN")
     }
 }

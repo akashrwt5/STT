@@ -55,8 +55,10 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
                 return
             }
             self.streamContinuation = continuation
+            // Tear down on stream cancellation — must dispatch to MainActor
+            // because AVAudioEngine methods are @MainActor in iOS 26.
             continuation.onTermination = { [weak self] _ in
-                self?.tearDownEngine()
+                Task { @MainActor [weak self] in self?.tearDownEngine() }
             }
             Task { [weak self] in
                 await self?.startEngine(continuation: continuation)
@@ -67,11 +69,11 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
 
     /// Stops the audio engine and finishes the buffer stream.
     public func stop() {
-        state = .stopping
-        tearDownEngine()
         streamContinuation?.finish()
         streamContinuation = nil
         state = .stopped
+        // AVAudioEngine teardown must run on MainActor in iOS 26.
+        Task { @MainActor [weak self] in self?.tearDownEngine() }
         logger.info("AudioCaptureService stopped.")
     }
 
@@ -79,9 +81,6 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
 
     private func resolveFormat() async throws -> AVAudioFormat {
         if let cached = resolvedFormat { return cached }
-
-        // Use SpeechAnalyzer's preferred format for the current locale configuration.
-        // Falls back to the input node's native format if the API is unavailable.
         let inputFormat = engine.inputNode.outputFormat(forBus: 0)
         guard let format = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -97,24 +96,20 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
 
     private func startEngine(continuation: AsyncStream<AnalyzerInput>.Continuation) async {
         do {
-            // Must remove any existing tap before installing a new one.
             engine.inputNode.removeTap(onBus: 0)
 
             let format = try await resolveFormat()
-            let sampleRate = format.sampleRate
 
             engine.inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) { [weak self] buffer, _ in
                 guard let self else { return }
-                let startTime = Double(self.accumulatedFrames) / sampleRate
                 self.accumulatedFrames += AVAudioFramePosition(buffer.frameLength)
-                let input = buffer.analyzerInput(bufferStartTime: startTime)
-                continuation.yield(input)
+                continuation.yield(buffer.analyzerInput())
             }
 
             engine.prepare()
             try engine.start()
             state = .active
-            logger.info("AudioCaptureService started. Sample rate: \(sampleRate) Hz")
+            logger.info("AudioCaptureService started. Sample rate: \(format.sampleRate) Hz")
         } catch {
             logger.error("AudioCaptureService failed to start: \(error)")
             state = .failed(error)
@@ -122,6 +117,9 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
         }
     }
 
+    /// Must be called on `@MainActor` — AVAudioEngine's `stop()` and `removeTap` are
+    /// main-actor-isolated in iOS 26.
+    @MainActor
     private func tearDownEngine() {
         guard engine.isRunning else { return }
         engine.inputNode.removeTap(onBus: 0)

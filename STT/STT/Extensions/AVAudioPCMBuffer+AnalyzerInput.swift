@@ -7,16 +7,12 @@ import AVFoundation
 import Speech
 
 extension AVAudioPCMBuffer {
-    /// Creates an `AnalyzerInput` from this buffer with the given start time.
+    /// Creates an `AnalyzerInput` from this buffer.
     ///
-    /// - Parameter bufferStartTime: The time (in seconds from session start) at which
-    ///   the first sample in this buffer was captured. Must be calculated from
-    ///   accumulated frame counts — not wall clock time.
-    /// - Returns: An `AnalyzerInput` suitable for passing to `SpeechAnalyzer`.
-    func analyzerInput(bufferStartTime: TimeInterval) -> AnalyzerInput {
-        AnalyzerInput(buffer: self, audioTime: AVAudioTime(
-            sampleTime: AVAudioFramePosition(bufferStartTime * Double(format.sampleRate)),
-            atRate: format.sampleRate
-        ))
+    /// Timing is derived from the buffer's own `AVAudioTime` as set by the audio engine
+    /// tap or file reader — do not pass an external audioTime, as `AnalyzerInput` does
+    /// not expose that parameter in the iOS 26 API.
+    func analyzerInput() -> AnalyzerInput {
+        AnalyzerInput(buffer: self)
     }
 }

@@ -22,35 +22,35 @@ public final class TranscriptionCoordinator {
     public private(set) var state: TranscriptionState = .idle
     public private(set) var currentTranscript: String = ""
     public private(set) var currentRoute: AudioRoute = .builtInMic
+    /// Resolved asynchronously on first transcription or explicit locale switch.
     public private(set) var currentLocale: Locale
 
     public var isTranscribing: Bool { state.isActive }
 
-    /// Delegation interface. Set before calling `startLiveTranscription()`.
     public weak var delegate: TranscriptionDelegate?
 
     // MARK: - AsyncSequence API
 
-    /// Stream of all transcription results (partial and final).
-    ///
-    /// Initialized via `AsyncStream.makeStream()` in `init` to avoid mutating
-    /// `self` inside a lazy-var closure, which Swift 6 rejects on `@MainActor`.
     public let results: AsyncStream<TranscriptionResult>
     private var resultsContinuation: AsyncStream<TranscriptionResult>.Continuation?
 
     // MARK: - Available Locales
 
-    /// All locales the on-device recognizer supports, for display in the language picker.
+    /// Returns all locales the on-device recognizer supports.
+    ///
+    /// `async` because `SpeechTranscriber.supportedLocales` is async in iOS 26.
     public var availableLocales: [Locale] {
-        SpeechTranscriber.supportedLocales
+        get async { await SpeechTranscriber.supportedLocales }
     }
 
     // MARK: - Dependencies (injected)
 
     private let sessionManager: AudioSessionManager
     private let recognitionService: SpeechRecognitionService
-    private let captureServiceFactory: () -> any AudioInputProvider
-    private let fileServiceFactory: (URL) -> any AudioInputProvider
+    // Factory closures are @MainActor because AudioCaptureService/FileCaptureService
+    // create AVAudioEngine/AVAudioFile which are @MainActor-isolated in iOS 26.
+    private let captureServiceFactory: @MainActor () -> any AudioInputProvider
+    private let fileServiceFactory: @MainActor (URL) -> any AudioInputProvider
 
     private var activeProvider: (any AudioInputProvider)?
     private let logger = Logger(subsystem: "com.stt.module", category: "TranscriptionCoordinator")
@@ -62,16 +62,14 @@ public final class TranscriptionCoordinator {
     ///   - recognitionService: Manages `SpeechAnalyzer` + `SpeechTranscriber`.
     ///   - captureServiceFactory: Returns a fresh `AudioCaptureService` for live mic sessions.
     ///   - fileServiceFactory: Returns a fresh `FileCaptureService` for the given URL.
-    ///   - locale: Initial locale. Defaults to auto-detected from device + UserDefaults.
+    ///   - locale: Initial locale. Defaults to en-IN; resolved asynchronously on first use.
     public init(
         sessionManager: AudioSessionManager,
         recognitionService: SpeechRecognitionService,
-        captureServiceFactory: @escaping () -> any AudioInputProvider = { AudioCaptureService() },
-        fileServiceFactory: @escaping (URL) -> any AudioInputProvider = { FileCaptureService(fileURL: $0) },
+        captureServiceFactory: @MainActor @escaping () -> any AudioInputProvider = { AudioCaptureService() },
+        fileServiceFactory: @MainActor @escaping (URL) -> any AudioInputProvider = { FileCaptureService(fileURL: $0) },
         locale: Locale? = nil
     ) {
-        // Build the results stream before any other init work so `self` is never
-        // mutated inside a closure passed to a lazy-var initializer.
         let (stream, continuation) = AsyncStream<TranscriptionResult>.makeStream()
         self.results = stream
         self.resultsContinuation = continuation
@@ -81,8 +79,10 @@ public final class TranscriptionCoordinator {
         self.captureServiceFactory = captureServiceFactory
         self.fileServiceFactory = fileServiceFactory
 
+        // Default to en-IN; will be resolved asynchronously in startLiveTranscription/transcribeFile
+        // if no explicit locale is provided.
         let savedOverride = UserDefaults.standard.string(forKey: localeDefaultsKey)
-        self.currentLocale = locale ?? SpeechRecognitionService.resolveLocale(userOverride: savedOverride)
+        self.currentLocale = locale ?? Locale(identifier: savedOverride ?? "en-IN")
 
         sessionManager.delegate = self
         recognitionService.delegate = self
@@ -91,28 +91,21 @@ public final class TranscriptionCoordinator {
     /// Convenience initializer with no external dependencies.
     public convenience init() {
         let savedOverride = UserDefaults.standard.string(forKey: localeDefaultsKey)
-        let locale = SpeechRecognitionService.resolveLocale(userOverride: savedOverride)
-        let recognitionService = SpeechRecognitionService(locale: locale)
-
+        let defaultLocale = Locale(identifier: savedOverride ?? "en-IN")
+        let recognitionService = SpeechRecognitionService(locale: defaultLocale)
         self.init(
             sessionManager: AudioSessionManager(),
             recognitionService: recognitionService,
-            locale: locale
+            locale: defaultLocale
         )
     }
 
     // MARK: - Permission Check
 
     /// Checks both microphone and speech recognition permissions without requesting them.
-    ///
-    /// - Returns: A `PermissionStatus` indicating which (if any) permissions are missing.
     public func checkPermissions() async -> PermissionStatus {
-        let micStatus = AVAudioApplication.shared.recordPermission
-        let speechStatus = SFSpeechRecognizer.authorizationStatus()
-
-        let micGranted = micStatus == .granted
-        let speechGranted = speechStatus == .authorized
-
+        let micGranted = AVAudioApplication.shared.recordPermission == .granted
+        let speechGranted = SFSpeechRecognizer.authorizationStatus() == .authorized
         switch (micGranted, speechGranted) {
         case (true, true):   return .granted
         case (false, true):  return .microphoneDenied
@@ -130,10 +123,13 @@ public final class TranscriptionCoordinator {
     /// - Throws: `TranscriptionError.audioSessionSetupFailed` if the audio session cannot start.
     /// - Throws: `TranscriptionError.analyzerFailed` if the speech engine cannot start.
     public func startLiveTranscription() async throws {
-        guard state == .idle || state == .stopped else { return }
+        guard !state.isActive, state != .stopping else { return }
 
         transition(to: .requestingPermissions)
         try await requestPermissionsOrThrow()
+
+        // Resolve the locale asynchronously now that we're in an async context.
+        await resolveCurrentLocaleIfNeeded()
         transition(to: .preparingAudio)
 
         try sessionManager.configure()
@@ -169,8 +165,6 @@ public final class TranscriptionCoordinator {
     /// - Parameter url: Path to the audio file (m4a, wav, mp3, caf).
     /// - Returns: The complete transcribed text.
     /// - Throws: `TranscriptionError.fileNotFound` if the URL is inaccessible.
-    /// - Throws: `TranscriptionError.unsupportedAudioFormat` if the format is incompatible.
-    /// - Throws: `TranscriptionError.analyzerFailed` on recognition failure.
     public func transcribeFile(at url: URL) async throws -> String {
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw TranscriptionError.fileNotFound(url)
@@ -178,6 +172,7 @@ public final class TranscriptionCoordinator {
 
         transition(to: .requestingPermissions)
         try await requestPermissionsOrThrow()
+        await resolveCurrentLocaleIfNeeded()
         transition(to: .processingFile(progress: 0.0))
 
         currentTranscript = ""
@@ -186,8 +181,6 @@ public final class TranscriptionCoordinator {
         let provider = fileServiceFactory(url)
         activeProvider = provider
 
-        // Use a fresh single-use stream for file transcription rather than
-        // sharing the long-lived `results` stream.
         let (fileStream, fileContinuation) = AsyncStream<TranscriptionResult>.makeStream()
         let previousContinuation = resultsContinuation
         resultsContinuation = fileContinuation
@@ -216,15 +209,14 @@ public final class TranscriptionCoordinator {
 
     // MARK: - Locale Switching
 
-    /// Switches the active transcription locale.
-    ///
-    /// Saves the selection to `UserDefaults` and restarts the recognizer if active.
+    /// Switches the active transcription locale and persists it to `UserDefaults`.
     ///
     /// - Parameter identifier: BCP-47 locale string (e.g. "hi-IN", "en-US").
     /// - Throws: `TranscriptionError.localeNotSupported` if no model exists for this locale.
     public func switchLocale(to identifier: String) async throws {
         try await recognitionService.switchLocale(to: identifier)
-        if let matched = SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: identifier)) {
+        // `supportedLocale(equivalentTo:)` is async in iOS 26.
+        if let matched = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: identifier)) {
             currentLocale = matched
         }
         UserDefaults.standard.set(identifier, forKey: localeDefaultsKey)
@@ -236,6 +228,14 @@ public final class TranscriptionCoordinator {
     private func transition(to newState: TranscriptionState) {
         state = newState
         delegate?.didChangeState(newState)
+    }
+
+    /// Resolves `currentLocale` from the async SpeechTranscriber API if it hasn't been
+    /// set by an explicit `switchLocale` call. Only resolves once per session.
+    private func resolveCurrentLocaleIfNeeded() async {
+        let savedOverride = UserDefaults.standard.string(forKey: localeDefaultsKey)
+        let resolved = await SpeechRecognitionService.resolveLocale(userOverride: savedOverride)
+        currentLocale = resolved
     }
 
     private func requestPermissionsOrThrow() async throws {
@@ -258,7 +258,6 @@ public final class TranscriptionCoordinator {
 extension TranscriptionCoordinator: AudioSessionManagerDelegate {
     public func audioSessionManager(_ manager: AudioSessionManager, routeDidChangeTo route: AudioRoute) {
         currentRoute = route
-        logger.info("Route changed to: \(route.name)")
     }
 
     public func audioSessionManagerWasInterrupted(_ manager: AudioSessionManager) {
@@ -266,9 +265,7 @@ extension TranscriptionCoordinator: AudioSessionManagerDelegate {
     }
 
     public func audioSessionManagerInterruptionEnded(_ manager: AudioSessionManager, shouldResume: Bool) {
-        if shouldResume {
-            Task { try? await startLiveTranscription() }
-        }
+        if shouldResume { Task { try? await startLiveTranscription() } }
     }
 }
 
