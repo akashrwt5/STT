@@ -139,7 +139,8 @@ public final class TranscriptionCoordinator {
         let provider = captureServiceFactory()
         activeProvider = provider
 
-        try await recognitionService.startTranscribing(from: provider)
+        // .progressiveTranscription yields partial results immediately — ideal for live mic.
+        try await recognitionService.startTranscribing(from: provider, preset: .progressiveTranscription)
         transition(to: .transcribing)
         logger.info("Live transcription started.")
     }
@@ -185,7 +186,8 @@ public final class TranscriptionCoordinator {
         let previousContinuation = resultsContinuation
         resultsContinuation = fileContinuation
 
-        try await recognitionService.startTranscribing(from: provider)
+        // .transcription optimises for accuracy over the complete audio buffer — ideal for files.
+        try await recognitionService.startTranscribing(from: provider, preset: .transcription)
         transition(to: .processingFile(progress: 0.1))
 
         for await result in fileStream {

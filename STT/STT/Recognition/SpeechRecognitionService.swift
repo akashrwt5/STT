@@ -41,15 +41,20 @@ public final class SpeechRecognitionService: @unchecked Sendable {
 
     /// Begins transcribing audio from the given provider.
     ///
-    /// - Parameter provider: Any `AudioInputProvider` — mic or file.
+    /// - Parameters:
+    ///   - provider: Any `AudioInputProvider` — mic or file.
+    ///   - preset: Recognition profile. Use `.progressiveTranscription` for live mic
+    ///     (yields partial results immediately) and `.transcription` for file input
+    ///     (optimises for accuracy over a complete audio buffer).
     /// - Throws: `TranscriptionError.localeNotSupported` if the locale has no model.
     /// - Throws: `TranscriptionError.analyzerFailed` if the analyzer cannot start.
-    public func startTranscribing(from provider: any AudioInputProvider) async throws {
+    public func startTranscribing(
+        from provider: any AudioInputProvider,
+        preset: SpeechTranscriber.Preset = .progressiveTranscription
+    ) async throws {
         let resolvedLocale = try await resolveTranscriberLocale(currentLocale)
 
-        // `SpeechTranscriber(locale:preset:)` — preset `.default` selects the system's
-        // recommended recognition profile. Use `.dictation` if you need punctuation insertion.
-        let transcriber = SpeechTranscriber(locale: resolvedLocale, preset: .dictation)
+        let transcriber = SpeechTranscriber(locale: resolvedLocale, preset: preset)
         self.transcriber = transcriber
 
         let analyzer = SpeechAnalyzer(modules: [transcriber])
