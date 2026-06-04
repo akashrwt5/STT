@@ -60,9 +60,15 @@ public final class AudioSessionManager {
     /// - Throws: `TranscriptionError.audioSessionSetupFailed` if configuration fails.
     public func configure() throws {
         do {
-            try session.setCategory(.record, mode: .measurement, options: [.allowBluetooth, .allowBluetoothA2DP])
+            // .allowBluetooth enables Bluetooth HFP input (hearing aids, headsets).
+            // .allowBluetoothA2DP is intentionally excluded — it is an output-only
+            // protocol and is incompatible with the .record category, causing
+            // "the operation could not be completed" at runtime.
+            try session.setCategory(.record, mode: .measurement, options: [.allowBluetooth])
             try session.setActive(true)
             preferHearingAidInputIfAvailable()
+            // Remove before re-adding so repeated configure() calls don't stack observers.
+            NotificationCenter.default.removeObserver(self)
             registerForNotifications()
             updateCurrentRoute()
             logger.info("Audio session configured. Route: \(self.currentRoute.name)")
