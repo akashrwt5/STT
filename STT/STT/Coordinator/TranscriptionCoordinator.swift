@@ -13,15 +13,16 @@ private let localeDefaultsKey = "stt.userSelectedLocale"
 ///
 /// Wires together `AudioSessionManager`, `AudioCaptureService`/`FileCaptureService`,
 /// and `SpeechRecognitionService`. The rest of the app only touches this class.
+@Observable
 @MainActor
-public final class TranscriptionCoordinator: ObservableObject {
+public final class TranscriptionCoordinator {
 
     // MARK: - Public State
 
-    @Published public private(set) var state: TranscriptionState = .idle
-    @Published public private(set) var currentTranscript: String = ""
-    @Published public private(set) var currentRoute: AudioRoute = .builtInMic
-    @Published public private(set) var currentLocale: Locale
+    public private(set) var state: TranscriptionState = .idle
+    public private(set) var currentTranscript: String = ""
+    public private(set) var currentRoute: AudioRoute = .builtInMic
+    public private(set) var currentLocale: Locale
 
     public var isTranscribing: Bool { state.isActive }
 
@@ -30,11 +31,11 @@ public final class TranscriptionCoordinator: ObservableObject {
 
     // MARK: - AsyncSequence API
 
-    public private(set) lazy var results: AsyncStream<TranscriptionResult> = {
-        AsyncStream { continuation in
-            self.resultsContinuation = continuation
-        }
-    }()
+    /// Stream of all transcription results (partial and final).
+    ///
+    /// Initialized via `AsyncStream.makeStream()` in `init` to avoid mutating
+    /// `self` inside a lazy-var closure, which Swift 6 rejects on `@MainActor`.
+    public let results: AsyncStream<TranscriptionResult>
     private var resultsContinuation: AsyncStream<TranscriptionResult>.Continuation?
 
     // MARK: - Available Locales
@@ -69,6 +70,12 @@ public final class TranscriptionCoordinator: ObservableObject {
         fileServiceFactory: @escaping (URL) -> any AudioInputProvider = { FileCaptureService(fileURL: $0) },
         locale: Locale? = nil
     ) {
+        // Build the results stream before any other init work so `self` is never
+        // mutated inside a closure passed to a lazy-var initializer.
+        let (stream, continuation) = AsyncStream<TranscriptionResult>.makeStream()
+        self.results = stream
+        self.resultsContinuation = continuation
+
         self.sessionManager = sessionManager
         self.recognitionService = recognitionService
         self.captureServiceFactory = captureServiceFactory
@@ -107,9 +114,9 @@ public final class TranscriptionCoordinator: ObservableObject {
         let speechGranted = speechStatus == .authorized
 
         switch (micGranted, speechGranted) {
-        case (true, true):  return .granted
-        case (false, true): return .microphoneDenied
-        case (true, false): return .speechRecognitionDenied
+        case (true, true):   return .granted
+        case (false, true):  return .microphoneDenied
+        case (true, false):  return .speechRecognitionDenied
         case (false, false): return .allDenied
         }
     }
@@ -157,12 +164,12 @@ public final class TranscriptionCoordinator: ObservableObject {
 
     // MARK: - File Transcription
 
-    /// Transcribes an audio file synchronously and returns the full transcript.
+    /// Transcribes an audio file and returns the full transcript when complete.
     ///
     /// - Parameter url: Path to the audio file (m4a, wav, mp3, caf).
     /// - Returns: The complete transcribed text.
     /// - Throws: `TranscriptionError.fileNotFound` if the URL is inaccessible.
-    /// - Throws: `TranscriptionError.unsupportedAudioFormat` if the file format is incompatible.
+    /// - Throws: `TranscriptionError.unsupportedAudioFormat` if the format is incompatible.
     /// - Throws: `TranscriptionError.analyzerFailed` on recognition failure.
     public func transcribeFile(at url: URL) async throws -> String {
         guard FileManager.default.fileExists(atPath: url.path) else {
@@ -179,23 +186,28 @@ public final class TranscriptionCoordinator: ObservableObject {
         let provider = fileServiceFactory(url)
         activeProvider = provider
 
-        // Collect results via an async stream bridge.
-        let resultStream = AsyncStream<TranscriptionResult> { [weak self] continuation in
-            self?.resultsContinuation = continuation
-        }
+        // Use a fresh single-use stream for file transcription rather than
+        // sharing the long-lived `results` stream.
+        let (fileStream, fileContinuation) = AsyncStream<TranscriptionResult>.makeStream()
+        let previousContinuation = resultsContinuation
+        resultsContinuation = fileContinuation
 
         try await recognitionService.startTranscribing(from: provider)
         transition(to: .processingFile(progress: 0.1))
 
-        for await result in resultStream {
+        for await result in fileStream {
             if result.isFinal {
                 fullTranscript += (fullTranscript.isEmpty ? "" : " ") + result.text
                 transition(to: .processingFile(progress: min(1.0, Double(fullTranscript.count) / 100.0)))
             }
-            if provider.state == .idle || provider.state == .stopped { break }
+            if provider.state == .idle || provider.state == .stopped {
+                fileContinuation.finish()
+                break
+            }
         }
 
         await recognitionService.stopTranscribing()
+        resultsContinuation = previousContinuation
         activeProvider = nil
         transition(to: .idle)
         logger.info("File transcription complete. Characters: \(fullTranscript.count)")
@@ -227,8 +239,8 @@ public final class TranscriptionCoordinator: ObservableObject {
     }
 
     private func requestPermissionsOrThrow() async throws {
-        let micStatus = await AVAudioApplication.requestRecordPermission()
-        guard micStatus else { throw TranscriptionError.microphonePermissionDenied }
+        let micGranted = await AVAudioApplication.requestRecordPermission()
+        guard micGranted else { throw TranscriptionError.microphonePermissionDenied }
 
         let speechStatus = await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { status in
@@ -250,9 +262,7 @@ extension TranscriptionCoordinator: AudioSessionManagerDelegate {
     }
 
     public func audioSessionManagerWasInterrupted(_ manager: AudioSessionManager) {
-        if state == .transcribing {
-            stopLiveTranscription()
-        }
+        if state == .transcribing { stopLiveTranscription() }
     }
 
     public func audioSessionManagerInterruptionEnded(_ manager: AudioSessionManager, shouldResume: Bool) {

@@ -12,13 +12,20 @@ struct LanguageSelectorView: View {
     let onSelect: (String) -> Void
 
     @State private var searchText = ""
-    @State private var locales: [Locale] = SpeechTranscriber.supportedLocales
+    // Loaded in .task to avoid calling a framework API as a stored-property default,
+    // which can cause availability and initializer availability errors.
+    @State private var locales: [Locale] = []
+
+    private var autoLocale: Locale {
+        SpeechRecognitionService.resolveLocale()
+    }
 
     private var filteredGroups: [(String, [Locale])] {
         let filtered = searchText.isEmpty ? locales : locales.filter { locale in
             let name = Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier
             let native = locale.localizedString(forIdentifier: locale.identifier) ?? ""
-            return name.localizedCaseInsensitiveContains(searchText) || native.localizedCaseInsensitiveContains(searchText)
+            return name.localizedCaseInsensitiveContains(searchText)
+                || native.localizedCaseInsensitiveContains(searchText)
         }
         return groupedLocales(from: filtered)
     }
@@ -30,7 +37,6 @@ struct LanguageSelectorView: View {
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
-                        // Auto-detected option at top
                         Section {
                             autoDetectedRow
                         } header: {
@@ -65,22 +71,30 @@ struct LanguageSelectorView: View {
                 }
             }
             .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always))
+            .task {
+                // Load after the view is on screen so the framework is fully ready.
+                locales = SpeechTranscriber.supportedLocales
+            }
         }
         .preferredColorScheme(.dark)
     }
 
     // MARK: - Subviews
 
-    private var autoDetectedRow: some View {
-        let autoLocale = SpeechRecognitionService.resolveLocale()
-        let displayName = Locale.current.localizedString(forIdentifier: autoLocale.identifier) ?? autoLocale.identifier
+    // Extracted locale to a computed property so `autoDetectedRow` stays a pure
+    // @ViewBuilder body without mixing `let` statements before `return`.
+    private var autoDetectedDisplayName: String {
+        Locale.current.localizedString(forIdentifier: autoLocale.identifier) ?? autoLocale.identifier
+    }
 
-        return HStack(spacing: 12) {
+    @ViewBuilder
+    private var autoDetectedRow: some View {
+        HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Automatic")
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(.white)
-                Text(displayName)
+                Text(autoDetectedDisplayName)
                     .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.5))
             }
@@ -100,12 +114,13 @@ struct LanguageSelectorView: View {
         }
     }
 
+    @ViewBuilder
     private func localeRow(_ locale: Locale) -> some View {
         let displayName = Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier
         let nativeName = locale.localizedString(forIdentifier: locale.identifier) ?? ""
         let isSelected = locale.identifier == currentLocale.identifier
 
-        return HStack(spacing: 12) {
+        HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayName)
                     .font(.system(size: 15, weight: isSelected ? .semibold : .regular))
@@ -127,6 +142,7 @@ struct LanguageSelectorView: View {
         .contentShape(Rectangle())
     }
 
+    @ViewBuilder
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
             .font(.system(size: 11, weight: .semibold))
@@ -140,23 +156,23 @@ struct LanguageSelectorView: View {
     // MARK: - Grouping
 
     private func groupedLocales(from locales: [Locale]) -> [(String, [Locale])] {
-        let southAsian = Set(["en-IN", "hi", "ta", "te", "kn", "ml", "mr", "gu", "pa", "bn", "ur", "or"])
-        let eastAsian = Set(["zh", "ja", "ko"])
-        let european = Set(["en-US", "en-GB", "fr", "de", "es", "it", "pt", "nl", "pl", "sv", "da", "fi", "nb", "ru"])
-        let middleEastern = Set(["ar", "he", "tr"])
-        let southeastAsian = Set(["th", "vi", "id", "ms"])
+        let southAsian  = Set(["en-IN", "hi", "ta", "te", "kn", "ml", "mr", "gu", "pa", "bn", "ur", "or"])
+        let eastAsian   = Set(["zh", "ja", "ko"])
+        let european    = Set(["en-US", "en-GB", "fr", "de", "es", "it", "pt", "nl", "pl", "sv", "da", "fi", "nb", "ru"])
+        let midEastern  = Set(["ar", "he", "tr"])
+        let seAsian     = Set(["th", "vi", "id", "ms"])
 
         var groups: [(String, [Locale])] = [
-            ("South Asian", []),
-            ("East Asian", []),
-            ("European", []),
+            ("South Asian",    []),
+            ("East Asian",     []),
+            ("European",       []),
             ("Middle Eastern", []),
-            ("Southeast Asian", []),
-            ("Other", [])
+            ("Southeast Asian",[]),
+            ("Other",          [])
         ]
 
         for locale in locales {
-            let id = locale.identifier
+            let id   = locale.identifier
             let lang = locale.language.languageCode?.identifier ?? ""
 
             if southAsian.contains(id) || southAsian.contains(lang) {
@@ -165,9 +181,9 @@ struct LanguageSelectorView: View {
                 groups[1].1.append(locale)
             } else if european.contains(id) || european.contains(lang) {
                 groups[2].1.append(locale)
-            } else if middleEastern.contains(lang) {
+            } else if midEastern.contains(lang) {
                 groups[3].1.append(locale)
-            } else if southeastAsian.contains(lang) {
+            } else if seAsian.contains(lang) {
                 groups[4].1.append(locale)
             } else {
                 groups[5].1.append(locale)
