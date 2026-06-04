@@ -77,11 +77,14 @@ public final class SpeechRecognitionService: @unchecked Sendable {
                     let resultStream = await transcriber.results
                     for await result in resultStream {
                         guard !Task.isCancelled else { break }
+                        // `result.text` is an `AttributedString` in iOS 26 —
+                        // flatten to a plain String via its character view.
+                        let plainText = String(result.text.characters)
                         let transcriptionResult = TranscriptionResult(
-                            text: result.text,
+                            text: plainText,
                             isFinal: result.isFinal,
                             locale: self.currentLocale,
-                            confidence: result.confidence.map { Float($0) }
+                            confidence: nil
                         )
                         await MainActor.run {
                             if result.isFinal {
