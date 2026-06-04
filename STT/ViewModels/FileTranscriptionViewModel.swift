@@ -76,7 +76,9 @@ public final class FileTranscriptionViewModel {
 
         transcriptionTask = Task {
             do {
-                let result = try await coordinator.transcribeFile(at: url)
+                let result = try await coordinator.transcribeFile(at: url) { [weak self] fraction in
+                    self?.progress = fraction
+                }
                 transcript = result
                 processingDuration = Date().timeIntervalSince(startTime)
                 progress = 1.0

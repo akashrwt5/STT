@@ -30,4 +30,15 @@ public protocol AudioInputProvider: Sendable {
 
     /// Current lifecycle state of this provider.
     var state: AudioInputState { get }
+
+    /// Optional stream of completion progress in the range 0.0...1.0.
+    ///
+    /// Finite sources (files) report real progress here; open-ended sources (the live
+    /// microphone) return `nil`. Consumed once per `start()`.
+    var progressStream: AsyncStream<Double>? { get }
+}
+
+public extension AudioInputProvider {
+    /// Default: no progress reporting (suitable for open-ended sources like the mic).
+    var progressStream: AsyncStream<Double>? { nil }
 }

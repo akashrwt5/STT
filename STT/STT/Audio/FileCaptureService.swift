@@ -20,18 +20,25 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
 
     public private(set) var state: AudioInputState = .idle
 
+    /// Real frame-based progress (0.0...1.0), driven as the file is read.
+    public let progressStream: AsyncStream<Double>?
+
     // MARK: - Private
 
     private let fileURL: URL
     private let logger = Logger(subsystem: "com.stt.module", category: "FileCaptureService")
     private var isCancelled = false
     private let readBufferSize: AVAudioFrameCount = 8192
+    private let progressContinuation: AsyncStream<Double>.Continuation
 
     // MARK: - Init
 
     /// - Parameter fileURL: Path to the audio file to transcribe.
     public init(fileURL: URL) {
         self.fileURL = fileURL
+        let (stream, continuation) = AsyncStream<Double>.makeStream()
+        self.progressStream = stream
+        self.progressContinuation = continuation
     }
 
     // MARK: - AudioInputProvider
@@ -70,7 +77,10 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
     }
 
     private func streamFile(continuation: AsyncStream<AVAudioPCMBuffer>.Continuation) async {
-        defer { continuation.finish() }
+        defer {
+            continuation.finish()
+            progressContinuation.finish()
+        }
 
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             logger.error("File not found: \(self.fileURL.path)")
@@ -81,6 +91,7 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
         do {
             let file = try AVAudioFile(forReading: fileURL)
             state = .active
+            let totalFrames = max(file.length, 1)
 
             while file.framePosition < file.length && !isCancelled {
                 guard let buffer = AVAudioPCMBuffer(
@@ -95,8 +106,13 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
                 }
                 guard buffer.frameLength > 0 else { break }
                 continuation.yield(buffer)
+
+                // Report real progress based on how far into the file we've read.
+                let progress = Double(file.framePosition) / Double(totalFrames)
+                progressContinuation.yield(min(progress, 1.0))
             }
 
+            if !isCancelled { progressContinuation.yield(1.0) }
             state = isCancelled ? .stopped : .idle
             logger.info("FileCaptureService finished streaming.")
         } catch {

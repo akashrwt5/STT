@@ -88,7 +88,9 @@ public final class TranscriptionCoordinator {
         self.currentLocale = locale ?? Locale(identifier: savedOverride ?? "en-IN")
 
         sessionManager.delegate = self
-        recognitionService.delegate = self
+        // recognitionService is an actor; wire the delegate asynchronously before the
+        // first transcription (see startLiveTranscription / transcribeFile).
+        Task { await recognitionService.setDelegate(self) }
     }
 
     /// Convenience initializer with no external dependencies.
@@ -142,6 +144,8 @@ public final class TranscriptionCoordinator {
         let provider = captureServiceFactory()
         activeProvider = provider
 
+        // Deterministically wire the actor's delegate before results can flow.
+        await recognitionService.setDelegate(self)
         // .progressiveTranscription yields partial results immediately — ideal for live mic.
         try await recognitionService.startTranscribing(from: provider, preset: .progressiveTranscription)
         transition(to: .transcribing)
@@ -170,10 +174,15 @@ public final class TranscriptionCoordinator {
 
     /// Transcribes an audio file and returns the full transcript when complete.
     ///
-    /// - Parameter url: Path to the audio file (m4a, wav, mp3, caf).
+    /// - Parameters:
+    ///   - url: Path to the audio file (m4a, wav, mp3, caf).
+    ///   - onProgress: Called on the main actor with real frame-based progress (0...1).
     /// - Returns: The complete transcribed text.
     /// - Throws: `TranscriptionError.fileNotFound` if the URL is inaccessible.
-    public func transcribeFile(at url: URL) async throws -> String {
+    public func transcribeFile(
+        at url: URL,
+        onProgress: @MainActor @escaping (Double) -> Void = { _ in }
+    ) async throws -> String {
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw TranscriptionError.fileNotFound(url)
         }
@@ -197,21 +206,37 @@ public final class TranscriptionCoordinator {
         // finishes the stream so the loop below terminates deterministically — no polling.
         fileCompletionHandler = { fileContinuation.finish() }
 
+        // Drive UI progress from the file reader's real frame position (authoritative),
+        // rather than guessing from transcript length.
+        var progressTask: Task<Void, Never>?
+        if let progressStream = provider.progressStream {
+            progressTask = Task { [weak self] in
+                for await fraction in progressStream {
+                    let clamped = max(0.05, min(0.99, fraction))
+                    onProgress(clamped)
+                    if let self, case .processingFile = self.state {
+                        self.state = .processingFile(progress: clamped)
+                    }
+                }
+            }
+        }
+
         defer {
+            progressTask?.cancel()
             fileCompletionHandler = nil
             resultsContinuation = previousContinuation
             activeProvider = nil
         }
 
+        // Deterministically wire the actor's delegate before results can flow.
+        await recognitionService.setDelegate(self)
         // .transcription optimises for accuracy over the complete audio buffer — ideal for files.
         try await recognitionService.startTranscribing(from: provider, preset: .transcription)
-        transition(to: .processingFile(progress: 0.1))
 
         for await result in fileStream {
             guard !Task.isCancelled else { break }
             if result.isFinal {
                 fullTranscript += (fullTranscript.isEmpty ? "" : " ") + result.text
-                transition(to: .processingFile(progress: min(0.95, Double(fullTranscript.count) / 100.0)))
             }
         }
 

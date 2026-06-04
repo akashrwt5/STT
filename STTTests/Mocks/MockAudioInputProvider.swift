@@ -11,7 +11,7 @@ final class MockAudioInputProvider: AudioInputProvider, @unchecked Sendable {
     // MARK: - Configuration
 
     /// Buffers to yield when `start()` is called, in order.
-    var buffersToYield: [AnalyzerInput] = []
+    var buffersToYield: [AVAudioPCMBuffer] = []
     /// If set, thrown from `audioFormat`.
     var audioFormatError: Error?
     /// If set, signals the stream finished after yielding all buffers.
@@ -33,7 +33,7 @@ final class MockAudioInputProvider: AudioInputProvider, @unchecked Sendable {
 
     private(set) var state: AudioInputState = .idle
 
-    func start() -> AsyncStream<AnalyzerInput> {
+    func start() -> AsyncStream<AVAudioPCMBuffer> {
         startCallCount += 1
         state = .active
         let buffers = buffersToYield

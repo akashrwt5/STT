@@ -8,7 +8,11 @@ import Speech
 import os.log
 
 /// Callback interface for speech recognition events.
-public protocol SpeechRecognitionServiceDelegate: AnyObject {
+///
+/// `@MainActor` (and `Sendable`) so the actor-isolated `SpeechRecognitionService` can
+/// safely hand results to a UI-bound delegate across the concurrency boundary.
+@MainActor
+public protocol SpeechRecognitionServiceDelegate: AnyObject, Sendable {
     func recognitionService(_ service: SpeechRecognitionService, didReceivePartialResult result: TranscriptionResult)
     func recognitionService(_ service: SpeechRecognitionService, didReceiveFinalResult result: TranscriptionResult)
     func recognitionService(_ service: SpeechRecognitionService, didFailWith error: TranscriptionError)
@@ -22,11 +26,12 @@ public protocol SpeechRecognitionServiceDelegate: AnyObject {
 /// Accepts audio from any `AudioInputProvider` — it is agnostic to the audio source.
 /// It is also the only component that knows the analyzer's required audio format, so
 /// it performs the conversion from each provider's raw buffers.
-public final class SpeechRecognitionService: @unchecked Sendable {
+public actor SpeechRecognitionService {
 
     // MARK: - Public
 
-    public weak var delegate: SpeechRecognitionServiceDelegate?
+    /// The delegate is `@MainActor`; set it via `setDelegate(_:)` from any context.
+    private weak var delegate: SpeechRecognitionServiceDelegate?
 
     // MARK: - Private
 
@@ -41,6 +46,11 @@ public final class SpeechRecognitionService: @unchecked Sendable {
 
     public init(locale: Locale) {
         self.currentLocale = locale
+    }
+
+    /// Sets the event delegate. `async` because the service is an actor.
+    public func setDelegate(_ delegate: SpeechRecognitionServiceDelegate?) {
+        self.delegate = delegate
     }
 
     // MARK: - Transcription
@@ -93,10 +103,10 @@ public final class SpeechRecognitionService: @unchecked Sendable {
         let (analyzerInputSequence, analyzerInputBuilder) = AsyncStream<AnalyzerInput>.makeStream()
         let rawBufferStream = provider.start()
         let converter = BufferConverter()
-        var bufferCount = 0
 
         feedTask = Task { [weak self] in
             guard let self else { return }
+            var bufferCount = 0
             self.logger.info("[Feed] Feed task started.")
             for await buffer in rawBufferStream {
                 guard !Task.isCancelled else {
@@ -152,20 +162,22 @@ public final class SpeechRecognitionService: @unchecked Sendable {
                         let plainText = String(result.text.characters)
                         self.logger.info("[Results] Result #\(resultCount): isFinal=\(result.isFinal), text='\(plainText)'")
 
+                        let isFinal = result.isFinal
                         let transcriptionResult = TranscriptionResult(
                             text: plainText,
-                            isFinal: result.isFinal,
+                            isFinal: isFinal,
                             locale: self.currentLocale,
                             confidence: nil
                         )
 
+                        // Read the (Sendable, @MainActor) delegate before hopping.
+                        let delegate = self.delegate
+                        self.logger.info("[Delegate] Emitting \(isFinal ? "final" : "partial"): '\(plainText)'")
                         await MainActor.run {
-                            if result.isFinal {
-                                self.logger.info("[Delegate] Calling didReceiveFinalResult: '\(plainText)'")
-                                self.delegate?.recognitionService(self, didReceiveFinalResult: transcriptionResult)
+                            if isFinal {
+                                delegate?.recognitionService(self, didReceiveFinalResult: transcriptionResult)
                             } else {
-                                self.logger.info("[Delegate] Calling didReceivePartialResult: '\(plainText)'")
-                                self.delegate?.recognitionService(self, didReceivePartialResult: transcriptionResult)
+                                delegate?.recognitionService(self, didReceivePartialResult: transcriptionResult)
                             }
                         }
                     }
@@ -174,14 +186,14 @@ public final class SpeechRecognitionService: @unchecked Sendable {
                 }
                 // Reached only on normal completion (input exhausted), not cancellation/error.
                 if !Task.isCancelled {
-                    await MainActor.run {
-                        self.delegate?.recognitionServiceDidComplete(self)
-                    }
+                    let delegate = self.delegate
+                    await MainActor.run { delegate?.recognitionServiceDidComplete(self) }
                 }
             } catch {
                 self.logger.error("[Analysis] Analysis task failed with error: \(error)")
+                let delegate = self.delegate
                 await MainActor.run {
-                    self.delegate?.recognitionService(self, didFailWith: .analyzerFailed(error))
+                    delegate?.recognitionService(self, didFailWith: .analyzerFailed(error))
                 }
             }
             self.logger.info("[Analysis] Analysis task complete. Cancelling feed task.")
