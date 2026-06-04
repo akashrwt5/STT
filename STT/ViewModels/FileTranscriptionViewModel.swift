@@ -32,7 +32,15 @@ public final class FileTranscriptionViewModel {
 
     private let coordinator: TranscriptionCoordinator
     private var transcriptionTask: Task<Void, Never>?
+    private var isSecurityScoped = false
     private let logger = Logger(subsystem: "com.stt.module", category: "FileTranscriptionViewModel")
+
+    private func releaseSecurityScope() {
+        if isSecurityScoped, let url = selectedFileURL {
+            url.stopAccessingSecurityScopedResource()
+            isSecurityScoped = false
+        }
+    }
 
     // MARK: - Init
 
@@ -43,7 +51,14 @@ public final class FileTranscriptionViewModel {
     // MARK: - Public API
 
     /// Called when the user selects a file via `fileImporter`.
+    ///
+    /// Takes ownership of the security-scoped resource for files outside the app
+    /// sandbox (iCloud/Files). Access is held until `reset()` or deinit, because
+    /// transcription happens later when the user taps "Transcribe".
     public func selectFile(_ url: URL) {
+        releaseSecurityScope()
+        isSecurityScoped = url.startAccessingSecurityScopedResource()
+
         selectedFileURL = url
         transcript = ""
         error = nil
@@ -79,7 +94,7 @@ public final class FileTranscriptionViewModel {
     public func cancel() {
         transcriptionTask?.cancel()
         transcriptionTask = nil
-        coordinator.stopLiveTranscription()
+        coordinator.cancelFileTranscription()
         isProcessing = false
         progress = 0.0
         logger.info("File transcription cancelled.")
@@ -87,12 +102,19 @@ public final class FileTranscriptionViewModel {
 
     /// Resets to the initial state so the user can pick a new file.
     public func reset() {
+        releaseSecurityScope()
         selectedFileURL = nil
         fileInfo = nil
         transcript = ""
         error = nil
         progress = 0.0
         processingDuration = nil
+    }
+
+    deinit {
+        if isSecurityScoped {
+            selectedFileURL?.stopAccessingSecurityScopedResource()
+        }
     }
 
     // MARK: - Private

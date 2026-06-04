@@ -85,7 +85,11 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
             let format = await resolveFormat()
 
             engine.inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) { buffer, _ in
-                continuation.yield(buffer)
+                // The tap buffer is only valid for the duration of this callback; the
+                // engine may reuse its storage afterwards. Deep-copy before yielding it
+                // to the async stream, which is consumed on another task later.
+                guard let copy = buffer.deepCopy() else { return }
+                continuation.yield(copy)
             }
 
             engine.prepare()

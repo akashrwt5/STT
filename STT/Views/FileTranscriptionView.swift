@@ -56,10 +56,10 @@ struct FileTranscriptionView: View {
             allowedContentTypes: supportedTypes,
             allowsMultipleSelection: false
         ) { result in
+            // The view model takes ownership of the security-scoped resource and holds
+            // it until transcription is done, so we must NOT start/stop access here.
             if case .success(let urls) = result, let url = urls.first {
-                let gotAccess = url.startAccessingSecurityScopedResource()
                 viewModel.selectFile(url)
-                if gotAccess { url.stopAccessingSecurityScopedResource() }
             }
         }
     }

@@ -53,6 +53,9 @@ public final class TranscriptionCoordinator {
     private let fileServiceFactory: @MainActor (URL) -> any AudioInputProvider
 
     private var activeProvider: (any AudioInputProvider)?
+    /// Set during `transcribeFile`; invoked when the recognizer finishes the file so the
+    /// result-collection loop can terminate deterministically (instead of polling state).
+    private var fileCompletionHandler: (() -> Void)?
     private let logger = Logger(subsystem: "com.stt.module", category: "TranscriptionCoordinator")
 
     // MARK: - Init
@@ -146,8 +149,12 @@ public final class TranscriptionCoordinator {
     }
 
     /// Stops live transcription and releases audio resources.
+    ///
+    /// Permits stopping from any pre-active state too (e.g. while permissions are being
+    /// requested or audio is still being prepared on first launch), so a stop tap is
+    /// never silently ignored.
     public func stopLiveTranscription() {
-        guard state == .transcribing else { return }
+        guard state != .idle, state != .stopping else { return }
         transition(to: .stopping)
         Task {
             await recognitionService.stopTranscribing()
@@ -172,7 +179,8 @@ public final class TranscriptionCoordinator {
         }
 
         transition(to: .requestingPermissions)
-        try await requestPermissionsOrThrow()
+        // File transcription does not use the microphone — only speech recognition auth.
+        try await requestPermissionsOrThrow(requiresMicrophone: false)
         await resolveCurrentLocaleIfNeeded()
         transition(to: .processingFile(progress: 0.0))
 
@@ -185,28 +193,45 @@ public final class TranscriptionCoordinator {
         let (fileStream, fileContinuation) = AsyncStream<TranscriptionResult>.makeStream()
         let previousContinuation = resultsContinuation
         resultsContinuation = fileContinuation
+        // The recognizer signals completion via `recognitionServiceDidComplete`, which
+        // finishes the stream so the loop below terminates deterministically — no polling.
+        fileCompletionHandler = { fileContinuation.finish() }
+
+        defer {
+            fileCompletionHandler = nil
+            resultsContinuation = previousContinuation
+            activeProvider = nil
+        }
 
         // .transcription optimises for accuracy over the complete audio buffer — ideal for files.
         try await recognitionService.startTranscribing(from: provider, preset: .transcription)
         transition(to: .processingFile(progress: 0.1))
 
         for await result in fileStream {
+            guard !Task.isCancelled else { break }
             if result.isFinal {
                 fullTranscript += (fullTranscript.isEmpty ? "" : " ") + result.text
-                transition(to: .processingFile(progress: min(1.0, Double(fullTranscript.count) / 100.0)))
-            }
-            if provider.state == .idle || provider.state == .stopped {
-                fileContinuation.finish()
-                break
+                transition(to: .processingFile(progress: min(0.95, Double(fullTranscript.count) / 100.0)))
             }
         }
 
+        provider.stop()
         await recognitionService.stopTranscribing()
-        resultsContinuation = previousContinuation
-        activeProvider = nil
         transition(to: .idle)
         logger.info("File transcription complete. Characters: \(fullTranscript.count)")
         return fullTranscript
+    }
+
+    /// Cancels an in-progress file transcription and releases resources.
+    public func cancelFileTranscription() {
+        guard case .processingFile = state else { return }
+        fileCompletionHandler?()
+        activeProvider?.stop()
+        Task {
+            await recognitionService.stopTranscribing()
+            transition(to: .idle)
+            logger.info("File transcription cancelled.")
+        }
     }
 
     // MARK: - Locale Switching
@@ -240,9 +265,11 @@ public final class TranscriptionCoordinator {
         currentLocale = resolved
     }
 
-    private func requestPermissionsOrThrow() async throws {
-        let micGranted = await AVAudioApplication.requestRecordPermission()
-        guard micGranted else { throw TranscriptionError.microphonePermissionDenied }
+    private func requestPermissionsOrThrow(requiresMicrophone: Bool = true) async throws {
+        if requiresMicrophone {
+            let micGranted = await AVAudioApplication.requestRecordPermission()
+            guard micGranted else { throw TranscriptionError.microphonePermissionDenied }
+        }
 
         let speechStatus = await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { status in
@@ -294,5 +321,10 @@ extension TranscriptionCoordinator: SpeechRecognitionServiceDelegate {
         activeProvider?.stop()
         activeProvider = nil
         sessionManager.tearDown()
+    }
+
+    public func recognitionServiceDidComplete(_ service: SpeechRecognitionService) {
+        // Used by file transcription to end its result-collection loop deterministically.
+        fileCompletionHandler?()
     }
 }

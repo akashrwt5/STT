@@ -12,6 +12,9 @@ public protocol SpeechRecognitionServiceDelegate: AnyObject {
     func recognitionService(_ service: SpeechRecognitionService, didReceivePartialResult result: TranscriptionResult)
     func recognitionService(_ service: SpeechRecognitionService, didReceiveFinalResult result: TranscriptionResult)
     func recognitionService(_ service: SpeechRecognitionService, didFailWith error: TranscriptionError)
+    /// Called when the result stream completes normally (e.g. an input file is fully
+    /// consumed). Not called when the session is cancelled or fails.
+    func recognitionServiceDidComplete(_ service: SpeechRecognitionService)
 }
 
 /// Owns `SpeechAnalyzer` and `SpeechTranscriber` setup, lifecycle, and result iteration.
@@ -168,6 +171,12 @@ public final class SpeechRecognitionService: @unchecked Sendable {
                     }
                     self.logger.info("[Results] Result stream exhausted. Total results received: \(resultCount).")
                     group.cancelAll()
+                }
+                // Reached only on normal completion (input exhausted), not cancellation/error.
+                if !Task.isCancelled {
+                    await MainActor.run {
+                        self.delegate?.recognitionServiceDidComplete(self)
+                    }
                 }
             } catch {
                 self.logger.error("[Analysis] Analysis task failed with error: \(error)")
