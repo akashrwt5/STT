@@ -7,12 +7,9 @@ import AVFoundation
 import Speech
 import os.log
 
-/// Callback interface for speech recognition events.
-///
-/// `@MainActor` (and `Sendable`) so the actor-isolated `SpeechRecognitionService` can
-/// safely hand results to a UI-bound delegate across the concurrency boundary.
+/// Callback interface for speech recognition events. Called on the main actor.
 @MainActor
-public protocol SpeechRecognitionServiceDelegate: AnyObject, Sendable {
+public protocol SpeechRecognitionServiceDelegate: AnyObject {
     func recognitionService(_ service: SpeechRecognitionService, didReceivePartialResult result: TranscriptionResult)
     func recognitionService(_ service: SpeechRecognitionService, didReceiveFinalResult result: TranscriptionResult)
     func recognitionService(_ service: SpeechRecognitionService, didFailWith error: TranscriptionError)
@@ -26,12 +23,16 @@ public protocol SpeechRecognitionServiceDelegate: AnyObject, Sendable {
 /// Accepts audio from any `AudioInputProvider` — it is agnostic to the audio source.
 /// It is also the only component that knows the analyzer's required audio format, so
 /// it performs the conversion from each provider's raw buffers.
-public actor SpeechRecognitionService {
+///
+/// Main-actor isolated, consistent with the rest of the module. The heavy work
+/// (buffer conversion, analyzer execution, result iteration) happens inside child
+/// tasks that suspend on `await`, so the main thread is never blocked.
+@MainActor
+public final class SpeechRecognitionService {
 
     // MARK: - Public
 
-    /// The delegate is `@MainActor`; set it via `setDelegate(_:)` from any context.
-    private weak var delegate: SpeechRecognitionServiceDelegate?
+    public weak var delegate: SpeechRecognitionServiceDelegate?
 
     // MARK: - Private
 
@@ -46,11 +47,6 @@ public actor SpeechRecognitionService {
 
     public init(locale: Locale) {
         self.currentLocale = locale
-    }
-
-    /// Sets the event delegate. `async` because the service is an actor.
-    public func setDelegate(_ delegate: SpeechRecognitionServiceDelegate?) {
-        self.delegate = delegate
     }
 
     // MARK: - Transcription
@@ -103,14 +99,14 @@ public actor SpeechRecognitionService {
         let (analyzerInputSequence, analyzerInputBuilder) = AsyncStream<AnalyzerInput>.makeStream()
         let rawBufferStream = provider.start()
         let converter = BufferConverter()
+        let logger = self.logger
 
-        feedTask = Task { [weak self] in
-            guard let self else { return }
+        feedTask = Task {
             var bufferCount = 0
-            self.logger.info("[Feed] Feed task started.")
+            logger.info("[Feed] Feed task started.")
             for await buffer in rawBufferStream {
                 guard !Task.isCancelled else {
-                    self.logger.info("[Feed] Feed task cancelled — breaking buffer loop.")
+                    logger.info("[Feed] Feed task cancelled — breaking buffer loop.")
                     break
                 }
                 do {
@@ -122,81 +118,74 @@ public actor SpeechRecognitionService {
                     }
                     bufferCount += 1
                     if bufferCount == 1 || bufferCount % 50 == 0 {
-                        self.logger.info("[Feed] Buffer #\(bufferCount) → frameLength: \(outputBuffer.frameLength), format: \(outputBuffer.format.sampleRate) Hz")
+                        logger.info("[Feed] Buffer #\(bufferCount) → frameLength: \(outputBuffer.frameLength), format: \(outputBuffer.format.sampleRate) Hz")
                     }
                     analyzerInputBuilder.yield(AnalyzerInput(buffer: outputBuffer))
                 } catch {
-                    self.logger.error("[Feed] Buffer conversion failed at buffer #\(bufferCount): \(error)")
+                    logger.error("[Feed] Buffer conversion failed at buffer #\(bufferCount): \(error)")
                 }
             }
-            self.logger.info("[Feed] Raw buffer stream exhausted. Total buffers fed: \(bufferCount). Finishing analyzer input stream.")
+            logger.info("[Feed] Raw buffer stream exhausted. Total buffers fed: \(bufferCount). Finishing analyzer input stream.")
             analyzerInputBuilder.finish()
         }
         logger.info("[5/6] Feed task started.")
 
         // ── 6. Analysis task (run analyzer + consume results) ─────────────────
         logger.info("[6/6] Starting analysis task…")
+        let locale = currentLocale
         analysisTask = Task { [weak self] in
             guard let self else { return }
-            self.logger.info("[Analysis] Analysis task started. Entering withThrowingTaskGroup…")
+            logger.info("[Analysis] Analysis task started. Entering withThrowingTaskGroup…")
             do {
                 try await withThrowingTaskGroup(of: Void.self) { group in
                     group.addTask {
-                        self.logger.info("[Analyzer] analyzer.start() called — feeding input sequence to SpeechAnalyzer.")
+                        logger.info("[Analyzer] analyzer.start() called — feeding input sequence to SpeechAnalyzer.")
                         try await analyzer.start(inputSequence: analyzerInputSequence)
-                        self.logger.info("[Analyzer] analyzer.start() returned (input sequence exhausted).")
+                        logger.info("[Analyzer] analyzer.start() returned (input sequence exhausted).")
                     }
 
                     // `transcriber.results` is an async property in iOS 26.
-                    self.logger.info("[Results] Awaiting transcriber.results async property…")
+                    logger.info("[Results] Awaiting transcriber.results async property…")
                     let resultStream = await transcriber.results
-                    self.logger.info("[Results] Got result stream. Starting iteration…")
+                    logger.info("[Results] Got result stream. Starting iteration…")
 
                     var resultCount = 0
                     for try await result in resultStream {
                         guard !Task.isCancelled else {
-                            self.logger.info("[Results] Task cancelled — breaking result loop.")
+                            logger.info("[Results] Task cancelled — breaking result loop.")
                             break
                         }
                         resultCount += 1
                         let plainText = String(result.text.characters)
-                        self.logger.info("[Results] Result #\(resultCount): isFinal=\(result.isFinal), text='\(plainText)'")
-
                         let isFinal = result.isFinal
+                        logger.info("[Results] Result #\(resultCount): isFinal=\(isFinal), text='\(plainText)'")
+
                         let transcriptionResult = TranscriptionResult(
                             text: plainText,
                             isFinal: isFinal,
-                            locale: self.currentLocale,
+                            locale: locale,
                             confidence: nil
                         )
 
-                        // Read the (Sendable, @MainActor) delegate before hopping.
-                        let delegate = self.delegate
-                        self.logger.info("[Delegate] Emitting \(isFinal ? "final" : "partial"): '\(plainText)'")
-                        await MainActor.run {
-                            if isFinal {
-                                delegate?.recognitionService(self, didReceiveFinalResult: transcriptionResult)
-                            } else {
-                                delegate?.recognitionService(self, didReceivePartialResult: transcriptionResult)
-                            }
+                        // Already on the main actor — deliver directly.
+                        if isFinal {
+                            self.delegate?.recognitionService(self, didReceiveFinalResult: transcriptionResult)
+                        } else {
+                            self.delegate?.recognitionService(self, didReceivePartialResult: transcriptionResult)
                         }
                     }
-                    self.logger.info("[Results] Result stream exhausted. Total results received: \(resultCount).")
+                    logger.info("[Results] Result stream exhausted. Total results received: \(resultCount).")
                     group.cancelAll()
                 }
                 // Reached only on normal completion (input exhausted), not cancellation/error.
                 if !Task.isCancelled {
-                    let delegate = self.delegate
-                    await MainActor.run { delegate?.recognitionServiceDidComplete(self) }
+                    self.delegate?.recognitionServiceDidComplete(self)
                 }
             } catch {
-                self.logger.error("[Analysis] Analysis task failed with error: \(error)")
-                let delegate = self.delegate
-                await MainActor.run {
-                    delegate?.recognitionService(self, didFailWith: .analyzerFailed(error))
-                }
+                logger.error("[Analysis] Analysis task failed with error: \(error)")
+                self.delegate?.recognitionService(self, didFailWith: .analyzerFailed(error))
             }
-            self.logger.info("[Analysis] Analysis task complete. Cancelling feed task.")
+            logger.info("[Analysis] Analysis task complete. Cancelling feed task.")
             self.feedTask?.cancel()
         }
         logger.info("━━━ startTranscribing setup complete. Pipeline is running.")
@@ -311,8 +300,6 @@ public actor SpeechRecognitionService {
     /// known on-device asset store locations and log what we find.
     private func logModelStorageLocation(for localeID: String) {
         let fm = FileManager.default
-        // Speech model assets are delivered as system assets; the app-visible cache
-        // lives under the app's Library/Caches and the shared on-device asset store.
         let candidates: [URL] = [
             fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
             fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first

@@ -88,9 +88,7 @@ public final class TranscriptionCoordinator {
         self.currentLocale = locale ?? Locale(identifier: savedOverride ?? "en-IN")
 
         sessionManager.delegate = self
-        // recognitionService is an actor; wire the delegate asynchronously before the
-        // first transcription (see startLiveTranscription / transcribeFile).
-        Task { await recognitionService.setDelegate(self) }
+        recognitionService.delegate = self
     }
 
     /// Convenience initializer with no external dependencies.
@@ -144,8 +142,6 @@ public final class TranscriptionCoordinator {
         let provider = captureServiceFactory()
         activeProvider = provider
 
-        // Deterministically wire the actor's delegate before results can flow.
-        await recognitionService.setDelegate(self)
         // .progressiveTranscription yields partial results immediately — ideal for live mic.
         try await recognitionService.startTranscribing(from: provider, preset: .progressiveTranscription)
         transition(to: .transcribing)
@@ -228,8 +224,6 @@ public final class TranscriptionCoordinator {
             activeProvider = nil
         }
 
-        // Deterministically wire the actor's delegate before results can flow.
-        await recognitionService.setDelegate(self)
         // .transcription optimises for accuracy over the complete audio buffer — ideal for files.
         try await recognitionService.startTranscribing(from: provider, preset: .transcription)
 

@@ -54,7 +54,7 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
                 Task { @MainActor [weak self] in self?.tearDownEngine() }
             }
             Task { [weak self] in
-                await self?.startEngine(continuation: continuation)
+                self?.startEngine(continuation: continuation)
             }
         }
     }
@@ -75,14 +75,14 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
         engine.inputNode.outputFormat(forBus: 0)
     }
 
-    private func startEngine(continuation: AsyncStream<AVAudioPCMBuffer>.Continuation) async {
+    private func startEngine(continuation: AsyncStream<AVAudioPCMBuffer>.Continuation) {
         do {
             engine.inputNode.removeTap(onBus: 0)
 
             // Tap in the input node's NATIVE format. Forcing a format on the tap can
             // fail when it doesn't match the hardware; conversion to the analyzer's
             // required format happens later in SpeechRecognitionService.
-            let format = await resolveFormat()
+            let format = resolveFormat()
 
             engine.inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) { buffer, _ in
                 // The tap buffer is only valid for the duration of this callback; the
