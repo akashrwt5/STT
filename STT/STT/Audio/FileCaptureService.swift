@@ -1,24 +1,21 @@
 // FileCaptureService.swift
 // STT
 //
-// Single responsibility: reading audio files and converting them to AnalyzerInput streams.
+// Single responsibility: reading audio files and streaming raw buffers.
 
 import AVFoundation
-import Speech
 import os.log
 
-/// Reads an audio file from disk and streams its content as `AnalyzerInput` buffers.
+/// Reads an audio file from disk and streams its content as raw `AVAudioPCMBuffer`s.
 ///
-/// Supports m4a, wav, mp3, and caf. Converts to the recognizer's preferred format
-/// automatically using `AVAudioConverter`.
+/// Supports m4a, wav, mp3, and caf. Format conversion to the analyzer's required
+/// format is handled downstream by `SpeechRecognitionService`.
 public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
 
     // MARK: - AudioInputProvider
 
     public var audioFormat: AVAudioFormat {
-        get async throws {
-            try resolveOutputFormat()
-        }
+        get async throws { try resolveProcessingFormat() }
     }
 
     public private(set) var state: AudioInputState = .idle
@@ -39,14 +36,11 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
 
     // MARK: - AudioInputProvider
 
-    /// Opens the file and begins streaming converted buffers.
-    ///
-    /// - Returns: An `AsyncStream` that yields buffers until EOF or `stop()` is called.
-    public func start() -> AsyncStream<AnalyzerInput> {
+    /// Opens the file and begins streaming raw buffers.
+    public func start() -> AsyncStream<AVAudioPCMBuffer> {
         isCancelled = false
         state = .preparing
-
-        return AsyncStream<AnalyzerInput> { [weak self] continuation in
+        return AsyncStream<AVAudioPCMBuffer> { [weak self] continuation in
             guard let self else {
                 continuation.finish()
                 return
@@ -58,7 +52,7 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
         }
     }
 
-    /// Signals the file reader to stop yielding buffers and finish the stream.
+    /// Signals the file reader to stop yielding buffers.
     public func stop() {
         isCancelled = true
         state = .stopped
@@ -67,23 +61,15 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
 
     // MARK: - Private
 
-    private func resolveOutputFormat() throws -> AVAudioFormat {
+    private func resolveProcessingFormat() throws -> AVAudioFormat {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw TranscriptionError.fileNotFound(fileURL)
         }
         let file = try AVAudioFile(forReading: fileURL)
-        guard let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: file.fileFormat.sampleRate,
-            channels: 1,
-            interleaved: false
-        ) else {
-            throw TranscriptionError.unsupportedAudioFormat(file.fileFormat.description)
-        }
-        return format
+        return file.processingFormat
     }
 
-    private func streamFile(continuation: AsyncStream<AnalyzerInput>.Continuation) async {
+    private func streamFile(continuation: AsyncStream<AVAudioPCMBuffer>.Continuation) async {
         defer { continuation.finish() }
 
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -94,55 +80,21 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
 
         do {
             let file = try AVAudioFile(forReading: fileURL)
-            guard let outputFormat = try? resolveOutputFormat() else {
-                state = .failed(TranscriptionError.unsupportedAudioFormat(file.fileFormat.description))
-                return
-            }
-
-            let needsConversion = file.processingFormat != outputFormat
-            let converter: AVAudioConverter?
-            if needsConversion {
-                guard let conv = AVAudioConverter(from: file.processingFormat, to: outputFormat) else {
-                    state = .failed(TranscriptionError.unsupportedAudioFormat(file.processingFormat.description))
-                    return
-                }
-                converter = conv
-            } else {
-                converter = nil
-            }
-
             state = .active
 
             while file.framePosition < file.length && !isCancelled {
-                guard let inputBuffer = AVAudioPCMBuffer(
+                guard let buffer = AVAudioPCMBuffer(
                     pcmFormat: file.processingFormat,
                     frameCapacity: readBufferSize
                 ) else { break }
 
-                do { try file.read(into: inputBuffer) } catch { break }
-
-                let outputBuffer: AVAudioPCMBuffer
-                if let conv = converter {
-                    guard let converted = AVAudioPCMBuffer(
-                        pcmFormat: outputFormat,
-                        frameCapacity: AVAudioFrameCount(
-                            Double(inputBuffer.frameLength)
-                                * outputFormat.sampleRate / file.processingFormat.sampleRate
-                        ) + 1
-                    ) else { break }
-
-                    var conversionError: NSError?
-                    let status = conv.convert(to: converted, error: &conversionError) { _, outStatus in
-                        outStatus.pointee = .haveData
-                        return inputBuffer
-                    }
-                    if status == .error || conversionError != nil { break }
-                    outputBuffer = converted
-                } else {
-                    outputBuffer = inputBuffer
+                do {
+                    try file.read(into: buffer)
+                } catch {
+                    break
                 }
-
-                continuation.yield(outputBuffer.analyzerInput())
+                guard buffer.frameLength > 0 else { break }
+                continuation.yield(buffer)
             }
 
             state = isCancelled ? .stopped : .idle

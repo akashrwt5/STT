@@ -4,22 +4,20 @@
 // Single responsibility: AVAudioEngine tap installation and live buffer streaming.
 
 import AVFoundation
-import Speech
 import os.log
 
 /// Captures live audio from the microphone (or connected hearing aid) and streams
-/// `AnalyzerInput` buffers via `AsyncStream`.
+/// raw `AVAudioPCMBuffer`s via `AsyncStream`.
 ///
 /// Conforms to `AudioInputProvider` — the recognition service does not know this
-/// is a live mic vs. any other audio source.
+/// is a live mic vs. any other audio source, and is responsible for converting the
+/// buffers to the analyzer's required format.
 public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable {
 
     // MARK: - AudioInputProvider
 
     public var audioFormat: AVAudioFormat {
-        get async throws {
-            try await resolveFormat()
-        }
+        get async throws { await resolveFormat() }
     }
 
     public private(set) var state: AudioInputState = .idle
@@ -28,10 +26,8 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
 
     private let engine: AVAudioEngine
     private let logger = Logger(subsystem: "com.stt.module", category: "AudioCaptureService")
-    private var streamContinuation: AsyncStream<AnalyzerInput>.Continuation?
+    private var streamContinuation: AsyncStream<AVAudioPCMBuffer>.Continuation?
     private let bufferSize: AVAudioFrameCount = 4096
-    private var accumulatedFrames: AVAudioFramePosition = 0
-    private var resolvedFormat: AVAudioFormat?
 
     // MARK: - Init
 
@@ -44,19 +40,16 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
 
     /// Starts the audio engine and installs a tap on the input node.
     ///
-    /// - Returns: An `AsyncStream` that yields buffers until `stop()` is called.
-    public func start() -> AsyncStream<AnalyzerInput> {
-        accumulatedFrames = 0
+    /// - Returns: An `AsyncStream` of raw buffers (in the input node's native format)
+    ///   that yields until `stop()` is called.
+    public func start() -> AsyncStream<AVAudioPCMBuffer> {
         state = .preparing
-
-        let stream = AsyncStream<AnalyzerInput> { [weak self] continuation in
+        return AsyncStream<AVAudioPCMBuffer> { [weak self] continuation in
             guard let self else {
                 continuation.finish()
                 return
             }
             self.streamContinuation = continuation
-            // Tear down on stream cancellation — must dispatch to MainActor
-            // because AVAudioEngine methods are @MainActor in iOS 26.
             continuation.onTermination = { [weak self] _ in
                 Task { @MainActor [weak self] in self?.tearDownEngine() }
             }
@@ -64,7 +57,6 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
                 await self?.startEngine(continuation: continuation)
             }
         }
-        return stream
     }
 
     /// Stops the audio engine and finishes the buffer stream.
@@ -72,38 +64,28 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
         streamContinuation?.finish()
         streamContinuation = nil
         state = .stopped
-        // AVAudioEngine teardown must run on MainActor in iOS 26.
         Task { @MainActor [weak self] in self?.tearDownEngine() }
         logger.info("AudioCaptureService stopped.")
     }
 
     // MARK: - Private
 
-    private func resolveFormat() async throws -> AVAudioFormat {
-        if let cached = resolvedFormat { return cached }
-        let inputFormat = engine.inputNode.outputFormat(forBus: 0)
-        guard let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: inputFormat.sampleRate,
-            channels: 1,
-            interleaved: false
-        ) else {
-            throw TranscriptionError.unsupportedAudioFormat("Cannot create mono Float32 format")
-        }
-        resolvedFormat = format
-        return format
+    @MainActor
+    private func resolveFormat() -> AVAudioFormat {
+        engine.inputNode.outputFormat(forBus: 0)
     }
 
-    private func startEngine(continuation: AsyncStream<AnalyzerInput>.Continuation) async {
+    private func startEngine(continuation: AsyncStream<AVAudioPCMBuffer>.Continuation) async {
         do {
             engine.inputNode.removeTap(onBus: 0)
 
-            let format = try await resolveFormat()
+            // Tap in the input node's NATIVE format. Forcing a format on the tap can
+            // fail when it doesn't match the hardware; conversion to the analyzer's
+            // required format happens later in SpeechRecognitionService.
+            let format = await resolveFormat()
 
-            engine.inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) { [weak self] buffer, _ in
-                guard let self else { return }
-                self.accumulatedFrames += AVAudioFramePosition(buffer.frameLength)
-                continuation.yield(buffer.analyzerInput())
+            engine.inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) { buffer, _ in
+                continuation.yield(buffer)
             }
 
             engine.prepare()
@@ -117,8 +99,7 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
         }
     }
 
-    /// Must be called on `@MainActor` — AVAudioEngine's `stop()` and `removeTap` are
-    /// main-actor-isolated in iOS 26.
+    /// Must run on `@MainActor` — `AVAudioEngine.stop()`/`removeTap` are main-actor-isolated in iOS 26.
     @MainActor
     private func tearDownEngine() {
         guard engine.isRunning else { return }
