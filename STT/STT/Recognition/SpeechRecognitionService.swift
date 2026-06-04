@@ -49,7 +49,7 @@ public final class SpeechRecognitionService: @unchecked Sendable {
 
         // `SpeechTranscriber(locale:preset:)` — preset `.default` selects the system's
         // recommended recognition profile. Use `.dictation` if you need punctuation insertion.
-        let transcriber = SpeechTranscriber(locale: resolvedLocale, preset: .default)
+        let transcriber = SpeechTranscriber(locale: resolvedLocale, preset: .dictation)
         self.transcriber = transcriber
 
         let analyzer = SpeechAnalyzer(modules: [transcriber])
