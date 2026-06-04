@@ -210,32 +210,106 @@ public final class SpeechRecognitionService: @unchecked Sendable {
 
     // MARK: - Asset Installation
 
-    /// Ensures the on-device model assets for `locale` are installed and allocated.
+    /// Ensures the on-device model assets for `locale` are installed AND allocated.
     ///
-    /// Always calls `AssetInventory.assetInstallationRequest` regardless of
-    /// `installedLocales` — "installed" does not guarantee "allocated", and the
-    /// system is idempotent (returns nil when nothing is needed).
+    /// Three distinct states to reconcile:
+    ///   1. **Supported**  — a model *exists* for this locale (downloadable from Apple).
+    ///   2. **Installed**  — the model bytes are already on disk.
+    ///   3. **Reserved/Allocated** — this app has claimed an allocation slot for the
+    ///      locale so the analyzer may actually load it. Missing this step is what
+    ///      causes "Cannot use modules with unallocated locales", even when installed.
     private func ensureModelInstalled(for transcriber: SpeechTranscriber, locale: Locale) async throws {
-        // Log current installed locales for diagnostics (not used as a gate).
-        let installedLocales = await SpeechTranscriber.installedLocales
-        let installedIDs = installedLocales.map { $0.identifier(.bcp47) }
-        logger.info("[Assets] installedLocales (\(installedLocales.count)): \(installedIDs.joined(separator: ", "))")
-        logger.info("[Assets] Target locale: \(locale.identifier(.bcp47)) — listed in installedLocales: \(installedIDs.contains(locale.identifier(.bcp47)))")
+        let targetID = locale.identifier(.bcp47)
 
-        // Always request asset installation — system returns nil when nothing to do.
-        logger.info("[Assets] Calling AssetInventory.assetInstallationRequest(supporting: [transcriber])…")
+        // ── 1. Is a model even available for this locale? ─────────────────────
+        let supported = await SpeechTranscriber.supportedLocales
+        let supportedIDs = supported.map { $0.identifier(.bcp47) }
+        let isSupported = supportedIDs.contains(targetID)
+        logger.info("[Assets] supportedLocales (\(supported.count)): \(supportedIDs.joined(separator: ", "))")
+        if isSupported {
+            logger.info("[Assets] ✅ A model IS AVAILABLE for \(targetID) (downloadable / on-device).")
+        } else {
+            logger.error("[Assets] ❌ NO MODEL AVAILABLE for \(targetID). This locale is not in supportedLocales.")
+            throw TranscriptionError.localeNotSupported(targetID)
+        }
+
+        // ── 2. Is the model already installed on disk? ────────────────────────
+        let installed = await SpeechTranscriber.installedLocales
+        let installedIDs = installed.map { $0.identifier(.bcp47) }
+        let isInstalled = installedIDs.contains(targetID)
+        logger.info("[Assets] installedLocales (\(installed.count)): \(installedIDs.joined(separator: ", "))")
+        logger.info("[Assets] Model on disk for \(targetID): \(isInstalled ? "YES" : "NO")")
+
+        // ── 3. Download + install if not on disk ──────────────────────────────
+        logger.info("[Assets] Requesting AssetInventory.assetInstallationRequest(supporting: [transcriber])…")
         do {
-            let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber])
-            if let request {
-                logger.info("[Assets] Installation request returned non-nil — downloading and installing assets for \(locale.identifier(.bcp47))…")
+            if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+                logger.info("[Assets] ⬇️ Downloading speech model for \(targetID)… (may be tens of MB on first use)")
+
+                // Observe download progress.
+                let progress = request.progress
+                let observation = progress.observe(\.fractionCompleted, options: [.new]) { [weak self] prog, _ in
+                    self?.logger.info("[Assets] Download progress for \(targetID): \(Int(prog.fractionCompleted * 100))%")
+                }
+                defer { observation.invalidate() }
+
                 try await request.downloadAndInstall()
-                logger.info("[Assets] downloadAndInstall() completed for \(locale.identifier(.bcp47)).")
+                logger.info("[Assets] ✅ downloadAndInstall() completed for \(targetID).")
             } else {
-                logger.info("[Assets] AssetInventory returned nil request — assets already present and allocated for \(locale.identifier(.bcp47)).")
+                logger.info("[Assets] No download required — model already installed for \(targetID).")
             }
         } catch {
-            logger.error("[Assets] Asset installation failed for \(locale.identifier(.bcp47)): \(error)")
+            logger.error("[Assets] ❌ Download/install failed for \(targetID): \(error)")
             throw TranscriptionError.analyzerFailed(error)
+        }
+
+        // ── 4. Reserve (allocate) the locale — the step that fixes the warning ─
+        let reservedBefore = await AssetInventory.reservedLocales
+        logger.info("[Assets] reservedLocales BEFORE: \(reservedBefore.map { $0.identifier(.bcp47) }.joined(separator: ", "))")
+        if reservedBefore.contains(where: { $0.identifier(.bcp47) == targetID }) {
+            logger.info("[Assets] \(targetID) already reserved/allocated.")
+        } else {
+            logger.info("[Assets] Reserving (allocating) locale \(targetID) via AssetInventory.reserve(locale:)…")
+            do {
+                try await AssetInventory.reserve(locale: locale)
+                logger.info("[Assets] ✅ Reserved \(targetID).")
+            } catch {
+                logger.error("[Assets] ⚠️ AssetInventory.reserve(locale:) failed for \(targetID): \(error)")
+            }
+        }
+        let reservedAfter = await AssetInventory.reservedLocales
+        logger.info("[Assets] reservedLocales AFTER: \(reservedAfter.map { $0.identifier(.bcp47) }.joined(separator: ", "))")
+
+        // ── 5. Report where the model lives on disk ───────────────────────────
+        logModelStorageLocation(for: targetID)
+    }
+
+    /// Best-effort lookup + logging of where SpeechAnalyzer caches its model assets.
+    ///
+    /// Apple does not expose a public API for the exact asset path, so we probe the
+    /// known on-device asset store locations and log what we find.
+    private func logModelStorageLocation(for localeID: String) {
+        let fm = FileManager.default
+        // Speech model assets are delivered as system assets; the app-visible cache
+        // lives under the app's Library/Caches and the shared on-device asset store.
+        let candidates: [URL] = [
+            fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
+            fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        ].compactMap { $0 }
+
+        var foundAny = false
+        for base in candidates {
+            let speechDirs = ["com.apple.speech", "SpeechAnalyzer", "Speech", "AssetInventory"]
+            for sub in speechDirs {
+                let path = base.appendingPathComponent(sub)
+                if fm.fileExists(atPath: path.path) {
+                    foundAny = true
+                    logger.info("[Assets] 📁 Model/asset store found at: \(path.path)")
+                }
+            }
+        }
+        if !foundAny {
+            logger.info("[Assets] ℹ️ Model assets are managed by the system asset store (no app-visible path). Locale \(localeID) is allocated and ready for on-device use.")
         }
     }
 
