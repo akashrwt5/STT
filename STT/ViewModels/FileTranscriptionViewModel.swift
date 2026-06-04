@@ -32,13 +32,16 @@ public final class FileTranscriptionViewModel {
 
     private let coordinator: TranscriptionCoordinator
     private var transcriptionTask: Task<Void, Never>?
-    private var isSecurityScoped = false
+    /// The currently security-scoped URL, if any. Stored separately (and nonisolated)
+    /// so `deinit` — which runs in a nonisolated context — can release it without
+    /// touching main-actor-isolated state.
+    private nonisolated(unsafe) var scopedURL: URL?
     private let logger = Logger(subsystem: "com.stt.module", category: "FileTranscriptionViewModel")
 
     private func releaseSecurityScope() {
-        if isSecurityScoped, let url = selectedFileURL {
+        if let url = scopedURL {
             url.stopAccessingSecurityScopedResource()
-            isSecurityScoped = false
+            scopedURL = nil
         }
     }
 
@@ -57,7 +60,9 @@ public final class FileTranscriptionViewModel {
     /// transcription happens later when the user taps "Transcribe".
     public func selectFile(_ url: URL) {
         releaseSecurityScope()
-        isSecurityScoped = url.startAccessingSecurityScopedResource()
+        if url.startAccessingSecurityScopedResource() {
+            scopedURL = url
+        }
 
         selectedFileURL = url
         transcript = ""
@@ -114,9 +119,7 @@ public final class FileTranscriptionViewModel {
     }
 
     deinit {
-        if isSecurityScoped {
-            selectedFileURL?.stopAccessingSecurityScopedResource()
-        }
+        scopedURL?.stopAccessingSecurityScopedResource()
     }
 
     // MARK: - Private
