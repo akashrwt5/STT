@@ -36,6 +36,7 @@ struct LiveTranscriptionView: View {
                 }
             }
         }
+        .onAppear { viewModel.activate() }
         .sheet(isPresented: $showLanguagePicker) {
             LanguageSelectorView(currentLocale: viewModel.currentLocale) { identifier in
                 viewModel.switchLocale(identifier)

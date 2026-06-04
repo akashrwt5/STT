@@ -276,12 +276,14 @@ extension TranscriptionCoordinator: AudioSessionManagerDelegate {
 extension TranscriptionCoordinator: SpeechRecognitionServiceDelegate {
     public func recognitionService(_ service: SpeechRecognitionService, didReceivePartialResult result: TranscriptionResult) {
         currentTranscript = result.text
+        logger.info("[Coordinator] Partial → forwarding to delegate (nil? \(self.delegate == nil)): '\(result.text)'")
         delegate?.didReceivePartialResult(result.text)
         resultsContinuation?.yield(result)
     }
 
     public func recognitionService(_ service: SpeechRecognitionService, didReceiveFinalResult result: TranscriptionResult) {
         currentTranscript = result.text
+        logger.info("[Coordinator] Final → forwarding to delegate (nil? \(self.delegate == nil)): '\(result.text)'")
         delegate?.didReceiveFinalResult(result.text)
         resultsContinuation?.yield(result)
     }

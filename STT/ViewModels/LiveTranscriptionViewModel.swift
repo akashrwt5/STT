@@ -33,10 +33,24 @@ public final class LiveTranscriptionViewModel {
     public init(coordinator: TranscriptionCoordinator) {
         self.coordinator = coordinator
         self.currentLocale = coordinator.currentLocale
-        coordinator.delegate = self
+        // NOTE: delegate is intentionally NOT set here. `LiveTranscriptionView.init`
+        // runs on every parent re-render and eagerly constructs a throwaway view model
+        // (SwiftUI keeps only the first `@State` instance). If we set the delegate in
+        // `init`, each throwaway instance would steal `coordinator.delegate`, leaving
+        // the *displayed* view model unsubscribed — and no transcript on screen.
+        // Wiring happens in `activate()`, called from the View's `.onAppear`, which
+        // runs on the retained instance.
     }
 
     // MARK: - Public API
+
+    /// Wires this view model as the coordinator's delegate. Call from `.onAppear` so it
+    /// runs on the `@State`-retained instance, not a transient one from a re-render.
+    public func activate() {
+        coordinator.delegate = self
+        currentLocale = coordinator.currentLocale
+        audioSource = coordinator.currentRoute.name
+    }
 
     /// Toggles recording on/off.
     public func toggleRecording() {
