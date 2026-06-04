@@ -58,14 +58,25 @@ public final class AudioSessionManager {
     /// minimal signal processing, which yields cleaner input for the speech analyzer.
     ///
     /// - Throws: `TranscriptionError.audioSessionSetupFailed` if configuration fails.
-    public func configure() throws {
+    ///
+    /// `async` so the blocking `AVAudioSession` calls (`setActive`, `setCategory`) run
+    /// off the main thread — activating the audio session spins up the audio hardware
+    /// and can block for hundreds of milliseconds, freezing the UI if done on the main
+    /// actor. `AVAudioSession` is a thread-safe singleton, so this is safe.
+    public func configure() async throws {
         do {
-            // .allowBluetooth enables Bluetooth HFP input (hearing aids, headsets).
-            // .allowBluetoothA2DP is intentionally excluded — it is an output-only
-            // protocol and is incompatible with the .record category, causing
-            // "the operation could not be completed" at runtime.
-            try session.setCategory(.record, mode: .measurement, options: [.allowBluetooth])
-            try session.setActive(true)
+            // AVAudioSession is a thread-safe singleton; safe to use off the main actor.
+            nonisolated(unsafe) let session = self.session
+            try await Task.detached(priority: .userInitiated) {
+                // .allowBluetooth enables Bluetooth HFP input (hearing aids, headsets).
+                // .allowBluetoothA2DP is intentionally excluded — it is an output-only
+                // protocol and is incompatible with the .record category, causing
+                // "the operation could not be completed" at runtime.
+                try session.setCategory(.record, mode: .measurement, options: [.allowBluetooth])
+                try session.setActive(true)
+            }.value
+
+            // Route inspection + observer registration is lightweight; keep on main actor.
             preferHearingAidInputIfAvailable()
             // Remove before re-adding so repeated configure() calls don't stack observers.
             NotificationCenter.default.removeObserver(self)

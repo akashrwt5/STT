@@ -132,7 +132,7 @@ public final class TranscriptionCoordinator {
         await resolveCurrentLocaleIfNeeded()
         transition(to: .preparingAudio)
 
-        try sessionManager.configure()
+        try await sessionManager.configure()
         currentRoute = sessionManager.currentRoute
         currentTranscript = ""
 
