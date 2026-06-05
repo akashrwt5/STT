@@ -217,33 +217,62 @@ struct LiveTranscriptionView: View {
     /// Surfaces the NLU engine's follow-up question (e.g. "When should I remind you?")
     /// and nudges the user to answer by speaking again.
     private func followUpBanner(_ question: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "bubble.left.and.bubble.right.fill")
-                .font(.system(size: 18))
-                .foregroundStyle(Color(red: 0.2, green: 0.6, blue: 1.0))
+        let accent = Color(red: 0.2, green: 0.6, blue: 1.0)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: viewModel.isSpeaking
+                      ? "speaker.wave.2.fill"
+                      : "bubble.left.and.bubble.right.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(accent)
+                    .symbolEffect(.variableColor, isActive: viewModel.isSpeaking)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(question)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(viewModel.isListening ? "Listening for your answer…" : "Tap the mic and answer")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.5))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(question)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(statusLine)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+
+            // Progress: slots already understood this conversation.
+            if !viewModel.collectedSlots.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(viewModel.collectedSlots.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.green.opacity(0.8))
+                            Text("\(SlotFormatting.displayName(key)): \(SlotFormatting.displayValue(value, forKey: key))")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.white.opacity(0.06), in: Capsule())
+                    }
+                }
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            Color(red: 0.2, green: 0.6, blue: 1.0).opacity(0.12),
-            in: RoundedRectangle(cornerRadius: 14)
-        )
+        .background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(Color(red: 0.2, green: 0.6, blue: 1.0).opacity(0.35), lineWidth: 0.5)
+                .stroke(accent.opacity(0.35), lineWidth: 0.5)
         )
         .animation(.spring(duration: 0.35), value: viewModel.pendingQuestion)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.isSpeaking)
+    }
+
+    private var statusLine: String {
+        if viewModel.isSpeaking { return "Asking…" }
+        if viewModel.isListening { return "Listening for your answer…" }
+        return "Tap the mic and answer"
     }
 
     // MARK: - Helpers

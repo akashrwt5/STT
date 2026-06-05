@@ -65,9 +65,9 @@ struct TranscriptionResultCard: View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(slots.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
                 HStack(spacing: 6) {
-                    Text(Self.humanizeSlot(key))
+                    Text(SlotFormatting.displayName(key))
                         .foregroundStyle(.white.opacity(0.45))
-                    Text(value)
+                    Text(SlotFormatting.displayValue(value, forKey: key))
                         .foregroundStyle(.white.opacity(0.85))
                         .fontWeight(.medium)
                 }
@@ -78,15 +78,6 @@ struct TranscriptionResultCard: View {
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private static func humanizeSlot(_ key: String) -> String {
-        switch key {
-        case "date-time": return "When"
-        case "name":      return "What"
-        case "MemoryName": return "Memory"
-        default:          return key.replacingOccurrences(of: "-", with: " ").capitalized
-        }
     }
 
     // MARK: - Intent badge

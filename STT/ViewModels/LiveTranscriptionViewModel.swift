@@ -26,6 +26,11 @@ public final class LiveTranscriptionViewModel {
     public private(set) var pendingQuestion: String?
     /// Slot values collected so far during a multi-turn exchange, for display.
     public private(set) var collectedSlots: [String: String] = [:]
+    /// True while the assistant is speaking a follow-up question or fulfillment.
+    public private(set) var isSpeaking: Bool = false
+    /// When enabled, follow-up questions are spoken aloud and the mic auto-restarts
+    /// to capture the user's answer (hands-free conversation).
+    public var voiceConversationEnabled: Bool = true
 
     /// When `true`, the session automatically stops after the user stops speaking
     /// (single-utterance mode). When `false`, it runs until the user taps stop
@@ -41,6 +46,7 @@ public final class LiveTranscriptionViewModel {
     private let coordinator: TranscriptionCoordinator
     private let classifier = IntentClassifierService.shared
     private let nlu = NLUEngine()
+    private let speaker = ConversationSpeaker()
     /// Accumulates the spoken text across a multi-turn exchange so the final card
     /// shows the complete phrase (e.g. "remind me" + "take medication" + "tomorrow").
     private var conversationTranscripts: [String] = []
@@ -71,6 +77,16 @@ public final class LiveTranscriptionViewModel {
         currentLocale = coordinator.currentLocale
         audioSource = coordinator.currentRoute.name
         coordinator.silenceConfiguration = autoStopOnSilence ? .singleUtterance : .disabled
+        speaker.onFinish = { [weak self] in self?.handleSpeechFinished() }
+    }
+
+    /// Called when the assistant finishes speaking. If we're mid-conversation
+    /// (a question is pending), auto-restart listening to capture the answer.
+    private func handleSpeechFinished() {
+        isSpeaking = false
+        if voiceConversationEnabled, pendingQuestion != nil, !isListening {
+            startRecording()
+        }
     }
 
     /// Toggles recording on/off.
@@ -98,6 +114,8 @@ public final class LiveTranscriptionViewModel {
         pendingQuestion = nil
         collectedSlots = [:]
         conversationTranscripts.removeAll()
+        isSpeaking = false
+        speaker.stop()
         nlu.reset()
     }
 
@@ -178,18 +196,21 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
 
         switch response {
         case .prompt(_, let question, let filled):
-            // Still collecting — surface the question, keep listening, no card yet.
+            // Still collecting — surface the question, speak it, no card yet.
             pendingQuestion = question
             collectedSlots = filled
+            ask(question)
 
         case .confirm(_, _, let question):
             pendingQuestion = question
+            ask(question)
 
-        case .fulfill(let intent, _, let parameters, _, let confidence):
+        case .fulfill(let intent, _, let parameters, let message, let confidence):
             appendConversationCard(
                 intent: .intent(label: intent, confidence: confidence),
                 slots: parameters.isEmpty ? nil : parameters
             )
+            announce(message)
 
         case .fallback(let url, let confidence):
             appendConversationCard(
@@ -197,6 +218,23 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
                 slots: nil
             )
         }
+    }
+
+    /// Asks a follow-up question: stops the mic, speaks it, and (on completion)
+    /// auto-restarts listening via `handleSpeechFinished`.
+    private func ask(_ question: String) {
+        guard voiceConversationEnabled else { return }
+        if isListening { stopRecording() }   // don't capture our own voice
+        isSpeaking = true
+        speaker.speak(question, locale: currentLocale)
+    }
+
+    /// Speaks a terminal fulfillment message (e.g. "Reminder created."). No auto-listen,
+    /// because `pendingQuestion` is already nil at this point.
+    private func announce(_ message: String) {
+        guard voiceConversationEnabled, !message.isEmpty else { return }
+        isSpeaking = true
+        speaker.speak(message, locale: currentLocale)
     }
 
     /// Builds one card from the full accumulated conversation and resets the buffer.
