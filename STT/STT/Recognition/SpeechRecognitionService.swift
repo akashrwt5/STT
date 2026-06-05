@@ -142,6 +142,21 @@ public final class SpeechRecognitionService {
                         logger.info("[Analyzer] analyzer.start() called — feeding input sequence to SpeechAnalyzer.")
                         try await analyzer.start(inputSequence: analyzerInputSequence)
                         logger.info("[Analyzer] analyzer.start() returned (input sequence exhausted).")
+
+                        // Critical: starting the analyzer and exhausting the input
+                        // sequence does NOT flush the transcriber's pending audio or
+                        // close `transcriber.results`. Without finalizing, the results
+                        // loop hangs forever waiting for output that never arrives.
+                        //
+                        // `finalizeAndFinishThroughEndOfInput()` drains all buffered
+                        // audio into final results and then closes the results stream,
+                        // which lets the results loop receive its output and terminate.
+                        // This is correct for both file input (input ends when the file
+                        // is fully read) and live mic (input ends when stop() finishes
+                        // the buffer stream).
+                        logger.info("[Analyzer] Finalizing analyzer through end of input…")
+                        try await analyzer.finalizeAndFinishThroughEndOfInput()
+                        logger.info("[Analyzer] finalizeAndFinishThroughEndOfInput() returned.")
                     }
 
                     // `transcriber.results` is an async property in iOS 26.

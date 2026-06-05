@@ -16,9 +16,9 @@ public struct AudioFileInfo: Sendable {
 /// View model for the audio file transcription screen.
 @Observable
 @MainActor
-public final class FileTranscriptionViewModel {
+public final class FileTranscriptionViewModel: NSObject {
 
-    // MARK: - Published State
+    // MARK: - Transcription State
 
     public private(set) var selectedFileURL: URL?
     public private(set) var fileInfo: AudioFileInfo?
@@ -27,6 +27,23 @@ public final class FileTranscriptionViewModel {
     public private(set) var progress: Double = 0.0
     public private(set) var error: TranscriptionError?
     public private(set) var processingDuration: TimeInterval?
+
+    // MARK: - Playback State
+
+    public private(set) var isPlaying: Bool = false
+    /// Current playback position in seconds.
+    public private(set) var playbackTime: TimeInterval = 0
+    /// 0–1 fraction of playback position; settable for scrubbing.
+    public var playbackProgress: Double {
+        get {
+            guard let duration = fileInfo?.duration, duration > 0 else { return 0 }
+            return playbackTime / duration
+        }
+        set {
+            guard let duration = fileInfo?.duration, duration > 0 else { return }
+            seek(to: newValue * duration)
+        }
+    }
 
     // MARK: - Private
 
@@ -37,6 +54,9 @@ public final class FileTranscriptionViewModel {
     /// touching main-actor-isolated state.
     private nonisolated(unsafe) var scopedURL: URL?
     private let logger = Logger(subsystem: "com.stt.module", category: "FileTranscriptionViewModel")
+
+    private var audioPlayer: AVAudioPlayer?
+    private var progressTimer: Timer?
 
     private func releaseSecurityScope() {
         if let url = scopedURL {
@@ -51,7 +71,7 @@ public final class FileTranscriptionViewModel {
         self.coordinator = coordinator
     }
 
-    // MARK: - Public API
+    // MARK: - File Selection
 
     /// Called when the user selects a file via `fileImporter`.
     ///
@@ -59,6 +79,7 @@ public final class FileTranscriptionViewModel {
     /// sandbox (iCloud/Files). Access is held until `reset()` or deinit, because
     /// transcription happens later when the user taps "Transcribe".
     public func selectFile(_ url: URL) {
+        stopPlayback()
         releaseSecurityScope()
         if url.startAccessingSecurityScopedResource() {
             scopedURL = url
@@ -70,11 +91,15 @@ public final class FileTranscriptionViewModel {
         progress = 0.0
         processingDuration = nil
         fileInfo = extractFileInfo(from: url)
+        preparePlayer(for: url)
     }
+
+    // MARK: - Transcription
 
     /// Begins transcribing the selected file.
     public func startTranscription() {
         guard let url = selectedFileURL, !isProcessing else { return }
+        stopPlayback()
         isProcessing = true
         progress = 0.0
         let startTime = Date()
@@ -109,6 +134,8 @@ public final class FileTranscriptionViewModel {
 
     /// Resets to the initial state so the user can pick a new file.
     public func reset() {
+        stopPlayback()
+        audioPlayer = nil
         releaseSecurityScope()
         selectedFileURL = nil
         fileInfo = nil
@@ -116,13 +143,75 @@ public final class FileTranscriptionViewModel {
         error = nil
         progress = 0.0
         processingDuration = nil
+        playbackTime = 0
     }
 
     deinit {
         scopedURL?.stopAccessingSecurityScopedResource()
     }
 
-    // MARK: - Private
+    // MARK: - Playback
+
+    /// Toggles play / pause.
+    public func togglePlayback() {
+        guard let player = audioPlayer else { return }
+        if player.isPlaying {
+            player.pause()
+            stopProgressTimer()
+            isPlaying = false
+        } else {
+            player.play()
+            startProgressTimer()
+            isPlaying = true
+        }
+    }
+
+    /// Seeks to an absolute time (seconds).
+    public func seek(to time: TimeInterval) {
+        guard let player = audioPlayer, let duration = fileInfo?.duration else { return }
+        let clamped = min(max(time, 0), duration)
+        player.currentTime = clamped
+        playbackTime = clamped
+    }
+
+    // MARK: - Private — Playback helpers
+
+    private func preparePlayer(for url: URL) {
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.delegate = self
+            player.prepareToPlay()
+            audioPlayer = player
+            playbackTime = 0
+            isPlaying = false
+        } catch {
+            logger.warning("AVAudioPlayer could not load file: \(error)")
+            audioPlayer = nil
+        }
+    }
+
+    private func stopPlayback() {
+        audioPlayer?.stop()
+        stopProgressTimer()
+        isPlaying = false
+    }
+
+    private func startProgressTimer() {
+        stopProgressTimer()
+        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, let player = self.audioPlayer else { return }
+                self.playbackTime = player.currentTime
+            }
+        }
+    }
+
+    private func stopProgressTimer() {
+        progressTimer?.invalidate()
+        progressTimer = nil
+    }
+
+    // MARK: - Private — File info
 
     private func extractFileInfo(from url: URL) -> AudioFileInfo? {
         guard let file = try? AVAudioFile(forReading: url) else { return nil }
@@ -136,5 +225,19 @@ public final class FileTranscriptionViewModel {
             format: file.fileFormat.description,
             fileSizeBytes: fileSize
         )
+    }
+}
+
+// MARK: - AVAudioPlayerDelegate
+
+extension FileTranscriptionViewModel: AVAudioPlayerDelegate {
+    public nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.stopProgressTimer()
+            self.isPlaying = false
+            self.playbackTime = 0
+            self.audioPlayer?.currentTime = 0
+        }
     }
 }
