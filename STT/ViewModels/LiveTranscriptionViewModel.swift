@@ -21,6 +21,12 @@ public final class LiveTranscriptionViewModel {
     public private(set) var error: TranscriptionError?
     public private(set) var transcriptionState: TranscriptionState = .idle
 
+    /// When the NLU engine needs more information (e.g. "When should I remind you?"),
+    /// this holds the follow-up question to surface. `nil` when not mid-conversation.
+    public private(set) var pendingQuestion: String?
+    /// Slot values collected so far during a multi-turn exchange, for display.
+    public private(set) var collectedSlots: [String: String] = [:]
+
     /// When `true`, the session automatically stops after the user stops speaking
     /// (single-utterance mode). When `false`, it runs until the user taps stop
     /// (continuous captioning). Mirrors the coordinator's `silenceConfiguration`.
@@ -34,6 +40,7 @@ public final class LiveTranscriptionViewModel {
 
     private let coordinator: TranscriptionCoordinator
     private let classifier = IntentClassifierService.shared
+    private let nlu = NLUEngine()
     private var levelTimer: Timer?
     private var animPhase: Double = 0
     private let logger = Logger(subsystem: "com.stt.module", category: "LiveTranscriptionViewModel")
@@ -85,6 +92,9 @@ public final class LiveTranscriptionViewModel {
     public func clearResults() {
         results.removeAll()
         transcript = ""
+        pendingQuestion = nil
+        collectedSlots = [:]
+        nlu.reset()
     }
 
     // MARK: - Private
@@ -148,13 +158,43 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
             locale: currentLocale,
             timestamp: Date()
         )
-        Task.detached(priority: .userInitiated) { [classifier, weak self] in
-            let intentResult = classifier.predict(text)
+        // Route the utterance through the multi-turn NLU engine. Inference runs off the
+        // main thread; the engine drives the conversation serially (one turn at a time).
+        Task.detached(priority: .userInitiated) { [nlu, weak self] in
+            let response = nlu.handle(text)
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                result.intentResult = intentResult
-                self.results.append(result)
+                self.apply(response, to: &result)
             }
+        }
+    }
+
+    /// Applies an NLU turn result: updates the conversation banner and appends a card.
+    private func apply(_ response: NLUResponse, to result: inout TranscriptionResult) {
+        switch response {
+        case .prompt(let intent, let question, let filled):
+            // Mid-collection: show the recognized intent on the card and surface the question.
+            result.intentResult = .intent(label: intent, confidence: 1.0)
+            pendingQuestion = question
+            collectedSlots = filled
+            results.append(result)
+
+        case .confirm(let intent, _, let question):
+            result.intentResult = .intent(label: intent, confidence: 1.0)
+            pendingQuestion = question
+            results.append(result)
+
+        case .fulfill(let intent, _, let parameters, _, let confidence):
+            result.intentResult = .intent(label: intent, confidence: confidence)
+            pendingQuestion = nil
+            collectedSlots = parameters
+            results.append(result)
+
+        case .fallback(let url, let confidence):
+            result.intentResult = .genai(url: url, confidence: confidence)
+            pendingQuestion = nil
+            collectedSlots = [:]
+            results.append(result)
         }
     }
 

@@ -47,6 +47,22 @@ public final class IntentClassifierService: @unchecked Sendable {
 
     // MARK: - Public API
 
+    /// Raw classification: the single most likely label and its softmax probability.
+    /// Unlike `predict`, this applies no confidence/gap thresholding and may return
+    /// `OUT_OF_SCOPE`. Used by the NLU engine, which applies its own policy.
+    /// Safe to call from any thread/Task.
+    public func classify(_ text: String) -> (label: String, confidence: Double) {
+        let probs = softmax(logitScores(tfidfVector(for: text)))
+        let top = probs.indices.max(by: { probs[$0] < probs[$1] })!
+        return (labels[top], probs[top])
+    }
+
+    /// The GenAI fallback URL for an unrecognised query.
+    public func genaiURL(for text: String) -> URL {
+        let encoded = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text
+        return URL(string: genaiBaseURL + encoded) ?? URL(string: "https://genai.yourcompany.com")!
+    }
+
     /// Classify `text` and return an `IntentResult`.
     /// Safe to call from any thread/Task.
     public func predict(_ text: String) -> IntentResult {
@@ -66,10 +82,7 @@ public final class IntentClassifierService: @unchecked Sendable {
             return .intent(label: labels[top1], confidence: conf1)
         }
 
-        let encoded = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text
-        let urlString = genaiBaseURL + encoded
-        let fallbackURL = URL(string: urlString) ?? URL(string: "https://genai.yourcompany.com")!
-        return .genai(url: fallbackURL, confidence: conf1)
+        return .genai(url: genaiURL(for: text), confidence: conf1)
     }
 
     // MARK: - TF-IDF

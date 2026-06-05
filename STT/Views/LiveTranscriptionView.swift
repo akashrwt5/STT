@@ -32,7 +32,14 @@ struct LiveTranscriptionView: View {
                     .padding(.bottom, 16)
 
                 micButton
-                    .padding(.bottom, 32)
+                    .padding(.bottom, viewModel.pendingQuestion == nil ? 32 : 16)
+
+                if let question = viewModel.pendingQuestion {
+                    followUpBanner(question)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 20)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
 
                 if !viewModel.results.isEmpty {
                     resultsList
@@ -203,6 +210,40 @@ struct LiveTranscriptionView: View {
                 .padding(.bottom, 8)
             }
         }
+    }
+
+    // MARK: - Follow-up question banner
+
+    /// Surfaces the NLU engine's follow-up question (e.g. "When should I remind you?")
+    /// and nudges the user to answer by speaking again.
+    private func followUpBanner(_ question: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "bubble.left.and.bubble.right.fill")
+                .font(.system(size: 18))
+                .foregroundStyle(Color(red: 0.2, green: 0.6, blue: 1.0))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(question)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(viewModel.isListening ? "Listening for your answer…" : "Tap the mic and answer")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color(red: 0.2, green: 0.6, blue: 1.0).opacity(0.12),
+            in: RoundedRectangle(cornerRadius: 14)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(red: 0.2, green: 0.6, blue: 1.0).opacity(0.35), lineWidth: 0.5)
+        )
+        .animation(.spring(duration: 0.35), value: viewModel.pendingQuestion)
     }
 
     // MARK: - Helpers
