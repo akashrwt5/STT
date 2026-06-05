@@ -29,4 +29,14 @@ public protocol TranscriptionDelegate: AnyObject {
 
     /// Called whenever the coordinator transitions between states.
     func didChangeState(_ state: TranscriptionState)
+
+    /// Called when automatic silence detection ends a live session because the user
+    /// stopped speaking (or never spoke). Only fired when silence detection is enabled.
+    /// Optional — defaults to a no-op.
+    func didReachEndOfSpeech()
+}
+
+public extension TranscriptionDelegate {
+    /// Default no-op so existing conformers need not implement silence handling.
+    func didReachEndOfSpeech() {}
 }

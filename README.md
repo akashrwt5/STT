@@ -15,34 +15,38 @@ No network. No third-party SDKs. No Dialogflow dependency.
 ```
 STT/
 ├── Protocols/
-│   ├── AudioInputProvider.swift      ← Open/closed audio source abstraction
-│   └── TranscriptionDelegate.swift   ← Interface-segregated callback protocol
+│   ├── AudioInputProvider.swift         ← Open/closed audio source abstraction
+│   └── TranscriptionDelegate.swift      ← Interface-segregated callback protocol
 ├── Audio/
-│   ├── AudioSessionManager.swift     ← AVAudioSession + hearing aid detection
-│   ├── AudioCaptureService.swift     ← Live mic → AsyncStream<AnalyzerInput>
-│   └── FileCaptureService.swift      ← Audio file → AsyncStream<AnalyzerInput>
+│   ├── AudioSessionManager.swift        ← AVAudioSession + hearing aid detection
+│   ├── AudioCaptureService.swift        ← Live mic → AsyncStream<AVAudioPCMBuffer>
+│   ├── FileCaptureService.swift         ← Audio file → AsyncStream<AVAudioPCMBuffer> + progress
+│   ├── BufferConverter.swift            ← AVAudioConverter (native format → Int16 PCM)
+│   └── SilenceDetector.swift           ← Energy-based VAD for auto session termination
 ├── Recognition/
-│   └── SpeechRecognitionService.swift ← SpeechAnalyzer + SpeechTranscriber
+│   └── SpeechRecognitionService.swift   ← SpeechAnalyzer + SpeechTranscriber lifecycle
 ├── Coordinator/
-│   └── TranscriptionCoordinator.swift ← Public API surface
+│   └── TranscriptionCoordinator.swift   ← Public API surface
 ├── Models/
 │   ├── TranscriptionResult.swift
 │   ├── TranscriptionState.swift
 │   ├── TranscriptionError.swift
-│   └── AudioInputState.swift
+│   ├── AudioInputState.swift
+│   └── SilenceDetectionConfiguration.swift  ← VAD tuning parameters
 └── Extensions/
-    └── AVAudioPCMBuffer+AnalyzerInput.swift
+    ├── AVAudioPCMBuffer+AnalyzerInput.swift  ← deepCopy() + AnalyzerInput bridge
+    └── AVAudioPCMBuffer+Power.swift          ← averagePowerDBFS() for VAD
 Views/
-├── STTTestView.swift              ← Root screen with Live / File tabs
-├── LiveTranscriptionView.swift    ← Hero mic screen
-├── FileTranscriptionView.swift    ← File picker + transcription
-├── LanguageSelectorView.swift     ← Language picker sheet
-├── TranscriptionResultCard.swift  ← Glassmorphism result card
-├── AudioVisualizerView.swift      ← Real-time waveform
+├── STTTestView.swift                ← Root screen with Live / File tabs
+├── LiveTranscriptionView.swift      ← Hero mic screen
+├── FileTranscriptionView.swift      ← File picker + playback + transcription
+├── LanguageSelectorView.swift       ← Language picker sheet
+├── TranscriptionResultCard.swift    ← Glassmorphism result card
+├── AudioVisualizerView.swift        ← Real-time waveform
 └── Components/
-    ├── PulsingMicButton.swift     ← Animated record button
-    ├── AudioLevelBar.swift        ← Audio level meter
-    └── StatusBadge.swift          ← Mic source indicator
+    ├── PulsingMicButton.swift       ← Animated record button
+    ├── AudioLevelBar.swift          ← Audio level meter
+    └── StatusBadge.swift            ← Mic source indicator
 ViewModels/
 ├── LiveTranscriptionViewModel.swift
 └── FileTranscriptionViewModel.swift
@@ -113,6 +117,52 @@ for await result in coordinator.results where result.isFinal {
 
 ---
 
+## Silence Detection (VAD)
+
+The pipeline includes on-device Voice Activity Detection for automatic session termination — the local equivalent of Dialogflow's `single_utterance` endpointing. Two modes are supported:
+
+| Mode | Behaviour |
+|---|---|
+| **Continuous** (default) | Session runs until the user taps stop. Suitable for live captioning of ongoing conversation. |
+| **Single-utterance** | Session ends automatically after the user stops speaking. Suitable for command-style interactions. |
+
+### How it works
+
+1. **Energy gate** — each buffer's RMS power is measured in dBFS. Buffers below the threshold (default −45 dBFS) are classified silent.
+2. **Two timeouts** — `speechEndTimeout` (1.5 s default) fires after speech followed by silence; `noSpeechTimeout` (5 s default) fires if nobody speaks at all.
+3. **`isFinal` guardrail** — end-of-speech silence only ends the session once the transcriber has committed at least one final result. A mid-sentence pause is ignored, so the user is never cut off mid-utterance. The no-speech timeout always terminates regardless.
+
+### Configuring from code
+
+```swift
+// Single-utterance (sensible defaults)
+coordinator.silenceConfiguration = .singleUtterance
+
+// Custom thresholds
+coordinator.silenceConfiguration = SilenceDetectionConfiguration(
+    isEnabled: true,
+    thresholdDBFS: -40,        // more aggressive noise gate
+    speechEndTimeout: 2.0,     // wait 2 s after speech ends
+    noSpeechTimeout: 8.0       // wait 8 s if nobody speaks
+)
+
+// Off (default — continuous captioning)
+coordinator.silenceConfiguration = .disabled
+```
+
+The `didReachEndOfSpeech()` delegate callback fires when the session ends via silence detection (not on manual stop):
+
+```swift
+func didReachEndOfSpeech() {
+    // e.g. immediately classify the committed transcript
+    let intent = try onnxClassifier.classify(text: coordinator.currentTranscript)
+}
+```
+
+The Live screen also exposes an **"Auto-stop on silence"** toggle that maps directly to this setting.
+
+---
+
 ## Locale Auto-Detection
 
 Priority order on first launch:
@@ -153,11 +203,13 @@ Custom pill tab bar switching between **Live** and **File** modes. Header shows 
 - Large transcript area — partial results in muted white, final results in full white
 - 40-bar animated waveform at 30fps
 - Pulsing mic button with radiating concentric rings while listening
+- **Auto-stop on silence** toggle — switches between continuous captioning and single-utterance command mode
 - Results history: swipeable glassmorphism cards with timestamp, locale, duration, confidence
 
 ### File Transcription
-- Dashed drop zone → file info card (name, duration, format, size) → Transcribe CTA
-- Progress bar with Cancel during processing
+- Dashed drop zone → file info card (name, duration, format, size)
+- **Audio playback**: play/pause button, scrubber slider, elapsed and remaining time labels
+- Progress bar with Cancel during transcription
 - Result card with Copy, Share, and "Transcribe Another"
 
 ### Language Selector (Sheet)
@@ -183,3 +235,4 @@ xcodebuild test \
 | `AudioSessionManagerTests` | Default route, delegate wiring, route equality |
 | `SpeechRecognitionServiceTests` | Locale resolution priority, unsupported locale throws, availableLocales matches system |
 | `TranscriptionCoordinatorTests` | Initial state, file-not-found, provider factory selection, delegate transitions, error descriptors, state semantics |
+

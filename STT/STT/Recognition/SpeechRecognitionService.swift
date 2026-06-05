@@ -16,6 +16,10 @@ public protocol SpeechRecognitionServiceDelegate: AnyObject {
     /// Called when the result stream completes normally (e.g. an input file is fully
     /// consumed). Not called when the session is cancelled or fails.
     func recognitionServiceDidComplete(_ service: SpeechRecognitionService)
+
+    /// Called when the silence detector determines the session should end (the user
+    /// stopped speaking, or never spoke). Only fired when silence detection is enabled.
+    func recognitionServiceDidDetectSilence(_ service: SpeechRecognitionService)
 }
 
 /// Owns `SpeechAnalyzer` and `SpeechTranscriber` setup, lifecycle, and result iteration.
@@ -41,6 +45,10 @@ public final class SpeechRecognitionService {
     private var currentLocale: Locale
     private var analysisTask: Task<Void, Never>?
     private var feedTask: Task<Void, Never>?
+    /// Set once the transcriber commits its first final result. Read by the silence
+    /// detector as a guardrail: end-of-speech silence only ends the session after a
+    /// complete utterance, so a mid-sentence pause never cuts the user off.
+    private var hasReceivedFinalResult = false
     private let logger = Logger(subsystem: "com.stt.module", category: "SpeechRecognitionService")
 
     // MARK: - Init
@@ -57,13 +65,17 @@ public final class SpeechRecognitionService {
     ///   - provider: Any `AudioInputProvider` — mic or file.
     ///   - preset: Recognition profile. `.progressiveTranscription` for live mic,
     ///     `.transcription` for file input.
+    ///   - silenceConfiguration: When enabled, the session ends automatically after a
+    ///     configurable period of silence. Defaults to `.disabled` (manual stop only).
     /// - Throws: `TranscriptionError.localeNotSupported` if the locale has no model.
     /// - Throws: `TranscriptionError.analyzerFailed` if the analyzer cannot start.
     public func startTranscribing(
         from provider: any AudioInputProvider,
-        preset: SpeechTranscriber.Preset = .progressiveTranscription
+        preset: SpeechTranscriber.Preset = .progressiveTranscription,
+        silenceConfiguration: SilenceDetectionConfiguration = .disabled
     ) async throws {
         logger.info("━━━ startTranscribing called. Preset: \(String(describing: preset)), initial locale: \(self.currentLocale.identifier(.bcp47))")
+        hasReceivedFinalResult = false
 
         // ── 1. Locale resolution ──────────────────────────────────────────────
         logger.info("[1/6] Resolving locale for: \(self.currentLocale.identifier(.bcp47))")
@@ -101,7 +113,21 @@ public final class SpeechRecognitionService {
         let converter = BufferConverter()
         let logger = self.logger
 
-        feedTask = Task {
+        // Silence detector (VAD). Measures buffer energy and signals when the session
+        // should end after a configurable silence. Sample rate is taken from the
+        // analyzer format the buffers are converted to (defaults to 16 kHz).
+        let silenceDetector: SilenceDetector?
+        if silenceConfiguration.isEnabled {
+            silenceDetector = SilenceDetector(
+                configuration: silenceConfiguration,
+                sampleRate: analyzerFormat?.sampleRate ?? 16_000
+            )
+            logger.info("[Feed] Silence detection ENABLED (speechEnd: \(silenceConfiguration.speechEndTimeout)s, noSpeech: \(silenceConfiguration.noSpeechTimeout)s, threshold: \(silenceConfiguration.thresholdDBFS) dBFS).")
+        } else {
+            silenceDetector = nil
+        }
+
+        feedTask = Task { [weak self] in
             var bufferCount = 0
             logger.info("[Feed] Feed task started.")
             for await buffer in rawBufferStream {
@@ -121,6 +147,34 @@ public final class SpeechRecognitionService {
                         logger.info("[Feed] Buffer #\(bufferCount) → frameLength: \(outputBuffer.frameLength), format: \(outputBuffer.format.sampleRate) Hz")
                     }
                     analyzerInputBuilder.yield(AnalyzerInput(buffer: outputBuffer))
+
+                    // VAD: end the session if enough silence has elapsed. We finish the
+                    // input stream so the analyzer drains cleanly, then notify the
+                    // delegate so the coordinator can tear down the live session.
+                    if let silenceDetector,
+                       case .silenceDetected(let reason) = silenceDetector.process(outputBuffer) {
+                        // Guardrail (Phase 2): end-of-speech silence only ends the session
+                        // once the transcriber has committed a final result — otherwise the
+                        // user merely paused mid-utterance and we keep listening. The
+                        // no-speech timeout always ends the session (nobody ever spoke).
+                        let shouldStop: Bool
+                        switch reason {
+                        case .noSpeech:
+                            shouldStop = true
+                        case .endOfSpeech:
+                            shouldStop = self?.hasReceivedFinalResult ?? true
+                        }
+
+                        guard shouldStop else {
+                            // Pause without a committed utterance yet — keep listening.
+                            continue
+                        }
+
+                        logger.info("[Feed] Silence confirmed (\(String(describing: reason))). Finishing input and notifying delegate.")
+                        analyzerInputBuilder.finish()
+                        if let self { self.delegate?.recognitionServiceDidDetectSilence(self) }
+                        return
+                    }
                 } catch {
                     logger.error("[Feed] Buffer conversion failed at buffer #\(bufferCount): \(error)")
                 }
@@ -184,6 +238,7 @@ public final class SpeechRecognitionService {
 
                         // Already on the main actor — deliver directly.
                         if isFinal {
+                            self.hasReceivedFinalResult = true
                             self.delegate?.recognitionService(self, didReceiveFinalResult: transcriptionResult)
                         } else {
                             self.delegate?.recognitionService(self, didReceivePartialResult: transcriptionResult)

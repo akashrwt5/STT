@@ -27,6 +27,13 @@ public final class TranscriptionCoordinator {
 
     public var isTranscribing: Bool { state.isActive }
 
+    /// Controls automatic silence-based termination for *live* transcription.
+    ///
+    /// Defaults to `.disabled` (continuous captioning — runs until stopped manually).
+    /// Set to `.singleUtterance` for command-style interactions that should end when
+    /// the user stops speaking. Has no effect on file transcription.
+    public var silenceConfiguration: SilenceDetectionConfiguration = .disabled
+
     public weak var delegate: TranscriptionDelegate?
 
     // MARK: - AsyncSequence API
@@ -143,9 +150,13 @@ public final class TranscriptionCoordinator {
         activeProvider = provider
 
         // .progressiveTranscription yields partial results immediately — ideal for live mic.
-        try await recognitionService.startTranscribing(from: provider, preset: .progressiveTranscription)
+        try await recognitionService.startTranscribing(
+            from: provider,
+            preset: .progressiveTranscription,
+            silenceConfiguration: silenceConfiguration
+        )
         transition(to: .transcribing)
-        logger.info("Live transcription started.")
+        logger.info("Live transcription started. Silence detection: \(self.silenceConfiguration.isEnabled ? "on" : "off").")
     }
 
     /// Stops live transcription and releases audio resources.
@@ -345,5 +356,14 @@ extension TranscriptionCoordinator: SpeechRecognitionServiceDelegate {
     public func recognitionServiceDidComplete(_ service: SpeechRecognitionService) {
         // Used by file transcription to end its result-collection loop deterministically.
         fileCompletionHandler?()
+    }
+
+    public func recognitionServiceDidDetectSilence(_ service: SpeechRecognitionService) {
+        // Only relevant for live transcription. Tear down the session the same way a
+        // manual stop would, so the UI returns to idle and resources are released.
+        logger.info("[Coordinator] Silence detected — stopping live transcription.")
+        guard state == .transcribing else { return }
+        delegate?.didReachEndOfSpeech()
+        stopLiveTranscription()
     }
 }
