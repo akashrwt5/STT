@@ -169,10 +169,16 @@ public final class LiveTranscriptionViewModel {
 
 extension LiveTranscriptionViewModel: TranscriptionDelegate {
     public func didReceivePartialResult(_ text: String) {
+        guard !isSpeaking else { return }
         transcript = text
     }
 
     public func didReceiveFinalResult(_ text: String) {
+        // Ignore anything captured while the assistant is speaking — otherwise the
+        // recognizer transcribes our own TTS (e.g. "Reminder created.") and re-triggers
+        // the intent. Guards the race where a result is queued before the mic stops.
+        guard !isSpeaking else { return }
+
         transcript = text
         // Route the utterance through the multi-turn NLU engine. Inference runs off the
         // main thread; the engine drives the conversation serially (one turn at a time).
@@ -229,10 +235,12 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
         speaker.speak(question, locale: currentLocale)
     }
 
-    /// Speaks a terminal fulfillment message (e.g. "Reminder created."). No auto-listen,
-    /// because `pendingQuestion` is already nil at this point.
+    /// Speaks a terminal fulfillment message (e.g. "Reminder created.").
+    /// Stops the mic first so the recognizer doesn't transcribe our own voice and
+    /// re-trigger the intent. Does NOT auto-listen afterward — the conversation is done.
     private func announce(_ message: String) {
         guard voiceConversationEnabled, !message.isEmpty else { return }
+        if isListening { stopRecording() }   // never capture our own fulfillment speech
         isSpeaking = true
         speaker.speak(message, locale: currentLocale)
     }
