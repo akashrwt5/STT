@@ -110,6 +110,7 @@ struct FileTranscriptionView: View {
 
     private func fileInfoCard(_ info: AudioFileInfo) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            // File name + metadata row
             HStack(spacing: 10) {
                 Image(systemName: "doc.waveform")
                     .font(.system(size: 20))
@@ -133,6 +134,10 @@ struct FileTranscriptionView: View {
                 Spacer()
             }
 
+            // Playback controls
+            playbackControls(duration: info.duration)
+
+            // Transcribe button (hidden while processing)
             if !viewModel.isProcessing {
                 Button {
                     viewModel.startTranscription()
@@ -157,6 +162,48 @@ struct FileTranscriptionView: View {
         .padding(16)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.1), lineWidth: 0.5))
+    }
+
+    private func playbackControls(duration: TimeInterval) -> some View {
+        VStack(spacing: 8) {
+            // Scrubber
+            Slider(value: $viewModel.playbackProgress, in: 0...1) { editing in
+                // When the user starts dragging, pause; resume when done
+                if editing && viewModel.isPlaying {
+                    viewModel.togglePlayback()
+                }
+            }
+            .tint(Color(red: 0.2, green: 0.6, blue: 1.0))
+            .accessibilityLabel("Playback position")
+
+            // Play / Pause button + time labels
+            HStack {
+                Text(formattedDuration(viewModel.playbackTime))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .frame(width: 44, alignment: .leading)
+
+                Spacer()
+
+                Button {
+                    viewModel.togglePlayback()
+                } label: {
+                    Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 36))
+                        .foregroundStyle(Color(red: 0.2, green: 0.6, blue: 1.0))
+                        .symbolEffect(.bounce, value: viewModel.isPlaying)
+                }
+                .accessibilityLabel(viewModel.isPlaying ? "Pause" : "Play")
+
+                Spacer()
+
+                Text("-\(formattedDuration(max(0, duration - viewModel.playbackTime)))")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .frame(width: 44, alignment: .trailing)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     private var progressSection: some View {
