@@ -45,6 +45,10 @@ public final class SpeechRecognitionService {
     private var currentLocale: Locale
     private var analysisTask: Task<Void, Never>?
     private var feedTask: Task<Void, Never>?
+    /// Set once the transcriber commits its first final result. Read by the silence
+    /// detector as a guardrail: end-of-speech silence only ends the session after a
+    /// complete utterance, so a mid-sentence pause never cuts the user off.
+    private var hasReceivedFinalResult = false
     private let logger = Logger(subsystem: "com.stt.module", category: "SpeechRecognitionService")
 
     // MARK: - Init
@@ -71,6 +75,7 @@ public final class SpeechRecognitionService {
         silenceConfiguration: SilenceDetectionConfiguration = .disabled
     ) async throws {
         logger.info("━━━ startTranscribing called. Preset: \(String(describing: preset)), initial locale: \(self.currentLocale.identifier(.bcp47))")
+        hasReceivedFinalResult = false
 
         // ── 1. Locale resolution ──────────────────────────────────────────────
         logger.info("[1/6] Resolving locale for: \(self.currentLocale.identifier(.bcp47))")
@@ -148,7 +153,24 @@ public final class SpeechRecognitionService {
                     // delegate so the coordinator can tear down the live session.
                     if let silenceDetector,
                        case .silenceDetected(let reason) = silenceDetector.process(outputBuffer) {
-                        logger.info("[Feed] Silence detected (\(String(describing: reason))). Finishing input and notifying delegate.")
+                        // Guardrail (Phase 2): end-of-speech silence only ends the session
+                        // once the transcriber has committed a final result — otherwise the
+                        // user merely paused mid-utterance and we keep listening. The
+                        // no-speech timeout always ends the session (nobody ever spoke).
+                        let shouldStop: Bool
+                        switch reason {
+                        case .noSpeech:
+                            shouldStop = true
+                        case .endOfSpeech:
+                            shouldStop = self?.hasReceivedFinalResult ?? true
+                        }
+
+                        guard shouldStop else {
+                            // Pause without a committed utterance yet — keep listening.
+                            continue
+                        }
+
+                        logger.info("[Feed] Silence confirmed (\(String(describing: reason))). Finishing input and notifying delegate.")
                         analyzerInputBuilder.finish()
                         if let self { self.delegate?.recognitionServiceDidDetectSilence(self) }
                         return
@@ -216,6 +238,7 @@ public final class SpeechRecognitionService {
 
                         // Already on the main actor — deliver directly.
                         if isFinal {
+                            self.hasReceivedFinalResult = true
                             self.delegate?.recognitionService(self, didReceiveFinalResult: transcriptionResult)
                         } else {
                             self.delegate?.recognitionService(self, didReceivePartialResult: transcriptionResult)
