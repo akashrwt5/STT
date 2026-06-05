@@ -80,13 +80,22 @@ public final class LiveTranscriptionViewModel {
         speaker.onFinish = { [weak self] in self?.handleSpeechFinished() }
     }
 
-    /// Called when the assistant finishes speaking. If we're mid-conversation
-    /// (a question is pending), auto-restart listening to capture the answer.
+    /// Called when the assistant finishes speaking. Decides whether to resume listening.
     private func handleSpeechFinished() {
         isSpeaking = false
-        if voiceConversationEnabled, pendingQuestion != nil, !isListening {
+        guard voiceConversationEnabled else { return }
+
+        if pendingQuestion != nil {
+            // Mid-conversation: always restart to capture the user's answer.
+            startRecording()
+        } else if !autoStopOnSilence {
+            // Conversation just completed in continuous mode — resume so the user can
+            // speak a new intent without tapping the mic again.
             startRecording()
         }
+        // In single-utterance (silence-detection) mode after fulfillment: leave the
+        // mic off. The coordinator already stopped when silence was detected; auto-
+        // restarting here would loop indefinitely.
     }
 
     /// Toggles recording on/off.
