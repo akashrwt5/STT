@@ -27,6 +27,10 @@ struct TranscriptionResultCard: View {
                 intentBadge(intent)
             }
 
+            if let slots = result.slots, !slots.isEmpty {
+                slotsView(slots)
+            }
+
             HStack(spacing: 12) {
                 Label(Self.timeFormatter.string(from: result.timestamp), systemImage: "clock")
                 Label(result.locale.identifier, systemImage: "globe")
@@ -50,6 +54,38 @@ struct TranscriptionResultCard: View {
         .offset(y: appeared ? 0 : 12)
         .onAppear {
             withAnimation(.spring(duration: 0.35)) { appeared = true }
+        }
+    }
+
+    // MARK: - Extracted slots
+
+    /// Displays the parameters the NLU engine extracted (e.g. name, date-time)
+    /// as small key/value chips beneath the intent badge.
+    private func slotsView(_ slots: [String: String]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(slots.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                HStack(spacing: 6) {
+                    Text(Self.humanizeSlot(key))
+                        .foregroundStyle(.white.opacity(0.45))
+                    Text(value)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .fontWeight(.medium)
+                }
+                .font(.system(size: 11))
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private static func humanizeSlot(_ key: String) -> String {
+        switch key {
+        case "date-time": return "When"
+        case "name":      return "What"
+        case "MemoryName": return "Memory"
+        default:          return key.replacingOccurrences(of: "-", with: " ").capitalized
         }
     }
 

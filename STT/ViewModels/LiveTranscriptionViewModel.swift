@@ -41,6 +41,9 @@ public final class LiveTranscriptionViewModel {
     private let coordinator: TranscriptionCoordinator
     private let classifier = IntentClassifierService.shared
     private let nlu = NLUEngine()
+    /// Accumulates the spoken text across a multi-turn exchange so the final card
+    /// shows the complete phrase (e.g. "remind me" + "take medication" + "tomorrow").
+    private var conversationTranscripts: [String] = []
     private var levelTimer: Timer?
     private var animPhase: Double = 0
     private let logger = Logger(subsystem: "com.stt.module", category: "LiveTranscriptionViewModel")
@@ -94,6 +97,7 @@ public final class LiveTranscriptionViewModel {
         transcript = ""
         pendingQuestion = nil
         collectedSlots = [:]
+        conversationTranscripts.removeAll()
         nlu.reset()
     }
 
@@ -152,50 +156,65 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
 
     public func didReceiveFinalResult(_ text: String) {
         transcript = text
-        var result = TranscriptionResult(
-            text: text,
-            isFinal: true,
-            locale: currentLocale,
-            timestamp: Date()
-        )
         // Route the utterance through the multi-turn NLU engine. Inference runs off the
         // main thread; the engine drives the conversation serially (one turn at a time).
         Task.detached(priority: .userInitiated) { [nlu, weak self] in
             let response = nlu.handle(text)
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.apply(response, to: &result)
+                self.apply(response, utterance: text)
             }
         }
     }
 
-    /// Applies an NLU turn result: updates the conversation banner and appends a card.
-    private func apply(_ response: NLUResponse, to result: inout TranscriptionResult) {
+    /// Applies an NLU turn result.
+    ///
+    /// Conversational model (matches Dialogflow): intermediate slot-filling and
+    /// confirmation turns only drive the follow-up popup — they do NOT create cards.
+    /// A single consolidated card is emitted when the intent is finally fulfilled
+    /// (or falls back to GenAI), carrying the full spoken text and extracted slots.
+    private func apply(_ response: NLUResponse, utterance: String) {
+        conversationTranscripts.append(utterance)
+
         switch response {
-        case .prompt(let intent, let question, let filled):
-            // Mid-collection: show the recognized intent on the card and surface the question.
-            result.intentResult = .intent(label: intent, confidence: 1.0)
+        case .prompt(_, let question, let filled):
+            // Still collecting — surface the question, keep listening, no card yet.
             pendingQuestion = question
             collectedSlots = filled
-            results.append(result)
 
-        case .confirm(let intent, _, let question):
-            result.intentResult = .intent(label: intent, confidence: 1.0)
+        case .confirm(_, _, let question):
             pendingQuestion = question
-            results.append(result)
 
         case .fulfill(let intent, _, let parameters, _, let confidence):
-            result.intentResult = .intent(label: intent, confidence: confidence)
-            pendingQuestion = nil
-            collectedSlots = parameters
-            results.append(result)
+            appendConversationCard(
+                intent: .intent(label: intent, confidence: confidence),
+                slots: parameters.isEmpty ? nil : parameters
+            )
 
         case .fallback(let url, let confidence):
-            result.intentResult = .genai(url: url, confidence: confidence)
-            pendingQuestion = nil
-            collectedSlots = [:]
-            results.append(result)
+            appendConversationCard(
+                intent: .genai(url: url, confidence: confidence),
+                slots: nil
+            )
         }
+    }
+
+    /// Builds one card from the full accumulated conversation and resets the buffer.
+    private func appendConversationCard(intent: IntentResult, slots: [String: String]?) {
+        let fullText = conversationTranscripts.joined(separator: " ")
+        var card = TranscriptionResult(
+            text: fullText,
+            isFinal: true,
+            locale: currentLocale,
+            timestamp: Date()
+        )
+        card.intentResult = intent
+        card.slots = slots
+        results.append(card)
+
+        pendingQuestion = nil
+        collectedSlots = [:]
+        conversationTranscripts.removeAll()
     }
 
     public func didEncounterError(_ error: TranscriptionError) {

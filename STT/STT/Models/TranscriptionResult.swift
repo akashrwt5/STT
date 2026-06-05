@@ -22,6 +22,8 @@ public struct TranscriptionResult: Identifiable, Sendable {
     public let confidence: Float?
     /// Intent classification result, populated after a final transcript is classified.
     public var intentResult: IntentResult?
+    /// Extracted slot parameters when a multi-turn intent is fulfilled (e.g. REMINDER → name, date-time).
+    public var slots: [String: String]?
 
     public init(
         id: UUID = UUID(),
@@ -31,7 +33,8 @@ public struct TranscriptionResult: Identifiable, Sendable {
         timestamp: Date = Date(),
         audioDuration: TimeInterval? = nil,
         confidence: Float? = nil,
-        intentResult: IntentResult? = nil
+        intentResult: IntentResult? = nil,
+        slots: [String: String]? = nil
     ) {
         self.id = id
         self.text = text
@@ -41,5 +44,6 @@ public struct TranscriptionResult: Identifiable, Sendable {
         self.audioDuration = audioDuration
         self.confidence = confidence
         self.intentResult = intentResult
+        self.slots = slots
     }
 }
