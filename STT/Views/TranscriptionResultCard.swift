@@ -61,7 +61,7 @@ struct TranscriptionResultCard: View {
         case .intent(let label, let confidence):
             HStack(spacing: 6) {
                 Image(systemName: intent.systemImage)
-                Text(label)
+                Text(intent.displayLabel)
                     .fontWeight(.semibold)
                 Spacer()
                 Text(String(format: "%.0f%%", confidence * 100))
@@ -81,7 +81,7 @@ struct TranscriptionResultCard: View {
             Link(destination: url) {
                 HStack(spacing: 6) {
                     Image(systemName: "questionmark.circle")
-                    Text("Unknown intent")
+                    Text("Unknown — Ask AI")
                         .fontWeight(.medium)
                     Spacer()
                     Text(String(format: "%.0f%%", confidence * 100))
@@ -104,16 +104,23 @@ struct TranscriptionResultCard: View {
 
     private func intentColor(for label: String) -> Color {
         switch label {
-        case "Reminder":      return Color(red: 1.0, green: 0.75, blue: 0.2)
-        case "Volume":        return Color(red: 0.2, green: 0.8, blue: 0.6)
-        case "Notifications": return Color(red: 0.4, green: 0.7, blue: 1.0)
-        case "Memory":        return Color(red: 0.9, green: 0.4, blue: 0.8)
-        case "Push To Talk":  return Color(red: 0.3, green: 0.9, blue: 0.4)
-        case "SelfCheck":     return Color(red: 0.2, green: 0.9, blue: 0.9)
-        case "Translate":     return Color(red: 1.0, green: 0.5, blue: 0.3)
-        case "Transcribe":    return Color(red: 0.6, green: 0.8, blue: 1.0)
-        case "TeleHearAI":    return Color(red: 0.8, green: 0.5, blue: 1.0)
-        default:              return .white
+        case "REMINDER":                          return Color(red: 1.0, green: 0.75, blue: 0.2)
+        case "VOLUME_INCREASE", "VOLUME_UNMUTE":  return Color(red: 0.2, green: 0.8, blue: 0.6)
+        case "VOLUME_DECREASE", "VOLUME_MUTE":    return Color(red: 0.4, green: 0.7, blue: 0.9)
+        case "NOTIFICATIONS":                     return Color(red: 0.4, green: 0.7, blue: 1.0)
+        case "MEMORY":                            return Color(red: 0.9, green: 0.4, blue: 0.8)
+        case "PUSH_TO_TALK":                      return Color(red: 0.3, green: 0.9, blue: 0.4)
+        case "SELFCHECK":                         return Color(red: 0.2, green: 0.9, blue: 0.9)
+        case "TRANSLATE":                         return Color(red: 1.0, green: 0.5, blue: 0.3)
+        case "TRANSCRIBE":                        return Color(red: 0.6, green: 0.8, blue: 1.0)
+        case "TELEHEARAI":                        return Color(red: 0.8, green: 0.5, blue: 1.0)
+        case "ACTIVITY":                          return Color(red: 0.5, green: 1.0, blue: 0.5)
+        case "BATTERY":                           return Color(red: 0.4, green: 0.9, blue: 0.3)
+        case "FIND_MY_PHONE":                     return Color(red: 0.3, green: 0.8, blue: 1.0)
+        case "HELP":                              return Color(red: 1.0, green: 0.8, blue: 0.4)
+        case "LISTEN_MESSAGE":                    return Color(red: 0.7, green: 0.5, blue: 1.0)
+        case "OUT_OF_SCOPE":                      return Color(red: 0.6, green: 0.6, blue: 0.6)
+        default:                                  return .white
         }
     }
 }
@@ -130,7 +137,7 @@ struct TranscriptionResultCard: View {
                     audioDuration: 1.8,
                     confidence: 0.95
                 )
-                r.intentResult = .intent(label: "Volume", confidence: 0.93)
+                r.intentResult = .intent(label: "VOLUME_INCREASE", confidence: 0.93)
                 return r
             }())
             TranscriptionResultCard(result: {
@@ -145,6 +152,17 @@ struct TranscriptionResultCard: View {
                     url: URL(string: "https://genai.yourcompany.com/chat?query=What+is+the+weather+today")!,
                     confidence: 0.31
                 )
+                return r
+            }())
+            TranscriptionResultCard(result: {
+                var r = TranscriptionResult(
+                    text: "Set a reminder for tomorrow",
+                    isFinal: true,
+                    locale: Locale(identifier: "en-IN"),
+                    audioDuration: 2.4,
+                    confidence: 0.97
+                )
+                r.intentResult = .intent(label: "REMINDER", confidence: 0.97)
                 return r
             }())
         }
