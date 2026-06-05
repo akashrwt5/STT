@@ -110,7 +110,9 @@ public final class IntentClassifierService: @unchecked Sendable {
         let words = lower.components(separatedBy: CharacterSet.alphanumerics.inverted)
                          .filter { !$0.isEmpty }
         var tokens = words
-        for i in 0..<(words.count - 1) {
+        // Bigrams: guard against 0- or 1-word input (0..<(count-1) underflows to a
+        // crashing range when count == 0). dropLast() yields an empty sequence safely.
+        for i in words.indices.dropLast() {
             tokens.append(words[i] + " " + words[i + 1])
         }
         return tokens
