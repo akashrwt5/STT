@@ -23,6 +23,10 @@ struct TranscriptionResultCard: View {
                 .foregroundStyle(.white)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let intent = result.intentResult {
+                intentBadge(intent)
+            }
+
             HStack(spacing: 12) {
                 Label(Self.timeFormatter.string(from: result.timestamp), systemImage: "clock")
                 Label(result.locale.identifier, systemImage: "globe")
@@ -48,18 +52,102 @@ struct TranscriptionResultCard: View {
             withAnimation(.spring(duration: 0.35)) { appeared = true }
         }
     }
+
+    // MARK: - Intent badge
+
+    @ViewBuilder
+    private func intentBadge(_ intent: IntentResult) -> some View {
+        switch intent {
+        case .intent(let label, let confidence):
+            HStack(spacing: 6) {
+                Image(systemName: intent.systemImage)
+                Text(label)
+                    .fontWeight(.semibold)
+                Spacer()
+                Text(String(format: "%.0f%%", confidence * 100))
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(intentColor(for: label))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(intentColor(for: label).opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(intentColor(for: label).opacity(0.3), lineWidth: 0.5)
+            )
+
+        case .genai(let url, let confidence):
+            Link(destination: url) {
+                HStack(spacing: 6) {
+                    Image(systemName: "questionmark.circle")
+                    Text("Unknown intent")
+                        .fontWeight(.medium)
+                    Spacer()
+                    Text(String(format: "%.0f%%", confidence * 100))
+                        .foregroundStyle(.white.opacity(0.5))
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 10))
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(Color(red: 0.6, green: 0.6, blue: 1.0))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color(red: 0.3, green: 0.3, blue: 0.8).opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color(red: 0.4, green: 0.4, blue: 0.9).opacity(0.3), lineWidth: 0.5)
+                )
+            }
+        }
+    }
+
+    private func intentColor(for label: String) -> Color {
+        switch label {
+        case "Reminder":      return Color(red: 1.0, green: 0.75, blue: 0.2)
+        case "Volume":        return Color(red: 0.2, green: 0.8, blue: 0.6)
+        case "Notifications": return Color(red: 0.4, green: 0.7, blue: 1.0)
+        case "Memory":        return Color(red: 0.9, green: 0.4, blue: 0.8)
+        case "Push To Talk":  return Color(red: 0.3, green: 0.9, blue: 0.4)
+        case "SelfCheck":     return Color(red: 0.2, green: 0.9, blue: 0.9)
+        case "Translate":     return Color(red: 1.0, green: 0.5, blue: 0.3)
+        case "Transcribe":    return Color(red: 0.6, green: 0.8, blue: 1.0)
+        case "TeleHearAI":    return Color(red: 0.8, green: 0.5, blue: 1.0)
+        default:              return .white
+        }
+    }
 }
 
 #Preview {
     ZStack {
         Color(red: 0.04, green: 0.04, blue: 0.06)
-        TranscriptionResultCard(result: TranscriptionResult(
-            text: "Volume up by 20 percent",
-            isFinal: true,
-            locale: Locale(identifier: "en-IN"),
-            audioDuration: 2.4,
-            confidence: 0.97
-        ))
+        VStack(spacing: 12) {
+            TranscriptionResultCard(result: {
+                var r = TranscriptionResult(
+                    text: "Turn the volume up",
+                    isFinal: true,
+                    locale: Locale(identifier: "en-IN"),
+                    audioDuration: 1.8,
+                    confidence: 0.95
+                )
+                r.intentResult = .intent(label: "Volume", confidence: 0.93)
+                return r
+            }())
+            TranscriptionResultCard(result: {
+                var r = TranscriptionResult(
+                    text: "What is the weather today",
+                    isFinal: true,
+                    locale: Locale(identifier: "en-IN"),
+                    audioDuration: 2.1,
+                    confidence: 0.88
+                )
+                r.intentResult = .genai(
+                    url: URL(string: "https://genai.yourcompany.com/chat?query=What+is+the+weather+today")!,
+                    confidence: 0.31
+                )
+                return r
+            }())
+        }
         .padding()
     }
 }

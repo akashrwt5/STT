@@ -24,6 +24,7 @@ public final class LiveTranscriptionViewModel {
     // MARK: - Private
 
     private let coordinator: TranscriptionCoordinator
+    private let classifier = IntentClassifierService.shared
     private var levelTimer: Timer?
     private var animPhase: Double = 0
     private let logger = Logger(subsystem: "com.stt.module", category: "LiveTranscriptionViewModel")
@@ -102,11 +103,6 @@ public final class LiveTranscriptionViewModel {
     }
 
     // MARK: - Audio Level Animation
-    //
-    // AudioCaptureService owns its AVAudioEngine tap exclusively, so we cannot
-    // install a second tap for metering without conflicting. Instead we drive a
-    // smooth sine-wave animation at 30 fps while recording is active. In a production
-    // build, expose a level callback from AudioCaptureService and wire it here.
 
     private func startAudioLevelAnimation() {
         animPhase = 0
@@ -136,13 +132,20 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
 
     public func didReceiveFinalResult(_ text: String) {
         transcript = text
-        let result = TranscriptionResult(
+        var result = TranscriptionResult(
             text: text,
             isFinal: true,
             locale: currentLocale,
             timestamp: Date()
         )
-        results.append(result)
+        Task.detached(priority: .userInitiated) { [classifier, weak self] in
+            let intentResult = classifier.predict(text)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                result.intentResult = intentResult
+                self.results.append(result)
+            }
+        }
     }
 
     public func didEncounterError(_ error: TranscriptionError) {

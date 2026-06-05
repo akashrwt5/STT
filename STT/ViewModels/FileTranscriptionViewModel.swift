@@ -27,13 +27,13 @@ public final class FileTranscriptionViewModel: NSObject {
     public private(set) var progress: Double = 0.0
     public private(set) var error: TranscriptionError?
     public private(set) var processingDuration: TimeInterval?
+    /// Intent classification result for the completed transcript, if any.
+    public private(set) var intentResult: IntentResult?
 
     // MARK: - Playback State
 
     public private(set) var isPlaying: Bool = false
-    /// Current playback position in seconds.
     public private(set) var playbackTime: TimeInterval = 0
-    /// 0–1 fraction of playback position; settable for scrubbing.
     public var playbackProgress: Double {
         get {
             guard let duration = fileInfo?.duration, duration > 0 else { return 0 }
@@ -48,10 +48,8 @@ public final class FileTranscriptionViewModel: NSObject {
     // MARK: - Private
 
     private let coordinator: TranscriptionCoordinator
+    private let classifier = IntentClassifierService.shared
     private var transcriptionTask: Task<Void, Never>?
-    /// The currently security-scoped URL, if any. Stored separately (and nonisolated)
-    /// so `deinit` — which runs in a nonisolated context — can release it without
-    /// touching main-actor-isolated state.
     private nonisolated(unsafe) var scopedURL: URL?
     private let logger = Logger(subsystem: "com.stt.module", category: "FileTranscriptionViewModel")
 
@@ -73,11 +71,6 @@ public final class FileTranscriptionViewModel: NSObject {
 
     // MARK: - File Selection
 
-    /// Called when the user selects a file via `fileImporter`.
-    ///
-    /// Takes ownership of the security-scoped resource for files outside the app
-    /// sandbox (iCloud/Files). Access is held until `reset()` or deinit, because
-    /// transcription happens later when the user taps "Transcribe".
     public func selectFile(_ url: URL) {
         stopPlayback()
         releaseSecurityScope()
@@ -90,18 +83,19 @@ public final class FileTranscriptionViewModel: NSObject {
         error = nil
         progress = 0.0
         processingDuration = nil
+        intentResult = nil
         fileInfo = extractFileInfo(from: url)
         preparePlayer(for: url)
     }
 
     // MARK: - Transcription
 
-    /// Begins transcribing the selected file.
     public func startTranscription() {
         guard let url = selectedFileURL, !isProcessing else { return }
         stopPlayback()
         isProcessing = true
         progress = 0.0
+        intentResult = nil
         let startTime = Date()
 
         transcriptionTask = Task {
@@ -113,6 +107,13 @@ public final class FileTranscriptionViewModel: NSObject {
                 processingDuration = Date().timeIntervalSince(startTime)
                 progress = 1.0
                 logger.info("File transcription complete in \(Date().timeIntervalSince(startTime))s")
+
+                // Classify intent on background thread
+                let classified = await Task.detached(priority: .userInitiated) { [classifier] in
+                    classifier.predict(result)
+                }.value
+                intentResult = classified
+
             } catch let err as TranscriptionError {
                 self.error = err
             } catch {
@@ -122,7 +123,6 @@ public final class FileTranscriptionViewModel: NSObject {
         }
     }
 
-    /// Cancels an in-progress transcription.
     public func cancel() {
         transcriptionTask?.cancel()
         transcriptionTask = nil
@@ -132,7 +132,6 @@ public final class FileTranscriptionViewModel: NSObject {
         logger.info("File transcription cancelled.")
     }
 
-    /// Resets to the initial state so the user can pick a new file.
     public func reset() {
         stopPlayback()
         audioPlayer = nil
@@ -144,6 +143,7 @@ public final class FileTranscriptionViewModel: NSObject {
         progress = 0.0
         processingDuration = nil
         playbackTime = 0
+        intentResult = nil
     }
 
     deinit {
@@ -152,7 +152,6 @@ public final class FileTranscriptionViewModel: NSObject {
 
     // MARK: - Playback
 
-    /// Toggles play / pause.
     public func togglePlayback() {
         guard let player = audioPlayer else { return }
         if player.isPlaying {
@@ -166,7 +165,6 @@ public final class FileTranscriptionViewModel: NSObject {
         }
     }
 
-    /// Seeks to an absolute time (seconds).
     public func seek(to time: TimeInterval) {
         guard let player = audioPlayer, let duration = fileInfo?.duration else { return }
         let clamped = min(max(time, 0), duration)
