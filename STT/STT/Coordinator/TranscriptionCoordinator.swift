@@ -60,6 +60,11 @@ public final class TranscriptionCoordinator {
     private let fileServiceFactory: @MainActor (URL) -> any AudioInputProvider
 
     private var activeProvider: (any AudioInputProvider)?
+    /// Tracks an in-progress live teardown so a restart can wait for it to finish before
+    /// starting a new session. Without this, `startLiveTranscription` can be called while
+    /// the previous session is still in `.stopping`, hit the guard, and silently no-op —
+    /// leaving the mic dead and the transcript frozen.
+    private var teardownTask: Task<Void, Never>?
     /// Set during `transcribeFile`; invoked when the recognizer finishes the file so the
     /// result-collection loop can terminate deterministically (instead of polling state).
     private var fileCompletionHandler: (() -> Void)?
@@ -133,6 +138,13 @@ public final class TranscriptionCoordinator {
     /// - Throws: `TranscriptionError.audioSessionSetupFailed` if the audio session cannot start.
     /// - Throws: `TranscriptionError.analyzerFailed` if the speech engine cannot start.
     public func startLiveTranscription() async throws {
+        // Wait for any in-progress teardown to finish so we always start from a clean
+        // `.idle` state (and a released audio session/engine), not on top of a session
+        // that is still tearing down. Fixes the freeze where a restart no-ops because
+        // the previous session was still `.stopping`.
+        await teardownTask?.value
+        teardownTask = nil
+
         guard !state.isActive, state != .stopping else { return }
 
         transition(to: .requestingPermissions)
@@ -167,7 +179,7 @@ public final class TranscriptionCoordinator {
     public func stopLiveTranscription() {
         guard state != .idle, state != .stopping else { return }
         transition(to: .stopping)
-        Task {
+        teardownTask = Task {
             await recognitionService.stopTranscribing()
             activeProvider?.stop()
             activeProvider = nil
@@ -175,6 +187,13 @@ public final class TranscriptionCoordinator {
             transition(to: .idle)
             logger.info("Live transcription stopped.")
         }
+    }
+
+    /// Suspends until any in-progress live teardown has completed. Callers that need the
+    /// audio session fully released before doing their own audio work (e.g. speaking a
+    /// TTS prompt) should await this first.
+    public func waitForTeardown() async {
+        await teardownTask?.value
     }
 
     // MARK: - File Transcription

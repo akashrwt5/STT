@@ -45,6 +45,11 @@ public final class SpeechRecognitionService {
     private var currentLocale: Locale
     private var analysisTask: Task<Void, Never>?
     private var feedTask: Task<Void, Never>?
+    /// Incremented on every `startTranscribing`. A finishing analysis task only touches
+    /// shared state (`feedTask`, completion delegate) if its captured generation still
+    /// matches — so a stale, slow-to-finish task can never cancel a *newer* session's
+    /// feed task or fire a spurious completion.
+    private var generation = 0
     /// Set once the transcriber commits its first final result. Read by the silence
     /// detector as a guardrail: end-of-speech silence only ends the session after a
     /// complete utterance, so a mid-sentence pause never cuts the user off.
@@ -76,6 +81,8 @@ public final class SpeechRecognitionService {
     ) async throws {
         logger.info("━━━ startTranscribing called. Preset: \(String(describing: preset)), initial locale: \(self.currentLocale.identifier(.bcp47))")
         hasReceivedFinalResult = false
+        generation += 1
+        let myGeneration = generation
 
         // ── 1. Locale resolution ──────────────────────────────────────────────
         logger.info("[1/6] Resolving locale for: \(self.currentLocale.identifier(.bcp47))")
@@ -248,15 +255,23 @@ public final class SpeechRecognitionService {
                     group.cancelAll()
                 }
                 // Reached only on normal completion (input exhausted), not cancellation/error.
-                if !Task.isCancelled {
+                // Guard with generation so a stale task can't fire completion for a session
+                // that has already been replaced by a newer one.
+                if !Task.isCancelled, self.generation == myGeneration {
                     self.delegate?.recognitionServiceDidComplete(self)
                 }
             } catch {
                 logger.error("[Analysis] Analysis task failed with error: \(error)")
-                self.delegate?.recognitionService(self, didFailWith: .analyzerFailed(error))
+                if self.generation == myGeneration {
+                    self.delegate?.recognitionService(self, didFailWith: .analyzerFailed(error))
+                }
             }
             logger.info("[Analysis] Analysis task complete. Cancelling feed task.")
-            self.feedTask?.cancel()
+            // Only cancel the feed task if it still belongs to *this* generation —
+            // otherwise a slow stale task would kill a newer session's feed.
+            if self.generation == myGeneration {
+                self.feedTask?.cancel()
+            }
         }
         logger.info("━━━ startTranscribing setup complete. Pipeline is running.")
     }

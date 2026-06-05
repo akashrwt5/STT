@@ -78,9 +78,10 @@ public final class LiveTranscriptionViewModel {
         audioSource = coordinator.currentRoute.name
         coordinator.silenceConfiguration = autoStopOnSilence ? .singleUtterance : .disabled
         speaker.onFinish = { [weak self] in self?.handleSpeechFinished() }
+        speaker.onCancel = { [weak self] in self?.handleSpeechCancelled() }
     }
 
-    /// Called when the assistant finishes speaking. Decides whether to resume listening.
+    /// Called when the assistant finishes speaking normally. Decides whether to resume.
     private func handleSpeechFinished() {
         isSpeaking = false
         guard voiceConversationEnabled else { return }
@@ -96,6 +97,13 @@ public final class LiveTranscriptionViewModel {
         // In single-utterance (silence-detection) mode after fulfillment: leave the
         // mic off. The coordinator already stopped when silence was detected; auto-
         // restarting here would loop indefinitely.
+    }
+
+    /// Called when speech is cancelled (explicit stop or external interruption like a
+    /// phone call). Only clears speaking state — never auto-resumes — so that input is
+    /// no longer dropped by the `isSpeaking` guard once speech is gone.
+    private func handleSpeechCancelled() {
+        isSpeaking = false
     }
 
     /// Toggles recording on/off.
@@ -235,23 +243,38 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
         }
     }
 
-    /// Asks a follow-up question: stops the mic, speaks it, and (on completion)
-    /// auto-restarts listening via `handleSpeechFinished`.
+    /// Asks a follow-up question. On normal completion, `handleSpeechFinished`
+    /// auto-restarts listening to capture the answer.
     private func ask(_ question: String) {
         guard voiceConversationEnabled else { return }
-        if isListening { stopRecording() }   // don't capture our own voice
-        isSpeaking = true
-        speaker.speak(question, locale: currentLocale)
+        speakSerialized(question)
     }
 
     /// Speaks a terminal fulfillment message (e.g. "Reminder created.").
-    /// Stops the mic first so the recognizer doesn't transcribe our own voice and
-    /// re-trigger the intent. Does NOT auto-listen afterward — the conversation is done.
+    /// Does NOT auto-listen afterward — the conversation is done.
     private func announce(_ message: String) {
         guard voiceConversationEnabled, !message.isEmpty else { return }
-        if isListening { stopRecording() }   // never capture our own fulfillment speech
+        speakSerialized(message)
+    }
+
+    /// Stops the mic, waits for the audio session/engine to fully tear down, then speaks.
+    ///
+    /// The wait is essential: without it the TTS playback session and the recording
+    /// session race over the shared `AVAudioSession`, leaving the engine started on a
+    /// dirty session (no buffers → frozen transcript) on the subsequent restart. Setting
+    /// `isSpeaking` synchronously also makes the `didReceiveFinalResult` guard drop any
+    /// audio captured during the handoff (no self-transcription).
+    private func speakSerialized(_ text: String) {
         isSpeaking = true
-        speaker.speak(message, locale: currentLocale)
+        if isListening { stopRecording() }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.coordinator.waitForTeardown()
+            // Re-check: a manual stop / clearResults during teardown may have cancelled
+            // the conversation. `speaker.stop()` in clearResults sets isSpeaking = false.
+            guard self.isSpeaking else { return }
+            self.speaker.speak(text, locale: self.currentLocale)
+        }
     }
 
     /// Builds one card from the full accumulated conversation and resets the buffer.

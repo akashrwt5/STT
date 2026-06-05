@@ -12,8 +12,15 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
 
     private let synthesizer = AVSpeechSynthesizer()
 
-    /// Called on the main actor when an utterance finishes (or is cancelled).
+    /// Called on the main actor when an utterance finishes *normally*. This is the
+    /// signal to auto-resume listening for the user's answer.
     public var onFinish: (() -> Void)?
+
+    /// Called on the main actor when speech is cancelled — either by an explicit `stop()`
+    /// or by an external interruption (phone call, system audio). Does NOT auto-resume
+    /// listening; it only lets the owner clear its own speaking state so input isn't
+    /// dropped forever. Without this, an interrupted utterance leaves `isSpeaking` stuck.
+    public var onCancel: (() -> Void)?
 
     public private(set) var isSpeaking = false
 
@@ -58,6 +65,14 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         Task { @MainActor in
             self.isSpeaking = false
             self.onFinish?()
+        }
+    }
+
+    public nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+                                              didCancel utterance: AVSpeechUtterance) {
+        Task { @MainActor in
+            self.isSpeaking = false
+            self.onCancel?()
         }
     }
 }
