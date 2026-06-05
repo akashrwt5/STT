@@ -21,6 +21,15 @@ public final class LiveTranscriptionViewModel {
     public private(set) var error: TranscriptionError?
     public private(set) var transcriptionState: TranscriptionState = .idle
 
+    /// When `true`, the session automatically stops after the user stops speaking
+    /// (single-utterance mode). When `false`, it runs until the user taps stop
+    /// (continuous captioning). Mirrors the coordinator's `silenceConfiguration`.
+    public var autoStopOnSilence: Bool = false {
+        didSet {
+            coordinator.silenceConfiguration = autoStopOnSilence ? .singleUtterance : .disabled
+        }
+    }
+
     // MARK: - Private
 
     private let coordinator: TranscriptionCoordinator
@@ -50,6 +59,7 @@ public final class LiveTranscriptionViewModel {
         coordinator.delegate = self
         currentLocale = coordinator.currentLocale
         audioSource = coordinator.currentRoute.name
+        coordinator.silenceConfiguration = autoStopOnSilence ? .singleUtterance : .disabled
     }
 
     /// Toggles recording on/off.
@@ -155,5 +165,12 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
         transcriptionState = state
         audioSource = coordinator.currentRoute.name
         currentLocale = coordinator.currentLocale
+    }
+
+    public func didReachEndOfSpeech() {
+        // Silence detection ended the session automatically — reset the recording UI
+        // (the coordinator has already begun tearing down the live session).
+        isListening = false
+        stopAudioLevelAnimation()
     }
 }

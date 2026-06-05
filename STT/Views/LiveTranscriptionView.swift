@@ -27,6 +27,10 @@ struct LiveTranscriptionView: View {
                 visualizerSection
                     .padding(.bottom, 20)
 
+                autoStopToggle
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 16)
+
                 micButton
                     .padding(.bottom, 32)
 
@@ -144,6 +148,22 @@ struct LiveTranscriptionView: View {
         AudioVisualizerView(level: viewModel.audioLevel, isActive: viewModel.isListening)
             .padding(.horizontal, 24)
             .frame(height: 60)
+    }
+
+    private var autoStopToggle: some View {
+        Toggle(isOn: $viewModel.autoStopOnSilence) {
+            HStack(spacing: 8) {
+                Image(systemName: "waveform.path.ecg")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.5))
+                Text("Auto-stop on silence")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+        }
+        .tint(Color(red: 0.2, green: 0.6, blue: 1.0))
+        .disabled(viewModel.isListening)
+        .accessibilityHint("Automatically ends listening shortly after you stop speaking")
     }
 
     private var micButton: some View {

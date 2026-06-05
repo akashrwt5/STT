@@ -16,6 +16,10 @@ public protocol SpeechRecognitionServiceDelegate: AnyObject {
     /// Called when the result stream completes normally (e.g. an input file is fully
     /// consumed). Not called when the session is cancelled or fails.
     func recognitionServiceDidComplete(_ service: SpeechRecognitionService)
+
+    /// Called when the silence detector determines the session should end (the user
+    /// stopped speaking, or never spoke). Only fired when silence detection is enabled.
+    func recognitionServiceDidDetectSilence(_ service: SpeechRecognitionService)
 }
 
 /// Owns `SpeechAnalyzer` and `SpeechTranscriber` setup, lifecycle, and result iteration.
@@ -57,11 +61,14 @@ public final class SpeechRecognitionService {
     ///   - provider: Any `AudioInputProvider` — mic or file.
     ///   - preset: Recognition profile. `.progressiveTranscription` for live mic,
     ///     `.transcription` for file input.
+    ///   - silenceConfiguration: When enabled, the session ends automatically after a
+    ///     configurable period of silence. Defaults to `.disabled` (manual stop only).
     /// - Throws: `TranscriptionError.localeNotSupported` if the locale has no model.
     /// - Throws: `TranscriptionError.analyzerFailed` if the analyzer cannot start.
     public func startTranscribing(
         from provider: any AudioInputProvider,
-        preset: SpeechTranscriber.Preset = .progressiveTranscription
+        preset: SpeechTranscriber.Preset = .progressiveTranscription,
+        silenceConfiguration: SilenceDetectionConfiguration = .disabled
     ) async throws {
         logger.info("━━━ startTranscribing called. Preset: \(String(describing: preset)), initial locale: \(self.currentLocale.identifier(.bcp47))")
 
@@ -101,7 +108,21 @@ public final class SpeechRecognitionService {
         let converter = BufferConverter()
         let logger = self.logger
 
-        feedTask = Task {
+        // Silence detector (VAD). Measures buffer energy and signals when the session
+        // should end after a configurable silence. Sample rate is taken from the
+        // analyzer format the buffers are converted to (defaults to 16 kHz).
+        let silenceDetector: SilenceDetector?
+        if silenceConfiguration.isEnabled {
+            silenceDetector = SilenceDetector(
+                configuration: silenceConfiguration,
+                sampleRate: analyzerFormat?.sampleRate ?? 16_000
+            )
+            logger.info("[Feed] Silence detection ENABLED (speechEnd: \(silenceConfiguration.speechEndTimeout)s, noSpeech: \(silenceConfiguration.noSpeechTimeout)s, threshold: \(silenceConfiguration.thresholdDBFS) dBFS).")
+        } else {
+            silenceDetector = nil
+        }
+
+        feedTask = Task { [weak self] in
             var bufferCount = 0
             logger.info("[Feed] Feed task started.")
             for await buffer in rawBufferStream {
@@ -121,6 +142,17 @@ public final class SpeechRecognitionService {
                         logger.info("[Feed] Buffer #\(bufferCount) → frameLength: \(outputBuffer.frameLength), format: \(outputBuffer.format.sampleRate) Hz")
                     }
                     analyzerInputBuilder.yield(AnalyzerInput(buffer: outputBuffer))
+
+                    // VAD: end the session if enough silence has elapsed. We finish the
+                    // input stream so the analyzer drains cleanly, then notify the
+                    // delegate so the coordinator can tear down the live session.
+                    if let silenceDetector,
+                       case .silenceDetected(let reason) = silenceDetector.process(outputBuffer) {
+                        logger.info("[Feed] Silence detected (\(String(describing: reason))). Finishing input and notifying delegate.")
+                        analyzerInputBuilder.finish()
+                        if let self { self.delegate?.recognitionServiceDidDetectSilence(self) }
+                        return
+                    }
                 } catch {
                     logger.error("[Feed] Buffer conversion failed at buffer #\(bufferCount): \(error)")
                 }
