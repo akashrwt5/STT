@@ -130,24 +130,54 @@ struct TranscriptionResultCard: View {
     }
 
     private func intentColor(for label: String) -> Color {
-        switch label {
-        case "REMINDER":                          return Color(red: 1.0, green: 0.75, blue: 0.2)
-        case "VOLUME_INCREASE", "VOLUME_UNMUTE":  return Color(red: 0.2, green: 0.8, blue: 0.6)
-        case "VOLUME_DECREASE", "VOLUME_MUTE":    return Color(red: 0.4, green: 0.7, blue: 0.9)
-        case "NOTIFICATIONS":                     return Color(red: 0.4, green: 0.7, blue: 1.0)
-        case "MEMORY":                            return Color(red: 0.9, green: 0.4, blue: 0.8)
-        case "PUSH_TO_TALK":                      return Color(red: 0.3, green: 0.9, blue: 0.4)
-        case "SELFCHECK":                         return Color(red: 0.2, green: 0.9, blue: 0.9)
-        case "TRANSLATE":                         return Color(red: 1.0, green: 0.5, blue: 0.3)
-        case "TRANSCRIBE":                        return Color(red: 0.6, green: 0.8, blue: 1.0)
-        case "TELEHEARAI":                        return Color(red: 0.8, green: 0.5, blue: 1.0)
-        case "ACTIVITY":                          return Color(red: 0.5, green: 1.0, blue: 0.5)
-        case "BATTERY":                           return Color(red: 0.4, green: 0.9, blue: 0.3)
-        case "FIND_MY_PHONE":                     return Color(red: 0.3, green: 0.8, blue: 1.0)
-        case "HELP":                              return Color(red: 1.0, green: 0.8, blue: 0.4)
-        case "LISTEN_MESSAGE":                    return Color(red: 0.7, green: 0.5, blue: 1.0)
-        case "OUT_OF_SCOPE":                      return Color(red: 0.6, green: 0.6, blue: 0.6)
-        default:                                  return .white
+        switch true {
+        // Reminders
+        case label.hasPrefix("reminders."):
+            return Color(red: 1.0, green: 0.75, blue: 0.2)
+        // Volume — up/unmute = green, down/mute = blue
+        case label == "Cmd.VolumeIncrease", label == "Cmd.VolumeUnmute":
+            return Color(red: 0.2, green: 0.8, blue: 0.6)
+        case label == "Cmd.VolumeDecrease", label == "Cmd.VolumeMute":
+            return Color(red: 0.4, green: 0.7, blue: 0.9)
+        // Activity
+        case label.hasPrefix("Cmd.Activity"):
+            return Color(red: 0.5, green: 1.0, blue: 0.5)
+        // Battery
+        case label == "Cmd.BatteryLevel", label == "Help_Battery":
+            return Color(red: 0.4, green: 0.9, blue: 0.3)
+        // Memory
+        case label == "Cmd.MemoryChange", label.hasPrefix("Help_Memory"), label.hasPrefix("Help_Changing"):
+            return Color(red: 0.9, green: 0.4, blue: 0.8)
+        // Messages / send
+        case label.hasPrefix("Cmd.SendMessage"):
+            return Color(red: 0.3, green: 0.9, blue: 0.4)
+        case label == "Cmd.ListenMessage":
+            return Color(red: 0.7, green: 0.5, blue: 1.0)
+        // Find
+        case label == "Cmd.FindMyPhone", label == "Help_FindMyHearingAids":
+            return Color(red: 0.3, green: 0.8, blue: 1.0)
+        // Transcribe / translate
+        case label == "Cmd.TranscribeStart", label == "Help_Transcribe":
+            return Color(red: 0.6, green: 0.8, blue: 1.0)
+        case label == "Cmd.TranslationStart", label == "Help_Translate":
+            return Color(red: 1.0, green: 0.5, blue: 0.3)
+        // Streaming
+        case label.hasPrefix("Cmd.Streaming"):
+            return Color(red: 0.8, green: 0.5, blue: 1.0)
+        // Health / heart
+        case label == "Cmd.Health", label.hasPrefix("Help_Health"), label.hasPrefix("Help_Heart"):
+            return Color(red: 1.0, green: 0.4, blue: 0.5)
+        // Self-check
+        case label == "Help_SelfCheck":
+            return Color(red: 0.2, green: 0.9, blue: 0.9)
+        // All other Help_ intents
+        case label.hasPrefix("Help_"):
+            return Color(red: 1.0, green: 0.8, blue: 0.4)
+        // Fallback / unknown
+        case label == "Default Fallback Intent":
+            return Color(red: 0.6, green: 0.6, blue: 0.6)
+        default:
+            return .white
         }
     }
 }
@@ -164,7 +194,7 @@ struct TranscriptionResultCard: View {
                     audioDuration: 1.8,
                     confidence: 0.95
                 )
-                r.intentResult = .intent(label: "VOLUME_INCREASE", confidence: 0.93)
+                r.intentResult = .intent(label: "Cmd.VolumeIncrease", confidence: 0.93)
                 return r
             }())
             TranscriptionResultCard(result: {
@@ -189,7 +219,7 @@ struct TranscriptionResultCard: View {
                     audioDuration: 2.4,
                     confidence: 0.97
                 )
-                r.intentResult = .intent(label: "REMINDER", confidence: 0.97)
+                r.intentResult = .intent(label: "reminders.add", confidence: 0.97)
                 return r
             }())
         }

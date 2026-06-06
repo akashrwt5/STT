@@ -145,11 +145,12 @@ public final class NLUEngine: @unchecked Sendable {
         session.decrementContexts()
         let (intent, conf) = classifier.classify(text)
 
-        if intent == "OUT_OF_SCOPE" || conf < schema.confidenceThreshold {
+        if intent == "OUT_OF_SCOPE" || intent == "Default Fallback Intent" || conf < schema.confidenceThreshold {
             return .fallback(url: classifier.genaiURL(for: text), confidence: conf)
         }
         guard let cfg = schema.intents[intent] else {
-            return .fallback(url: classifier.genaiURL(for: text), confidence: conf)
+            // Intent recognized but has no schema config — simple single-turn, no slot filling.
+            return .fulfill(intent: intent, action: nil, parameters: [:], message: "", confidence: conf)
         }
 
         // Intent that opens with a yes/no confirmation (e.g. PUSH_TO_TALK).
