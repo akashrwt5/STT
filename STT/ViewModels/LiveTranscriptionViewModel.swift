@@ -44,7 +44,6 @@ public final class LiveTranscriptionViewModel {
     // MARK: - Private
 
     private let coordinator: TranscriptionCoordinator
-    private let classifier = IntentClassifierService.shared
     // @ObservationIgnored backing var + plain computed accessor achieves lazy semantics
     // inside an @Observable class (@Observable expands stored properties into computed
     // properties, making `lazy` incompatible). First access creates the engine; the

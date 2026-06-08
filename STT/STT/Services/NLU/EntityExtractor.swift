@@ -30,7 +30,7 @@ public final class EntityExtractor: @unchecked Sendable {
 
     // MARK: - Init
 
-    public init(entitiesURL: URL? = Bundle.main.url(forResource: "nlu_entities", withExtension: "json")) {
+    public init(entitiesURL: URL? = Bundle(for: EntityExtractor.self).url(forResource: "nlu_entities", withExtension: "json")) {
         guard
             let url = entitiesURL,
             let data = try? Data(contentsOf: url),

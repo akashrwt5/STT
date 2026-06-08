@@ -12,7 +12,7 @@ struct STTApp: App {
         // background thread before any view renders. The classifier is a singleton —
         // once initialized here, every subsequent access on the main actor is instant,
         // eliminating the JSON-parse stall that blocks the first NLU call.
-        Task.detached(priority: .userInitiated) {
+        Task(priority: .userInitiated) {
             _ = IntentClassifierService.shared
         }
     }

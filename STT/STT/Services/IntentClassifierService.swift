@@ -40,7 +40,7 @@ public final class IntentClassifierService: @unchecked Sendable {
 
     private init() {
         guard
-            let url = Bundle.main.url(forResource: "intent_classifier_weights", withExtension: "json"),
+            let url = Bundle(for: IntentClassifierService.self).url(forResource: "intent_classifier_weights", withExtension: "json"),
             let data = try? Data(contentsOf: url),
             let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {

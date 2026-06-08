@@ -64,10 +64,10 @@ public struct NLUSchema: Decodable, Sendable {
         case intents, affirmative, negative
     }
 
-    /// Loads `nlu_schema.json` from the main app bundle.
+    /// Loads `nlu_schema.json` from the module bundle.
     public static func loadFromBundle() -> NLUSchema {
         guard
-            let url = Bundle.main.url(forResource: "nlu_schema", withExtension: "json"),
+            let url = Bundle(for: _NLUSchemaBundle.self).url(forResource: "nlu_schema", withExtension: "json"),
             let data = try? Data(contentsOf: url)
         else {
             fatalError("NLUSchema: nlu_schema.json not found in app bundle.")
@@ -79,3 +79,8 @@ public struct NLUSchema: Decodable, Sendable {
         }
     }
 }
+
+// Bundle anchor: Bundle(for:) requires a class type. This private sentinel lives in
+// the same module as the resource files so the bundle lookup is always correct,
+// even in test targets or framework builds where Bundle.main differs.
+private final class _NLUSchemaBundle: NSObject {}

@@ -343,8 +343,8 @@ public final class SpeechRecognitionService {
 
                 // Observe download progress.
                 let progress = request.progress
-                let observation = progress.observe(\.fractionCompleted, options: [.new]) { [weak self] prog, _ in
-                    self?.logger.info("[Assets] Download progress for \(targetID): \(Int(prog.fractionCompleted * 100))%")
+                let observation = progress.observe(\.fractionCompleted, options: [.new]) { prog, _ in
+                    logger.info("[Assets] Download progress for \(targetID): \(Int(prog.fractionCompleted * 100))%")
                 }
                 defer { observation.invalidate() }
 
