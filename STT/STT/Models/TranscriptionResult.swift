@@ -20,6 +20,10 @@ public struct TranscriptionResult: Identifiable, Sendable {
     public let audioDuration: TimeInterval?
     /// Confidence score in 0.0–1.0 range, if provided by the recognizer.
     public let confidence: Float?
+    /// Intent classification result, populated after a final transcript is classified.
+    public var intentResult: IntentResult?
+    /// Extracted slot parameters when a multi-turn intent is fulfilled (e.g. REMINDER → name, date-time).
+    public var slots: [String: String]?
 
     public init(
         id: UUID = UUID(),
@@ -28,7 +32,9 @@ public struct TranscriptionResult: Identifiable, Sendable {
         locale: Locale,
         timestamp: Date = Date(),
         audioDuration: TimeInterval? = nil,
-        confidence: Float? = nil
+        confidence: Float? = nil,
+        intentResult: IntentResult? = nil,
+        slots: [String: String]? = nil
     ) {
         self.id = id
         self.text = text
@@ -37,5 +43,7 @@ public struct TranscriptionResult: Identifiable, Sendable {
         self.timestamp = timestamp
         self.audioDuration = audioDuration
         self.confidence = confidence
+        self.intentResult = intentResult
+        self.slots = slots
     }
 }

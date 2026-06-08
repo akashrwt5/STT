@@ -21,6 +21,17 @@ public final class LiveTranscriptionViewModel {
     public private(set) var error: TranscriptionError?
     public private(set) var transcriptionState: TranscriptionState = .idle
 
+    /// When the NLU engine needs more information (e.g. "When should I remind you?"),
+    /// this holds the follow-up question to surface. `nil` when not mid-conversation.
+    public private(set) var pendingQuestion: String?
+    /// Slot values collected so far during a multi-turn exchange, for display.
+    public private(set) var collectedSlots: [String: String] = [:]
+    /// True while the assistant is speaking a follow-up question or fulfillment.
+    public private(set) var isSpeaking: Bool = false
+    /// When enabled, follow-up questions are spoken aloud and the mic auto-restarts
+    /// to capture the user's answer (hands-free conversation).
+    public var voiceConversationEnabled: Bool = true
+
     /// When `true`, the session automatically stops after the user stops speaking
     /// (single-utterance mode). When `false`, it runs until the user taps stop
     /// (continuous captioning). Mirrors the coordinator's `silenceConfiguration`.
@@ -33,6 +44,12 @@ public final class LiveTranscriptionViewModel {
     // MARK: - Private
 
     private let coordinator: TranscriptionCoordinator
+    private let classifier = IntentClassifierService.shared
+    private let nlu = NLUEngine()
+    private let speaker = ConversationSpeaker()
+    /// Accumulates the spoken text across a multi-turn exchange so the final card
+    /// shows the complete phrase (e.g. "remind me" + "take medication" + "tomorrow").
+    private var conversationTranscripts: [String] = []
     private var levelTimer: Timer?
     private var animPhase: Double = 0
     private let logger = Logger(subsystem: "com.stt.module", category: "LiveTranscriptionViewModel")
@@ -60,6 +77,27 @@ public final class LiveTranscriptionViewModel {
         currentLocale = coordinator.currentLocale
         audioSource = coordinator.currentRoute.name
         coordinator.silenceConfiguration = autoStopOnSilence ? .singleUtterance : .disabled
+        speaker.onFinish = { [weak self] in self?.handleSpeechFinished() }
+        speaker.onCancel = { [weak self] in self?.handleSpeechCancelled() }
+    }
+
+    /// Called when the assistant finishes speaking normally. Decides whether to resume.
+    private func handleSpeechFinished() {
+        isSpeaking = false
+        guard voiceConversationEnabled else { return }
+
+        if pendingQuestion != nil {
+            startRecording()
+        } else if !autoStopOnSilence {
+            startRecording()
+        }
+    }
+
+    /// Called when speech is cancelled (explicit stop or external interruption like a
+    /// phone call). Only clears speaking state — never auto-resumes — so that input is
+    /// no longer dropped by the `isSpeaking` guard once speech is gone.
+    private func handleSpeechCancelled() {
+        isSpeaking = false
     }
 
     /// Toggles recording on/off.
@@ -84,6 +122,12 @@ public final class LiveTranscriptionViewModel {
     public func clearResults() {
         results.removeAll()
         transcript = ""
+        pendingQuestion = nil
+        collectedSlots = [:]
+        conversationTranscripts.removeAll()
+        isSpeaking = false
+        speaker.stop()
+        nlu.reset()
     }
 
     // MARK: - Private
@@ -112,11 +156,6 @@ public final class LiveTranscriptionViewModel {
     }
 
     // MARK: - Audio Level Animation
-    //
-    // AudioCaptureService owns its AVAudioEngine tap exclusively, so we cannot
-    // install a second tap for metering without conflicting. Instead we drive a
-    // smooth sine-wave animation at 30 fps while recording is active. In a production
-    // build, expose a level callback from AudioCaptureService and wire it here.
 
     private func startAudioLevelAnimation() {
         animPhase = 0
@@ -141,18 +180,109 @@ public final class LiveTranscriptionViewModel {
 
 extension LiveTranscriptionViewModel: TranscriptionDelegate {
     public func didReceivePartialResult(_ text: String) {
+        if isSpeaking { return }
         transcript = text
     }
 
     public func didReceiveFinalResult(_ text: String) {
+        if isSpeaking { return }
+
         transcript = text
-        let result = TranscriptionResult(
-            text: text,
+        // Route the utterance through the multi-turn NLU engine. Inference runs off the
+        // main thread; the engine drives the conversation serially (one turn at a time).
+        Task.detached(priority: .userInitiated) { [nlu, weak self] in
+            let response = nlu.handle(text)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.apply(response, utterance: text)
+            }
+        }
+    }
+
+    /// Applies an NLU turn result.
+    ///
+    /// Conversational model (matches Dialogflow): intermediate slot-filling and
+    /// confirmation turns only drive the follow-up popup — they do NOT create cards.
+    /// A single consolidated card is emitted when the intent is finally fulfilled
+    /// (or falls back to GenAI), carrying the full spoken text and extracted slots.
+    private func apply(_ response: NLUResponse, utterance: String) {
+        conversationTranscripts.append(utterance)
+
+        switch response {
+        case .prompt(_, let question, let filled):
+            // Still collecting — surface the question, speak it, no card yet.
+            pendingQuestion = question
+            collectedSlots = filled
+            ask(question)
+
+        case .confirm(_, _, let question):
+            pendingQuestion = question
+            ask(question)
+
+        case .fulfill(let intent, _, let parameters, let message, let confidence):
+            appendConversationCard(
+                intent: .intent(label: intent, confidence: confidence),
+                slots: parameters.isEmpty ? nil : parameters
+            )
+            announce(message)
+
+        case .fallback(let url, let confidence):
+            appendConversationCard(
+                intent: .genai(url: url, confidence: confidence),
+                slots: nil
+            )
+        }
+    }
+
+    /// Asks a follow-up question. On normal completion, `handleSpeechFinished`
+    /// auto-restarts listening to capture the answer.
+    private func ask(_ question: String) {
+        guard voiceConversationEnabled else { return }
+        speakSerialized(question)
+    }
+
+    /// Speaks a terminal fulfillment message (e.g. "Reminder created.").
+    /// Does NOT auto-listen afterward — the conversation is done.
+    private func announce(_ message: String) {
+        guard voiceConversationEnabled, !message.isEmpty else { return }
+        speakSerialized(message)
+    }
+
+    /// Stops the mic, waits for the audio session/engine to fully tear down, then speaks.
+    ///
+    /// The wait is essential: without it the TTS playback session and the recording
+    /// session race over the shared `AVAudioSession`, leaving the engine started on a
+    /// dirty session (no buffers → frozen transcript) on the subsequent restart. Setting
+    /// `isSpeaking` synchronously also makes the `didReceiveFinalResult` guard drop any
+    /// audio captured during the handoff (no self-transcription).
+    private func speakSerialized(_ text: String) {
+        isSpeaking = true
+        if isListening { stopRecording() }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.coordinator.waitForTeardown()
+            // Re-check: a manual stop / clearResults during teardown may have cancelled.
+            guard self.isSpeaking else { return }
+            self.speaker.speak(text, locale: self.currentLocale)
+        }
+    }
+
+    /// Builds one card from the full accumulated conversation and resets the buffer.
+    private func appendConversationCard(intent: IntentResult, slots: [String: String]?) {
+        let fullText = conversationTranscripts.joined(separator: " ")
+        var card = TranscriptionResult(
+            text: fullText,
             isFinal: true,
             locale: currentLocale,
             timestamp: Date()
         )
-        results.append(result)
+        card.intentResult = intent
+        card.slots = slots
+        results.append(card)
+
+        pendingQuestion = nil
+        collectedSlots = [:]
+        conversationTranscripts.removeAll()
     }
 
     public func didEncounterError(_ error: TranscriptionError) {

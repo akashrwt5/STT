@@ -23,6 +23,14 @@ struct TranscriptionResultCard: View {
                 .foregroundStyle(.white)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let intent = result.intentResult {
+                intentBadge(intent)
+            }
+
+            if let slots = result.slots, !slots.isEmpty {
+                slotsView(slots)
+            }
+
             HStack(spacing: 12) {
                 Label(Self.timeFormatter.string(from: result.timestamp), systemImage: "clock")
                 Label(result.locale.identifier, systemImage: "globe")
@@ -48,18 +56,143 @@ struct TranscriptionResultCard: View {
             withAnimation(.spring(duration: 0.35)) { appeared = true }
         }
     }
+
+    // MARK: - Extracted slots
+
+    /// Displays the parameters the NLU engine extracted (e.g. name, date-time)
+    /// as small key/value chips beneath the intent badge.
+    private func slotsView(_ slots: [String: String]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(slots.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                HStack(spacing: 6) {
+                    Text(SlotFormatting.displayName(key))
+                        .foregroundStyle(.white.opacity(0.45))
+                    Text(SlotFormatting.displayValue(value, forKey: key))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .fontWeight(.medium)
+                }
+                .font(.system(size: 11))
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: - Intent badge
+
+    @ViewBuilder
+    private func intentBadge(_ intent: IntentResult) -> some View {
+        switch intent {
+        case .intent(let label, let confidence):
+            HStack(spacing: 6) {
+                Image(systemName: intent.systemImage)
+                Text(intent.displayLabel)
+                    .fontWeight(.semibold)
+                Spacer()
+                Text(String(format: "%.0f%%", confidence * 100))
+                    .foregroundStyle(.white.opacity(0.6))
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(intentColor(for: label))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(intentColor(for: label).opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(intentColor(for: label).opacity(0.3), lineWidth: 0.5)
+            )
+
+        case .genai(let url, let confidence):
+            Link(destination: url) {
+                HStack(spacing: 6) {
+                    Image(systemName: "questionmark.circle")
+                    Text("Unknown — Ask AI")
+                        .fontWeight(.medium)
+                    Spacer()
+                    Text(String(format: "%.0f%%", confidence * 100))
+                        .foregroundStyle(.white.opacity(0.5))
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 10))
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(Color(red: 0.6, green: 0.6, blue: 1.0))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color(red: 0.3, green: 0.3, blue: 0.8).opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color(red: 0.4, green: 0.4, blue: 0.9).opacity(0.3), lineWidth: 0.5)
+                )
+            }
+        }
+    }
+
+    private func intentColor(for label: String) -> Color {
+        switch label {
+        case "REMINDER":                          return Color(red: 1.0, green: 0.75, blue: 0.2)
+        case "VOLUME_INCREASE", "VOLUME_UNMUTE":  return Color(red: 0.2, green: 0.8, blue: 0.6)
+        case "VOLUME_DECREASE", "VOLUME_MUTE":    return Color(red: 0.4, green: 0.7, blue: 0.9)
+        case "NOTIFICATIONS":                     return Color(red: 0.4, green: 0.7, blue: 1.0)
+        case "MEMORY":                            return Color(red: 0.9, green: 0.4, blue: 0.8)
+        case "PUSH_TO_TALK":                      return Color(red: 0.3, green: 0.9, blue: 0.4)
+        case "SELFCHECK":                         return Color(red: 0.2, green: 0.9, blue: 0.9)
+        case "TRANSLATE":                         return Color(red: 1.0, green: 0.5, blue: 0.3)
+        case "TRANSCRIBE":                        return Color(red: 0.6, green: 0.8, blue: 1.0)
+        case "TELEHEARAI":                        return Color(red: 0.8, green: 0.5, blue: 1.0)
+        case "ACTIVITY":                          return Color(red: 0.5, green: 1.0, blue: 0.5)
+        case "BATTERY":                           return Color(red: 0.4, green: 0.9, blue: 0.3)
+        case "FIND_MY_PHONE":                     return Color(red: 0.3, green: 0.8, blue: 1.0)
+        case "HELP":                              return Color(red: 1.0, green: 0.8, blue: 0.4)
+        case "LISTEN_MESSAGE":                    return Color(red: 0.7, green: 0.5, blue: 1.0)
+        case "OUT_OF_SCOPE":                      return Color(red: 0.6, green: 0.6, blue: 0.6)
+        default:                                  return .white
+        }
+    }
 }
 
 #Preview {
     ZStack {
         Color(red: 0.04, green: 0.04, blue: 0.06)
-        TranscriptionResultCard(result: TranscriptionResult(
-            text: "Volume up by 20 percent",
-            isFinal: true,
-            locale: Locale(identifier: "en-IN"),
-            audioDuration: 2.4,
-            confidence: 0.97
-        ))
+        VStack(spacing: 12) {
+            TranscriptionResultCard(result: {
+                var r = TranscriptionResult(
+                    text: "Turn the volume up",
+                    isFinal: true,
+                    locale: Locale(identifier: "en-IN"),
+                    audioDuration: 1.8,
+                    confidence: 0.95
+                )
+                r.intentResult = .intent(label: "VOLUME_INCREASE", confidence: 0.93)
+                return r
+            }())
+            TranscriptionResultCard(result: {
+                var r = TranscriptionResult(
+                    text: "What is the weather today",
+                    isFinal: true,
+                    locale: Locale(identifier: "en-IN"),
+                    audioDuration: 2.1,
+                    confidence: 0.88
+                )
+                r.intentResult = .genai(
+                    url: URL(string: "https://genai.yourcompany.com/chat?query=What+is+the+weather+today")!,
+                    confidence: 0.31
+                )
+                return r
+            }())
+            TranscriptionResultCard(result: {
+                var r = TranscriptionResult(
+                    text: "Set a reminder for tomorrow",
+                    isFinal: true,
+                    locale: Locale(identifier: "en-IN"),
+                    audioDuration: 2.4,
+                    confidence: 0.97
+                )
+                r.intentResult = .intent(label: "REMINDER", confidence: 0.97)
+                return r
+            }())
+        }
         .padding()
     }
 }

@@ -26,7 +26,11 @@ public protocol AudioInputProvider: Sendable {
     func start() -> AsyncStream<AVAudioPCMBuffer>
 
     /// Signal the provider to stop producing buffers and release audio resources.
-    func stop()
+    ///
+    /// Must be called on the main actor — `AudioCaptureService` tears down
+    /// `AVAudioEngine` synchronously here to guarantee the engine is fully
+    /// stopped before the caller's teardown task completes.
+    @MainActor func stop()
 
     /// Current lifecycle state of this provider.
     var state: AudioInputState { get }

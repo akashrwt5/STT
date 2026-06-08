@@ -44,6 +44,8 @@ final class SilenceDetector {
     private var consecutiveSilentFrames: Int = 0
     /// Total frames seen, used for the no-speech timeout.
     private var totalFrames: Int = 0
+    /// Guards against firing `.silenceDetected` more than once per session.
+    private var hasFired = false
 
     /// - Parameters:
     ///   - configuration: Thresholds and timeouts.
@@ -56,7 +58,7 @@ final class SilenceDetector {
 
     /// Feeds one buffer and returns whether the session should now end.
     func process(_ buffer: AVAudioPCMBuffer) -> Outcome {
-        guard configuration.isEnabled else { return .ongoing }
+        guard configuration.isEnabled, !hasFired else { return .ongoing }
 
         let frames = Int(buffer.frameLength)
         guard frames > 0 else { return .ongoing }
@@ -81,12 +83,14 @@ final class SilenceDetector {
             let silentSeconds = Double(consecutiveSilentFrames) / sampleRate
             if silentSeconds >= configuration.speechEndTimeout {
                 logger.info("[VAD] End-of-speech silence reached (\(silentSeconds)s ≥ \(self.configuration.speechEndTimeout)s).")
+                hasFired = true
                 return .silenceDetected(reason: .endOfSpeech)
             }
         } else {
             let elapsedSeconds = Double(totalFrames) / sampleRate
             if elapsedSeconds >= configuration.noSpeechTimeout {
                 logger.info("[VAD] No-speech timeout reached (\(elapsedSeconds)s ≥ \(self.configuration.noSpeechTimeout)s).")
+                hasFired = true
                 return .silenceDetected(reason: .noSpeech)
             }
         }

@@ -7,6 +7,7 @@ import SwiftUI
 struct STTTestView: View {
     @State private var selectedTab: Tab = .live
     @State private var showLanguagePicker = false
+    @State private var showDiagnosticLog = false
     @State private var coordinator = TranscriptionCoordinator()
 
     enum Tab: String, CaseIterable {
@@ -37,6 +38,9 @@ struct STTTestView: View {
                 Task { try? await coordinator.switchLocale(to: identifier) }
             }
         }
+        .sheet(isPresented: $showDiagnosticLog) {
+            DiagnosticLogView()
+        }
     }
 
     // MARK: - Subviews
@@ -60,16 +64,29 @@ struct STTTestView: View {
 
             Spacer()
 
-            Button {
-                showLanguagePicker = true
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 20))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .frame(width: 40, height: 40)
-                    .background(.ultraThinMaterial, in: Circle())
+            HStack(spacing: 8) {
+                Button {
+                    showDiagnosticLog = true
+                } label: {
+                    Image(systemName: "ladybug")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .frame(width: 40, height: 40)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .accessibilityLabel("Open diagnostic log exporter")
+
+                Button {
+                    showLanguagePicker = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 20))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .frame(width: 40, height: 40)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .accessibilityLabel("Open settings and language picker")
             }
-            .accessibilityLabel("Open settings and language picker")
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)

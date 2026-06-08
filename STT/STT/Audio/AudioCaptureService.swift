@@ -4,6 +4,7 @@
 // Single responsibility: AVAudioEngine tap installation and live buffer streaming.
 
 import AVFoundation
+import os
 import os.log
 
 /// Captures live audio from the microphone (or connected hearing aid) and streams
@@ -28,6 +29,10 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
     private let logger = Logger(subsystem: "com.stt.module", category: "AudioCaptureService")
     private var streamContinuation: AsyncStream<AVAudioPCMBuffer>.Continuation?
     private let bufferSize: AVAudioFrameCount = 4096
+    /// Set the instant `stop()` is called. The tap closure checks it so a not-yet-torn-down
+    /// engine can't keep yielding buffers after stop (the actual `engine.stop()` runs on a
+    /// later main-actor hop). Prevents stale buffers leaking into a new session's pipeline.
+    private let stopped = OSAllocatedUnfairLock(initialState: false)
 
     // MARK: - Init
 
@@ -44,6 +49,7 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
     ///   that yields until `stop()` is called.
     public func start() -> AsyncStream<AVAudioPCMBuffer> {
         state = .preparing
+        stopped.withLock { $0 = false }
         return AsyncStream<AVAudioPCMBuffer> { [weak self] continuation in
             guard let self else {
                 continuation.finish()
@@ -60,11 +66,18 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
     }
 
     /// Stops the audio engine and finishes the buffer stream.
-    public func stop() {
+    ///
+    /// Tears down the engine synchronously on the main actor so the caller's
+    /// teardown task cannot return while the engine is still running. Without
+    /// this guarantee, `configureSessionForPlayback()` can race against a
+    /// still-running `.record` engine, causing the synthesizer to silently
+    /// fail to start (didStart/didFinish never fire).
+    @MainActor public func stop() {
+        stopped.withLock { $0 = true }
         streamContinuation?.finish()
         streamContinuation = nil
         state = .stopped
-        Task { @MainActor [weak self] in self?.tearDownEngine() }
+        tearDownEngine()
         logger.info("AudioCaptureService stopped.")
     }
 
@@ -84,7 +97,11 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
             // required format happens later in SpeechRecognitionService.
             let format = resolveFormat()
 
-            engine.inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) { buffer, _ in
+            engine.inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) { [stopped] buffer, _ in
+                // Drop buffers the instant stop() is called, even though the engine's own
+                // teardown happens on a later main-actor hop — prevents stale buffers from
+                // a stopping session leaking into a freshly started one.
+                guard !stopped.withLock({ $0 }) else { return }
                 // The tap buffer is only valid for the duration of this callback; the
                 // engine may reuse its storage afterwards. Deep-copy before yielding it
                 // to the async stream, which is consumed on another task later.
