@@ -45,11 +45,17 @@ public final class LiveTranscriptionViewModel {
 
     private let coordinator: TranscriptionCoordinator
     private let classifier = IntentClassifierService.shared
-    // lazy defers NLUEngine() — which synchronously parses 3 JSON files — until the
-    // first actual NLU call. LiveTranscriptionView.init() creates many throwaway ViewModel
-    // instances on every parent re-render; without lazy, each one blocks the main thread
-    // with JSON I/O even though SwiftUI discards all but the first @State instance.
-    private lazy var nlu = NLUEngine()
+    // @ObservationIgnored backing var + plain computed accessor achieves lazy semantics
+    // inside an @Observable class (@Observable expands stored properties into computed
+    // properties, making `lazy` incompatible). First access creates the engine; the
+    // backing var is excluded from observation tracking since views never read `nlu`.
+    @ObservationIgnored private var _nlu: NLUEngine?
+    private var nlu: NLUEngine {
+        if let existing = _nlu { return existing }
+        let engine = NLUEngine()
+        _nlu = engine
+        return engine
+    }
     private let speaker = ConversationSpeaker()
     /// Accumulates the spoken text across a multi-turn exchange so the final card
     /// shows the complete phrase (e.g. "remind me" + "take medication" + "tomorrow").
