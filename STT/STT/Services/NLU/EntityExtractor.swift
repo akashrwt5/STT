@@ -25,6 +25,8 @@ public final class EntityExtractor: @unchecked Sendable {
     private let configs: [String: EntityConfig]
     /// Flattened synonym → canonical-value lookup per enum entity.
     private let lookups: [String: [String: String]]
+    /// Synonyms pre-sorted longest-first, built once at init to avoid per-call sort cost.
+    private let sortedLookups: [String: [(key: String, value: String)]]
 
     // MARK: - Init
 
@@ -63,6 +65,10 @@ public final class EntityExtractor: @unchecked Sendable {
 
         self.configs = configs
         self.lookups = lookups
+        self.sortedLookups = lookups.mapValues { table in
+            table.map { (key: $0.key, value: $0.value) }
+                 .sorted { $0.key.count > $1.key.count }
+        }
     }
 
     // MARK: - Public entry point
@@ -89,28 +95,22 @@ public final class EntityExtractor: @unchecked Sendable {
     // MARK: - Enum entities
 
     private func extractEnum(_ entity: String, from text: String) -> String? {
-        guard let table = lookups[entity] else { return nil }
+        guard let sorted = sortedLookups[entity] else { return nil }
         let t = text.lowercased()
 
-        // Longest synonyms first, whole-word match.
-        // Each matchesWholeWord() call compiles a fresh NSRegularExpression — timing
-        // this loop isolates the regex-compilation overhead vs the actual match work.
-        let sortStart = Date()
-        let sorted = table.keys.sorted(by: { $0.count > $1.count })
-        let sortMs = Date().timeIntervalSince(sortStart) * 1_000
-
+        // Longest synonyms first, whole-word match. Order pre-computed at init.
         let matchStart = Date()
         var iterations = 0
-        for syn in sorted {
+        for entry in sorted {
             iterations += 1
-            if matchesWholeWord(syn, in: t) {
+            if matchesWholeWord(entry.key, in: t) {
                 let matchMs = Date().timeIntervalSince(matchStart) * 1_000
-                logger.info("[Timing] extractEnum(\(entity)) exact-match: sort=\(String(format: "%.2f", sortMs))ms match=\(String(format: "%.2f", matchMs))ms iters=\(iterations)/\(sorted.count) → '\(table[syn] ?? "")'")
-                return table[syn]
+                logger.info("[Timing] extractEnum(\(entity)) exact-match: match=\(String(format: "%.2f", matchMs))ms iters=\(iterations)/\(sorted.count) → '\(entry.value)'")
+                return entry.value
             }
         }
         let matchMs = Date().timeIntervalSince(matchStart) * 1_000
-        logger.info("[Timing] extractEnum(\(entity)) exact-match: sort=\(String(format: "%.2f", sortMs))ms match=\(String(format: "%.2f", matchMs))ms iters=\(iterations)/\(sorted.count) → no match")
+        logger.info("[Timing] extractEnum(\(entity)) exact-match: match=\(String(format: "%.2f", matchMs))ms iters=\(iterations)/\(sorted.count) → no match")
 
         // Fuzzy fallback (single-token Levenshtein within 30% of synonym length).
         if configs[entity]?.fuzzy == true {
@@ -118,7 +118,7 @@ public final class EntityExtractor: @unchecked Sendable {
             let tokens = tokenize(t)
             var best: String?
             var bestDistance = Int.max
-            for (syn, canon) in table {
+            for (syn, canon) in sorted {
                 if syn.contains(" ") || syn.count < 3 { continue }
                 let limit = max(1, Int((Double(syn.count) * 0.3).rounded()))
                 for tok in tokens {

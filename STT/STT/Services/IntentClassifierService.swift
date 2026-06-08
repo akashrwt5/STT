@@ -4,6 +4,7 @@
 // Pure-Swift TF-IDF + Logistic Regression inference.
 // Mirrors the logic in IntentClassifier/scripts/predict.py — no external dependencies.
 
+import Accelerate
 import Foundation
 import os.log
 import os.signpost
@@ -158,9 +159,7 @@ public final class IntentClassifierService: @unchecked Sendable {
     // MARK: - Linear classifier
 
     private func logitScores(_ vec: [Double]) -> [Double] {
-        return coef.indices.map { c in
-            zip(coef[c], vec).reduce(intercept[c]) { $0 + $1.0 * $1.1 }
-        }
+        coef.indices.map { vDSP.dot(coef[$0], vec) + intercept[$0] }
     }
 
     // MARK: - Math helpers
