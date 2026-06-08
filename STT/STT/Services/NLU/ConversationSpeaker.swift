@@ -26,6 +26,11 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
 
     public private(set) var isSpeaking = false
 
+    /// Set to `true` when `speak()` calls `stopSpeaking()` to clear a stale utterance
+    /// before queuing a new one. Suppresses the resulting `didCancel` callback so that
+    /// the new utterance's lifecycle is not disrupted by the cancellation of the old one.
+    private var isRestartingSpeak = false
+
     /// Cancels the in-flight safety timeout when a delegate callback fires first.
     private var timeoutTask: Task<Void, Never>?
 
@@ -46,6 +51,17 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         let routeType = session.currentRoute.outputs.first?.portType.rawValue ?? "none"
         logger.info("speak() — route: \(routeName) (\(routeType)), category: \(session.category.rawValue)")
 
+        // If a previous utterance is still queued or speaking, clear it before queuing
+        // the new one. AVSpeechSynthesizer queues rather than replaces, so calling
+        // speak() on top of a stuck utterance would leave the new one permanently
+        // behind the old one. Set isRestartingSpeak first so that the async didCancel
+        // callback the stop triggers doesn't propagate as a real cancellation event.
+        if synthesizer.isSpeaking || synthesizer.isPaused {
+            logger.warning("speak() — synthesizer already active; clearing stale utterance before queuing new one.")
+            isRestartingSpeak = true
+            synthesizer.stopSpeaking(at: .immediate)
+        }
+
         isSpeaking = true
         scheduleTimeout()
         Task {
@@ -56,7 +72,7 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
             utterance.rate = AVSpeechUtteranceDefaultSpeechRate
             utterance.postUtteranceDelay = 0.1
             synthesizer.speak(utterance)
-            logger.info("speak() — synthesizer.speak() called. synthesizer.isSpeaking=\(self.synthesizer.isSpeaking)")
+            logger.info("speak() — utterance queued. synthesizer.isSpeaking=\(self.synthesizer.isSpeaking)")
         }
     }
 
@@ -90,18 +106,22 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
 
     /// Configures the audio session for TTS playback off the main actor.
     ///
-    /// Uses `.playback` (not `.playAndRecord`) because recording is always stopped
-    /// before TTS runs — simpler routing reduces Bluetooth profile-switch failures
-    /// that accumulate after repeated record/playback cycles and cause silent hangs.
-    /// A 300ms settle delay gives the Bluetooth stack time to complete the route
+    /// Uses `.playAndRecord` (not `.playback`) so `.defaultToSpeaker` is available —
+    /// `.defaultToSpeaker` is only honoured by the `.playAndRecord` category and is
+    /// what routes audio to the loudspeaker instead of the earpiece on a plain iPhone.
+    /// `.allowBluetooth` keeps HFP/MFi hearing-aid routing working.
+    /// A 300ms settle delay gives the Bluetooth stack time to complete any route
     /// switch before the synthesizer queues audio.
     private func configureSessionForPlayback() async {
         nonisolated(unsafe) let session = AVAudioSession.sharedInstance()
         do {
             try await Task.detached(priority: .userInitiated) {
-                try session.setCategory(.playback,
+                // Deactivate first to ensure a clean handoff from the now-stopped
+                // recording engine, then reactivate for playback.
+                try? session.setActive(false, options: .notifyOthersOnDeactivation)
+                try session.setCategory(.playAndRecord,
                                         mode: .spokenAudio,
-                                        options: [.duckOthers])
+                                        options: [.defaultToSpeaker, .allowBluetooth, .duckOthers])
                 try session.setActive(true)
             }.value
             // Allow Bluetooth route to settle before queuing audio.
@@ -140,6 +160,14 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     public nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                               didCancel utterance: AVSpeechUtterance) {
         Task { @MainActor in
+            // If speak() triggered this cancel to flush a stale utterance before queuing
+            // a fresh one, swallow the event entirely — isSpeaking and the timeout belong
+            // to the new utterance, not to the one we just cleared.
+            if self.isRestartingSpeak {
+                self.logger.info("didCancel — stale utterance cleared (restarting speak); ignoring.")
+                self.isRestartingSpeak = false
+                return
+            }
             self.logger.info("didCancel — TTS was cancelled.")
             self.timeoutTask?.cancel()
             self.timeoutTask = nil

@@ -66,12 +66,18 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
     }
 
     /// Stops the audio engine and finishes the buffer stream.
-    public func stop() {
+    ///
+    /// Tears down the engine synchronously on the main actor so the caller's
+    /// teardown task cannot return while the engine is still running. Without
+    /// this guarantee, `configureSessionForPlayback()` can race against a
+    /// still-running `.record` engine, causing the synthesizer to silently
+    /// fail to start (didStart/didFinish never fire).
+    @MainActor public func stop() {
         stopped.withLock { $0 = true }
         streamContinuation?.finish()
         streamContinuation = nil
         state = .stopped
-        Task { @MainActor [weak self] in self?.tearDownEngine() }
+        tearDownEngine()
         logger.info("AudioCaptureService stopped.")
     }
 

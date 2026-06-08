@@ -60,7 +60,7 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
     }
 
     /// Signals the file reader to stop yielding buffers.
-    public func stop() {
+    @MainActor public func stop() {
         isCancelled = true
         state = .stopped
         logger.info("FileCaptureService cancelled.")
