@@ -65,17 +65,6 @@ public final class AudioSessionManager {
     /// actor. `AVAudioSession` is a thread-safe singleton, so this is safe.
     public func configure() async throws {
         do {
-            // [DIAG-RC1] Log the session state we are INHERITING before reconfiguring
-            // for recording. If the category is .playAndRecord here it means the previous
-            // TTS session was never deactivated — confirming RC1.
-            let inheritedCategory = session.category.rawValue
-            let inheritedMode = session.mode.rawValue
-            if session.category == .playAndRecord || session.category == .playback {
-                logger.error("[DIAG-RC1] configure() — session is in '\(inheritedCategory)'/'\(inheritedMode)' — NOT deactivated after previous TTS. setActive(false) was never called by ConversationSpeaker. This dirty state is the root cause of no audio input after 2–3 cycles.")
-            } else {
-                logger.info("[DIAG-RC1] configure() — session category before configure: '\(inheritedCategory)'/'\(inheritedMode)' (clean).")
-            }
-
             // AVAudioSession is a thread-safe singleton; safe to use off the main actor.
             nonisolated(unsafe) let session = self.session
             try await Task.detached(priority: .userInitiated) {
@@ -95,7 +84,7 @@ public final class AudioSessionManager {
             updateCurrentRoute()
             logger.info("Audio session configured. Route: \(self.currentRoute.name)")
         } catch {
-            logger.error("[DIAG-RC1] Audio session setup FAILED: \(error) — this throws back to startLiveTranscription. If the category was .playAndRecord before this call, RC1 directly caused this failure.")
+            logger.error("Audio session setup failed: \(error)")
             throw TranscriptionError.audioSessionSetupFailed(error)
         }
     }

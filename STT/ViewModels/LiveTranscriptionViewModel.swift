@@ -83,28 +83,13 @@ public final class LiveTranscriptionViewModel {
 
     /// Called when the assistant finishes speaking normally. Decides whether to resume.
     private func handleSpeechFinished() {
-        // [DIAG] Log the session state at this exact moment — right before
-        // startRecording() triggers sessionManager.configure(). The category/mode
-        // logged here should be .record/.measurement if the session was properly
-        // reset. If it still shows .playAndRecord/.spokenAudio, that is RC1.
-        let session = AVAudioSession.sharedInstance()
-        logger.warning("[DIAG-RC1] handleSpeechFinished — session entering startRecording: category=\(session.category.rawValue), mode=\(session.mode.rawValue). Expected .record/.measurement — if .playAndRecord/.spokenAudio, RC1 is confirmed.")
-        logger.info("[DIAG] handleSpeechFinished — pendingQuestion=\(self.pendingQuestion ?? "nil"), autoStopOnSilence=\(self.autoStopOnSilence), voiceConversationEnabled=\(self.voiceConversationEnabled), isListening=\(self.isListening)")
-
         isSpeaking = false
         guard voiceConversationEnabled else { return }
 
         if pendingQuestion != nil {
-            // Mid-conversation: always restart to capture the user's answer.
-            logger.info("[DIAG] handleSpeechFinished → startRecording() (pending question).")
             startRecording()
         } else if !autoStopOnSilence {
-            // Conversation just completed in continuous mode — resume so the user can
-            // speak a new intent without tapping the mic again.
-            logger.info("[DIAG] handleSpeechFinished → startRecording() (continuous mode, no pending question).")
             startRecording()
-        } else {
-            logger.info("[DIAG] handleSpeechFinished → NOT restarting (single-utterance mode, no pending question).")
         }
     }
 
@@ -195,22 +180,12 @@ public final class LiveTranscriptionViewModel {
 
 extension LiveTranscriptionViewModel: TranscriptionDelegate {
     public func didReceivePartialResult(_ text: String) {
-        // [DIAG-RC2] If isSpeaking is true here, the result is about to be silently
-        // dropped. Repeated occurrences after a TTS cycle confirm isSpeaking is stuck.
-        if isSpeaking {
-            logger.warning("[DIAG-RC2] didReceivePartialResult DROPPED — isSpeaking=true. text='\(text)'")
-            return
-        }
+        if isSpeaking { return }
         transcript = text
     }
 
     public func didReceiveFinalResult(_ text: String) {
-        // [DIAG-RC2] Same guard. If this fires repeatedly without any TTS happening,
-        // isSpeaking is permanently stuck and all intent classification is blocked.
-        if isSpeaking {
-            logger.error("[DIAG-RC2] didReceiveFinalResult DROPPED — isSpeaking=true. text='\(text)' — NLU/intent will NOT run. If this keeps appearing, isSpeaking is stuck.")
-            return
-        }
+        if isSpeaking { return }
 
         transcript = text
         // Route the utterance through the multi-turn NLU engine. Inference runs off the
@@ -281,20 +256,13 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
     /// `isSpeaking` synchronously also makes the `didReceiveFinalResult` guard drop any
     /// audio captured during the handoff (no self-transcription).
     private func speakSerialized(_ text: String) {
-        logger.info("[DIAG] speakSerialized called. isListening=\(self.isListening), isSpeaking=\(self.isSpeaking), state=\(String(describing: self.transcriptionState))")
         isSpeaking = true
         if isListening { stopRecording() }
         Task { [weak self] in
             guard let self else { return }
-            logger.info("[DIAG] speakSerialized — waiting for teardown...")
             await self.coordinator.waitForTeardown()
-            logger.info("[DIAG] speakSerialized — teardown complete. isSpeaking=\(self.isSpeaking). About to call speaker.speak().")
-            // Re-check: a manual stop / clearResults during teardown may have cancelled
-            // the conversation. `speaker.stop()` in clearResults sets isSpeaking = false.
-            guard self.isSpeaking else {
-                self.logger.info("[DIAG] speakSerialized — isSpeaking was cleared during teardown; aborting TTS.")
-                return
-            }
+            // Re-check: a manual stop / clearResults during teardown may have cancelled.
+            guard self.isSpeaking else { return }
             self.speaker.speak(text, locale: self.currentLocale)
         }
     }
