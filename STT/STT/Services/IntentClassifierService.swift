@@ -5,6 +5,8 @@
 // Mirrors the logic in IntentClassifier/scripts/predict.py — no external dependencies.
 
 import Foundation
+import os.log
+import os.signpost
 
 /// Runs on-device intent classification using weights pre-exported from the Python training pipeline.
 public final class IntentClassifierService: @unchecked Sendable {
@@ -12,6 +14,15 @@ public final class IntentClassifierService: @unchecked Sendable {
     // MARK: - Singleton
 
     public static let shared = IntentClassifierService()
+
+    // MARK: - Timing instrumentation
+
+    private let logger = Logger(subsystem: "com.stt.module", category: "IntentClassifier")
+    /// Signpost log visible in Instruments → "Points of Interest".
+    /// Attach Instruments → Time Profiler while running to see each classify() call
+    /// as a labelled coloured span, correlated with CPU activity.
+    private static let signpostLog = OSLog(subsystem: "com.stt.module",
+                                           category: "IntentClassifier")
 
     // MARK: - Model weights (loaded once)
 
@@ -52,8 +63,34 @@ public final class IntentClassifierService: @unchecked Sendable {
     /// `OUT_OF_SCOPE`. Used by the NLU engine, which applies its own policy.
     /// Safe to call from any thread/Task.
     public func classify(_ text: String) -> (label: String, confidence: Double) {
-        let probs = softmax(logitScores(tfidfVector(for: text)))
+        let spid = OSSignpostID(log: Self.signpostLog)
+        os_signpost(.begin, log: Self.signpostLog, name: "classify", signpostID: spid,
+                    "text='%{public}@'", text)
+
+        let t0 = Date()
+
+        let tfidfStart = Date()
+        let vec = tfidfVector(for: text)
+        let tfidfMs = Date().timeIntervalSince(tfidfStart) * 1_000
+
+        let logitStart = Date()
+        let probs = softmax(logitScores(vec))
+        let logitMs = Date().timeIntervalSince(logitStart) * 1_000
+
         let top = probs.indices.max(by: { probs[$0] < probs[$1] })!
+        let totalMs = Date().timeIntervalSince(t0) * 1_000
+
+        logger.info("""
+            [Timing] T1 — classify() \
+            | tfidf+norm: \(String(format: "%.2f", tfidfMs))ms \
+            | logit+softmax: \(String(format: "%.2f", logitMs))ms \
+            | total: \(String(format: "%.2f", totalMs))ms \
+            → '\(self.labels[top])' conf=\(String(format: "%.2f", probs[top]))
+            """)
+
+        os_signpost(.end, log: Self.signpostLog, name: "classify", signpostID: spid,
+                    "label='%{public}@' conf=%.2f total_ms=%.2f", labels[top], probs[top], totalMs)
+
         return (labels[top], probs[top])
     }
 

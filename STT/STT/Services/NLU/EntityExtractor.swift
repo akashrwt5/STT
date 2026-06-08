@@ -9,8 +9,11 @@
 //   - system entities (@sys.date-time, @sys.number-integer): rule-based parsers
 
 import Foundation
+import os.log
 
 public final class EntityExtractor: @unchecked Sendable {
+
+    private let logger = Logger(subsystem: "com.stt.module", category: "EntityExtractor")
 
     /// Raw config per entity (type, fuzzy, open flags) from nlu_entities.json.
     private struct EntityConfig {
@@ -66,11 +69,16 @@ public final class EntityExtractor: @unchecked Sendable {
 
     /// Extracts the value for `entity` from `text`. Returns nil if not found.
     public func extract(_ entity: String, from text: String) -> String? {
+        let t0 = Date()
+        let result: String?
         switch entity {
-        case "sys.date-time":      return extractDateTime(text)?.iso
-        case "sys.number-integer": return extractNumber(text).map { String($0) }
-        default:                   return extractEnum(entity, from: text)
+        case "sys.date-time":      result = extractDateTime(text)?.iso
+        case "sys.number-integer": result = extractNumber(text).map { String($0) }
+        default:                   result = extractEnum(entity, from: text)
         }
+        let ms = Date().timeIntervalSince(t0) * 1_000
+        logger.info("[Timing] EntityExtractor.extract(\(entity)) → \(result ?? "nil") | \(String(format: "%.2f", ms))ms")
+        return result
     }
 
     /// Whether an entity is an "open" topic (free text allowed beyond the synonym table).
@@ -85,14 +93,28 @@ public final class EntityExtractor: @unchecked Sendable {
         let t = text.lowercased()
 
         // Longest synonyms first, whole-word match.
-        for syn in table.keys.sorted(by: { $0.count > $1.count }) {
+        // Each matchesWholeWord() call compiles a fresh NSRegularExpression — timing
+        // this loop isolates the regex-compilation overhead vs the actual match work.
+        let sortStart = Date()
+        let sorted = table.keys.sorted(by: { $0.count > $1.count })
+        let sortMs = Date().timeIntervalSince(sortStart) * 1_000
+
+        let matchStart = Date()
+        var iterations = 0
+        for syn in sorted {
+            iterations += 1
             if matchesWholeWord(syn, in: t) {
+                let matchMs = Date().timeIntervalSince(matchStart) * 1_000
+                logger.info("[Timing] extractEnum(\(entity)) exact-match: sort=\(String(format: "%.2f", sortMs))ms match=\(String(format: "%.2f", matchMs))ms iters=\(iterations)/\(sorted.count) → '\(table[syn] ?? "")'")
                 return table[syn]
             }
         }
+        let matchMs = Date().timeIntervalSince(matchStart) * 1_000
+        logger.info("[Timing] extractEnum(\(entity)) exact-match: sort=\(String(format: "%.2f", sortMs))ms match=\(String(format: "%.2f", matchMs))ms iters=\(iterations)/\(sorted.count) → no match")
 
         // Fuzzy fallback (single-token Levenshtein within 30% of synonym length).
         if configs[entity]?.fuzzy == true {
+            let fuzzyStart = Date()
             let tokens = tokenize(t)
             var best: String?
             var bestDistance = Int.max
@@ -108,6 +130,8 @@ public final class EntityExtractor: @unchecked Sendable {
                     }
                 }
             }
+            let fuzzyMs = Date().timeIntervalSince(fuzzyStart) * 1_000
+            logger.info("[Timing] extractEnum(\(entity)) fuzzy: \(String(format: "%.2f", fuzzyMs))ms → \(best ?? "nil")")
             if let best { return best }
         }
         return nil
@@ -143,6 +167,11 @@ public final class EntityExtractor: @unchecked Sendable {
     public struct DateTimeMatch { public let iso: String; public let span: String }
 
     public func extractDateTime(_ text: String, now: Date = Date()) -> DateTimeMatch? {
+        let dtStart = Date()
+        defer {
+            let ms = Date().timeIntervalSince(dtStart) * 1_000
+            logger.info("[Timing] extractDateTime() total: \(String(format: "%.2f", ms))ms")
+        }
         let t = text.lowercased().trimmingCharacters(in: .whitespaces)
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone.current

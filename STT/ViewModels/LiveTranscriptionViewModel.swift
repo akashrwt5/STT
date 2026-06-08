@@ -188,12 +188,24 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
         if isSpeaking { return }
 
         transcript = text
-        // Route the utterance through the multi-turn NLU engine. Inference runs off the
-        // main thread; the engine drives the conversation serially (one turn at a time).
+        let turn = conversationTranscripts.count + 1
+        let t0 = Date()
+        logger.info("[Timing] ▶ T0 — final result delivered (turn \(turn)): '\(text)'")
+
         Task.detached(priority: .userInitiated) { [nlu, weak self] in
+            let nluStart = Date()
             let response = nlu.handle(text)
+            let nluMs = Date().timeIntervalSince(nluStart) * 1_000
+
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                let totalMs = Date().timeIntervalSince(t0) * 1_000
+                self.logger.info("""
+                    [Timing] ◀ T3 — NLU complete (turn \(turn)) \
+                    | nlu-engine: \(String(format: "%.1f", nluMs))ms \
+                    | wall-from-final-result: \(String(format: "%.1f", totalMs))ms \
+                    | response: \(String(describing: response))
+                    """)
                 self.apply(response, utterance: text)
             }
         }
@@ -238,6 +250,7 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
     /// auto-restarts listening to capture the answer.
     private func ask(_ question: String) {
         guard voiceConversationEnabled else { return }
+        logger.info("[Timing] ▶ T4-followup — speaking follow-up question: '\(question)'")
         speakSerialized(question)
     }
 
@@ -245,6 +258,7 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
     /// Does NOT auto-listen afterward — the conversation is done.
     private func announce(_ message: String) {
         guard voiceConversationEnabled, !message.isEmpty else { return }
+        logger.info("[Timing] ▶ T4-fulfill — speaking fulfillment message: '\(message)'")
         speakSerialized(message)
     }
 

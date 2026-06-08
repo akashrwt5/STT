@@ -14,6 +14,8 @@
 // is delegated to IntentClassifierService, which is itself thread-safe.
 
 import Foundation
+import os.log
+import os.signpost
 
 public final class NLUEngine: @unchecked Sendable {
 
@@ -23,6 +25,9 @@ public final class NLUEngine: @unchecked Sendable {
     private let session: NLUSession
     private let affirmative: Set<String>
     private let negative: Set<String>
+
+    private let logger = Logger(subsystem: "com.stt.module", category: "NLUEngine")
+    private static let signpostLog = OSLog(subsystem: "com.stt.module", category: "NLUEngine")
 
     public init(
         schema: NLUSchema = .loadFromBundle(),
@@ -43,14 +48,35 @@ public final class NLUEngine: @unchecked Sendable {
     /// Processes one user utterance and returns the next conversational step.
     public func handle(_ text: String) -> NLUResponse {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let t0 = Date()
+        let spid = OSSignpostID(log: Self.signpostLog)
+        os_signpost(.begin, log: Self.signpostLog, name: "NLU handle", signpostID: spid,
+                    "text='%{public}@'", text)
+
+        let phase: String
+        let response: NLUResponse
 
         if let confirm = activeConfirmation() {
-            return handleConfirmation(confirm.intent, confirm.followup, text)
+            phase = "confirmation"
+            response = handleConfirmation(confirm.intent, confirm.followup, text)
+        } else if session.pendingIntent != nil {
+            phase = "slot-filling"
+            response = handleSlotFilling(text)
+        } else {
+            phase = "new-intent"
+            response = handleNewIntent(text)
         }
-        if session.pendingIntent != nil {
-            return handleSlotFilling(text)
-        }
-        return handleNewIntent(text)
+
+        let ms = Date().timeIntervalSince(t0) * 1_000
+        logger.info("""
+            [Timing] T2 — NLUEngine.handle() \
+            | phase=\(phase) \
+            | duration: \(String(format: "%.1f", ms))ms \
+            | result: \(String(describing: response))
+            """)
+        os_signpost(.end, log: Self.signpostLog, name: "NLU handle", signpostID: spid,
+                    "phase=%{public}@ ms=%.1f", phase, ms)
+        return response
     }
 
     /// Abandons any in-progress conversation (slot filling / confirmation).
