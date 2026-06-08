@@ -59,7 +59,11 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
             continuation.onTermination = { [weak self] _ in
                 Task { @MainActor [weak self] in self?.tearDownEngine() }
             }
-            Task { [weak self] in
+            // Explicit @MainActor: AVAudioEngine.installTap/prepare/start and
+            // resolveFormat() are all main-actor-isolated in iOS 26. Without the
+            // explicit annotation, calling @MainActor methods from this Task
+            // would require a synchronous forced hop (unsafeForcedSync).
+            Task { @MainActor [weak self] in
                 self?.startEngine(continuation: continuation)
             }
         }
@@ -88,6 +92,7 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
         engine.inputNode.outputFormat(forBus: 0)
     }
 
+    @MainActor
     private func startEngine(continuation: AsyncStream<AVAudioPCMBuffer>.Continuation) {
         do {
             engine.inputNode.removeTap(onBus: 0)

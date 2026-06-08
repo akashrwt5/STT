@@ -148,39 +148,43 @@ public final class AudioSessionManager {
         )
     }
 
-    @objc private func handleRouteChange(_ notification: Notification) {
-        guard let reasonValue = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
-              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
-
-        logger.info("Audio route changed: \(String(describing: reason))")
-        preferHearingAidInputIfAvailable()
-        updateCurrentRoute()
-        delegate?.audioSessionManager(self, routeDidChangeTo: currentRoute)
+    // AVAudioSession posts these notifications on a private audio thread, not the main
+    // thread. Marking the handlers `nonisolated` prevents Swift from forcing a synchronous
+    // hop to the main actor from that background thread (the `unsafeForcedSync` error).
+    // Only Sendable UInt values are extracted before the async hop to the main actor.
+    @objc private nonisolated func handleRouteChange(_ notification: Notification) {
+        let reasonValue = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+        Task { @MainActor [weak self] in
+            guard let self,
+                  let reasonValue,
+                  let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+            self.logger.info("Audio route changed: \(String(describing: reason))")
+            self.preferHearingAidInputIfAvailable()
+            self.updateCurrentRoute()
+            self.delegate?.audioSessionManager(self, routeDidChangeTo: self.currentRoute)
+        }
     }
 
-    @objc private func handleInterruption(_ notification: Notification) {
-        guard let typeValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-
-        switch type {
-        case .began:
-            logger.info("Audio interruption began.")
-            delegate?.audioSessionManagerWasInterrupted(self)
-
-        case .ended:
-            let shouldResume: Bool
-            if let optionsValue = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt {
-                let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-                shouldResume = options.contains(.shouldResume)
-            } else {
-                shouldResume = false
+    @objc private nonisolated func handleInterruption(_ notification: Notification) {
+        let typeValue    = notification.userInfo?[AVAudioSessionInterruptionTypeKey]   as? UInt
+        let optionsValue = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
+        Task { @MainActor [weak self] in
+            guard let self,
+                  let typeValue,
+                  let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+            switch type {
+            case .began:
+                self.logger.info("Audio interruption began.")
+                self.delegate?.audioSessionManagerWasInterrupted(self)
+            case .ended:
+                let options = optionsValue.map { AVAudioSession.InterruptionOptions(rawValue: $0) }
+                let shouldResume = options?.contains(.shouldResume) ?? false
+                self.logger.info("Audio interruption ended. Should resume: \(shouldResume)")
+                try? self.session.setActive(true)
+                self.delegate?.audioSessionManagerInterruptionEnded(self, shouldResume: shouldResume)
+            @unknown default:
+                break
             }
-            logger.info("Audio interruption ended. Should resume: \(shouldResume)")
-            try? session.setActive(true)
-            delegate?.audioSessionManagerInterruptionEnded(self, shouldResume: shouldResume)
-
-        @unknown default:
-            break
         }
     }
 }

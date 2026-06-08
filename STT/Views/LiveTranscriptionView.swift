@@ -105,7 +105,10 @@ struct LiveTranscriptionView: View {
                 }
             }
             .onChange(of: viewModel.transcript) { _, _ in
-                withAnimation { proxy.scrollTo("transcript", anchor: .bottom) }
+                // No withAnimation wrapper — it causes "updated multiple times per frame"
+                // warnings when partial + final results arrive in the same render cycle.
+                // The Text already animates via .animation(.easeInOut, value: transcript).
+                proxy.scrollTo("transcript", anchor: .bottom)
             }
         }
         .overlay(alignment: .topTrailing) {

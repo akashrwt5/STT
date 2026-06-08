@@ -11,7 +11,8 @@ import os.log
 @MainActor
 public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
 
-    private let synthesizer = AVSpeechSynthesizer()
+    // `var` so it can be recreated when the watchdog detects a zombie state.
+    private var synthesizer = AVSpeechSynthesizer()
     private let logger = Logger(subsystem: "com.stt.module", category: "ConversationSpeaker")
 
     /// Called on the main actor when an utterance finishes *normally*. This is the
@@ -20,48 +21,91 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
 
     /// Called on the main actor when speech is cancelled — either by an explicit `stop()`
     /// or by an external interruption (phone call, system audio). Does NOT auto-resume
-    /// listening; it only lets the owner clear its own speaking state so input isn't
-    /// dropped forever. Without this, an interrupted utterance leaves `isSpeaking` stuck.
+    /// listening; it only lets the owner clear its own speaking state so input is no
+    /// longer dropped forever after an interrupted utterance.
     public var onCancel: (() -> Void)?
 
     public private(set) var isSpeaking = false
 
+    // MARK: - Restart-speak state
+
     /// Set to `true` when `speak()` calls `stopSpeaking()` to clear a stale utterance
-    /// before queuing a new one. Suppresses the resulting `didCancel` callback so that
-    /// the new utterance's lifecycle is not disrupted by the cancellation of the old one.
+    /// before queuing a new one. While true, the resulting `didCancel` callback is
+    /// suppressed (it belongs to the old utterance, not the one we're about to play).
     private var isRestartingSpeak = false
+
+    /// Text/locale stored when `speak()` defers because the synthesizer is still active.
+    /// Consumed by `didCancel` (normal path) or the cancel watchdog (zombie path).
+    private var pendingSpeakText: String?
+    private var pendingSpeakLocale: Locale?
+
+    /// Waits up to 500ms for `didCancel` to confirm the old utterance stopped.
+    /// If it never arrives (zombie synthesizer), recreates the synthesizer and
+    /// executes the pending speak directly.
+    private var cancelWatchdogTask: Task<Void, Never>?
+
+    // MARK: - Safety timeout
 
     /// Cancels the in-flight safety timeout when a delegate callback fires first.
     private var timeoutTask: Task<Void, Never>?
 
     /// Maximum seconds to wait for a delegate callback before force-resetting state.
-    /// Covers any TTS failure mode where didFinish/didCancel never fires.
     private static let timeoutSeconds: Double = 8
+
+    // MARK: - Init
 
     public override init() {
         super.init()
         synthesizer.delegate = self
     }
 
-    /// Speaks `text`. Configures the audio session for playback first so the
-    /// voice is audible even right after recording.
+    // MARK: - Public API
+
+    /// Speaks `text`. If the synthesizer is already active, defers until the current
+    /// utterance is fully stopped (confirmed by `didCancel`) before configuring the
+    /// session and queueing the new one. This prevents `setActive(false)` from racing
+    /// with an in-progress stop, which leaves the synthesizer in a zombie state where
+    /// `isSpeaking` is stuck as `true` and no delegate callbacks ever arrive.
     public func speak(_ text: String, locale: Locale) {
         let session = AVAudioSession.sharedInstance()
         let routeName = session.currentRoute.outputs.first?.portName ?? "none"
         let routeType = session.currentRoute.outputs.first?.portType.rawValue ?? "none"
         logger.info("speak() — route: \(routeName) (\(routeType)), category: \(session.category.rawValue)")
 
-        // If a previous utterance is still queued or speaking, clear it before queuing
-        // the new one. AVSpeechSynthesizer queues rather than replaces, so calling
-        // speak() on top of a stuck utterance would leave the new one permanently
-        // behind the old one. Set isRestartingSpeak first so that the async didCancel
-        // callback the stop triggers doesn't propagate as a real cancellation event.
         if synthesizer.isSpeaking || synthesizer.isPaused {
-            logger.warning("speak() — synthesizer already active; clearing stale utterance before queuing new one.")
+            logger.warning("speak() — synthesizer already active; deferring until cancel confirms.")
+            pendingSpeakText = text
+            pendingSpeakLocale = locale
             isRestartingSpeak = true
             synthesizer.stopSpeaking(at: .immediate)
+            startCancelWatchdog()
+            return
         }
 
+        executeSpeak(text: text, locale: locale)
+    }
+
+    /// Stops any in-progress speech immediately. Clears all deferred-speak state so
+    /// a pending restart does not fire after an explicit stop.
+    public func stop() {
+        cancelWatchdogTask?.cancel()
+        cancelWatchdogTask = nil
+        pendingSpeakText = nil
+        pendingSpeakLocale = nil
+        isRestartingSpeak = false
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        if synthesizer.isSpeaking || synthesizer.isPaused {
+            synthesizer.stopSpeaking(at: .immediate)
+        }
+        isSpeaking = false
+    }
+
+    // MARK: - Private
+
+    /// Configures the session and queues the utterance. Called after any stale utterance
+    /// is confirmed stopped (or the synthesizer has been recreated by the watchdog).
+    private func executeSpeak(text: String, locale: Locale) {
         isSpeaking = true
         scheduleTimeout()
         Task {
@@ -76,31 +120,43 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
-    /// Stops any in-progress speech immediately (does not fire `onFinish`).
-    public func stop() {
-        timeoutTask?.cancel()
-        timeoutTask = nil
-        guard synthesizer.isSpeaking else { return }
-        synthesizer.stopSpeaking(at: .immediate)
-        isSpeaking = false
+    /// Waits 500ms for `didCancel` to confirm the old utterance stopped. If it never
+    /// arrives (zombie synthesizer — audio session was killed before the stop completed),
+    /// recreates `AVSpeechSynthesizer` from scratch and executes the pending speak.
+    private func startCancelWatchdog() {
+        cancelWatchdogTask?.cancel()
+        cancelWatchdogTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled, let self else { return }
+            guard self.isRestartingSpeak else { return } // didCancel already fired — nothing to do
+            self.logger.warning("cancelWatchdog: didCancel never arrived in 500ms — recreating synthesizer.")
+            self.isRestartingSpeak = false
+            self.cancelWatchdogTask = nil
+            // Detach the zombie synthesizer and replace it with a clean instance.
+            self.synthesizer.delegate = nil
+            let fresh = AVSpeechSynthesizer()
+            fresh.delegate = self
+            self.synthesizer = fresh
+            guard let text = self.pendingSpeakText, let locale = self.pendingSpeakLocale else { return }
+            self.pendingSpeakText = nil
+            self.pendingSpeakLocale = nil
+            self.executeSpeak(text: text, locale: locale)
+        }
     }
 
     /// Schedules a watchdog that force-resets speaking state if no delegate callback
-    /// arrives within `timeoutSeconds`. Prevents isSpeaking from getting permanently
-    /// stuck when TTS fails silently (session error, hardware interruption, etc.).
+    /// arrives within `timeoutSeconds`. Guards against any TTS failure mode where
+    /// didFinish/didCancel is silently swallowed.
     private func scheduleTimeout() {
         timeoutTask?.cancel()
         timeoutTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(Self.timeoutSeconds))
-            guard !Task.isCancelled else { return }
-            await MainActor.run { [weak self] in
-                guard let self, self.isSpeaking else { return }
-                self.logger.warning("TTS safety timeout fired (\(Self.timeoutSeconds)s) — didFinish/didCancel never received. Force-resetting isSpeaking.")
-                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-                self.isSpeaking = false
-                self.timeoutTask = nil
-                self.onCancel?()
-            }
+            guard !Task.isCancelled, let self, self.isSpeaking else { return }
+            self.logger.warning("TTS safety timeout fired (\(Self.timeoutSeconds)s) — didFinish/didCancel never received. Force-resetting isSpeaking.")
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            self.isSpeaking = false
+            self.timeoutTask = nil
+            self.onCancel?()
         }
     }
 
@@ -146,11 +202,10 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     public nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                               didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor in
+            guard self.isSpeaking else { return } // stop() already handled this
             self.logger.info("didFinish — TTS completed normally.")
             self.timeoutTask?.cancel()
             self.timeoutTask = nil
-            // Deactivate the playback session so AudioSessionManager.configure() starts
-            // from a clean state instead of inheriting .playback/.spokenAudio (RC1).
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             self.isSpeaking = false
             self.onFinish?()
@@ -160,14 +215,21 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     public nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                               didCancel utterance: AVSpeechUtterance) {
         Task { @MainActor in
-            // If speak() triggered this cancel to flush a stale utterance before queuing
-            // a fresh one, swallow the event entirely — isSpeaking and the timeout belong
-            // to the new utterance, not to the one we just cleared.
             if self.isRestartingSpeak {
-                self.logger.info("didCancel — stale utterance cleared (restarting speak); ignoring.")
+                // This cancel belongs to the stale utterance we cleared in speak().
+                // Cancel the watchdog (it's no longer needed) and execute the pending speak.
+                self.logger.info("didCancel — stale utterance cleared; executing pending speak.")
                 self.isRestartingSpeak = false
+                self.cancelWatchdogTask?.cancel()
+                self.cancelWatchdogTask = nil
+                if let text = self.pendingSpeakText, let locale = self.pendingSpeakLocale {
+                    self.pendingSpeakText = nil
+                    self.pendingSpeakLocale = nil
+                    self.executeSpeak(text: text, locale: locale)
+                }
                 return
             }
+            guard self.isSpeaking else { return } // stop() already handled this
             self.logger.info("didCancel — TTS was cancelled.")
             self.timeoutTask?.cancel()
             self.timeoutTask = nil

@@ -45,7 +45,11 @@ public final class LiveTranscriptionViewModel {
 
     private let coordinator: TranscriptionCoordinator
     private let classifier = IntentClassifierService.shared
-    private let nlu = NLUEngine()
+    // lazy defers NLUEngine() — which synchronously parses 3 JSON files — until the
+    // first actual NLU call. LiveTranscriptionView.init() creates many throwaway ViewModel
+    // instances on every parent re-render; without lazy, each one blocks the main thread
+    // with JSON I/O even though SwiftUI discards all but the first @State instance.
+    private lazy var nlu = NLUEngine()
     private let speaker = ConversationSpeaker()
     /// Accumulates the spoken text across a multi-turn exchange so the final card
     /// shows the complete phrase (e.g. "remind me" + "take medication" + "tomorrow").
@@ -161,8 +165,10 @@ public final class LiveTranscriptionViewModel {
         animPhase = 0
         levelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             guard let self else { return }
-            Task { @MainActor [weak self] in
-                guard let self else { return }
+            // Timer fires on the main RunLoop (scheduled from @MainActor context).
+            // assumeIsolated avoids a Task allocation per tick (30×/sec) while still
+            // satisfying the type-checker that @MainActor properties are accessed safely.
+            MainActor.assumeIsolated {
                 self.animPhase += 0.12
                 self.audioLevel = Float(abs(sin(self.animPhase)) * 0.65 + 0.2)
             }
@@ -192,22 +198,23 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
         let t0 = Date()
         logger.info("[Timing] ▶ T0 — final result delivered (turn \(turn)): '\(text)'")
 
-        Task.detached(priority: .userInitiated) { [nlu, weak self] in
+        // Task (not detached) inherits the main actor — after the vDSP + pre-sort perf
+        // fixes, NLU is sub-millisecond so running on the main actor is fine. This also
+        // avoids the [nlu] capture that would trigger the lazy property's JSON-parse
+        // synchronously at Task-creation time (on the main actor in the current frame).
+        Task { [weak self] in
+            guard let self else { return }
             let nluStart = Date()
-            let response = nlu.handle(text)
+            let response = self.nlu.handle(text)
             let nluMs = Date().timeIntervalSince(nluStart) * 1_000
-
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                let totalMs = Date().timeIntervalSince(t0) * 1_000
-                self.logger.info("""
-                    [Timing] ◀ T3 — NLU complete (turn \(turn)) \
-                    | nlu-engine: \(String(format: "%.1f", nluMs))ms \
-                    | wall-from-final-result: \(String(format: "%.1f", totalMs))ms \
-                    | response: \(String(describing: response))
-                    """)
-                self.apply(response, utterance: text)
-            }
+            let totalMs = Date().timeIntervalSince(t0) * 1_000
+            self.logger.info("""
+                [Timing] ◀ T3 — NLU complete (turn \(turn)) \
+                | nlu-engine: \(String(format: "%.1f", nluMs))ms \
+                | wall-from-final-result: \(String(format: "%.1f", totalMs))ms \
+                | response: \(String(describing: response))
+                """)
+            self.apply(response, utterance: text)
         }
     }
 
