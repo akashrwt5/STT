@@ -30,13 +30,13 @@ public final class DiagnosticLogExporter {
             }
         }
     }
-
+    
     /// Fetches log entries and writes them to a temp file, returning its URL.
     ///
     /// Runs off the main actor so the UI stays responsive during the query.
     public func export(windowMinutes: Int = 15) async throws -> URL {
         let text = try await Task.detached(priority: .userInitiated) {
-            try Self.fetchEntries(windowMinutes: windowMinutes)
+            try await Self.fetchEntries(windowMinutes: windowMinutes)
         }.value
         return try writeToTemp(text)
     }

@@ -112,7 +112,7 @@ struct FileTranscriptionView: View {
         VStack(alignment: .leading, spacing: 12) {
             // File name + metadata row
             HStack(spacing: 10) {
-                Image(systemName: "doc.waveform")
+                Image(systemName: "waveform")
                     .font(.system(size: 20))
                     .foregroundStyle(Color(red: 0.2, green: 0.6, blue: 1.0))
 
