@@ -26,6 +26,13 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
 
     public private(set) var isSpeaking = false
 
+    /// Cancels the in-flight safety timeout when a delegate callback fires first.
+    private var timeoutTask: Task<Void, Never>?
+
+    /// Maximum seconds to wait for a delegate callback before force-resetting state.
+    /// Covers any TTS failure mode where didFinish/didCancel never fires.
+    private static let timeoutSeconds: Double = 15
+
     public override init() {
         super.init()
         synthesizer.delegate = self
@@ -35,6 +42,7 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     /// voice is audible even right after recording.
     public func speak(_ text: String, locale: Locale) {
         isSpeaking = true
+        scheduleTimeout()
         Task {
             await configureSessionForPlayback()
             let utterance = AVSpeechUtterance(string: text)
@@ -48,9 +56,30 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
 
     /// Stops any in-progress speech immediately (does not fire `onFinish`).
     public func stop() {
+        timeoutTask?.cancel()
+        timeoutTask = nil
         guard synthesizer.isSpeaking else { return }
         synthesizer.stopSpeaking(at: .immediate)
         isSpeaking = false
+    }
+
+    /// Schedules a watchdog that force-resets speaking state if no delegate callback
+    /// arrives within `timeoutSeconds`. Prevents isSpeaking from getting permanently
+    /// stuck when TTS fails silently (session error, hardware interruption, etc.).
+    private func scheduleTimeout() {
+        timeoutTask?.cancel()
+        timeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.timeoutSeconds))
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self, self.isSpeaking else { return }
+                self.logger.warning("TTS safety timeout fired — didFinish/didCancel never received. Force-resetting isSpeaking.")
+                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+                self.isSpeaking = false
+                self.timeoutTask = nil
+                self.onCancel?()
+            }
+        }
     }
 
     /// Configures the audio session for TTS playback off the main actor so the
@@ -74,6 +103,8 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     public nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                               didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor in
+            self.timeoutTask?.cancel()
+            self.timeoutTask = nil
             // Deactivate the playback session so AudioSessionManager.configure() starts
             // from a clean state instead of inheriting .playAndRecord/.spokenAudio (RC1).
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -85,6 +116,8 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     public nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                               didCancel utterance: AVSpeechUtterance) {
         Task { @MainActor in
+            self.timeoutTask?.cancel()
+            self.timeoutTask = nil
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             self.isSpeaking = false
             self.onCancel?()
