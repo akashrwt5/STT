@@ -30,9 +30,10 @@ final class SemanticEmbedder {
     // MARK: - Init
 
     init?() {
+        let miniLMURL = Bundle.main.url(forResource: "MiniLMEmbedder", withExtension: "mlmodelc")
+                     ?? Bundle.main.url(forResource: "MiniLMEmbedder", withExtension: "mlpackage")
         guard
-            let modelURL = Bundle.main.url(forResource: "MiniLMEmbedder",
-                                           withExtension: "mlpackage"),
+            let modelURL = miniLMURL,
             let vocabURL = Bundle.main.url(forResource: "minilm-vocab",
                                            withExtension: "txt"),
             let vocabText = try? String(contentsOf: vocabURL, encoding: .utf8)

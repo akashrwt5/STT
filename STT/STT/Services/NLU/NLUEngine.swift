@@ -144,14 +144,18 @@ public final class NLUEngine: @unchecked Sendable {
 
     private func handleNewIntent(_ text: String) async -> NLUResponse {
         session.decrementContexts()
-        let result = await classifier.classifyAsync(text)
-        let intent = result.label
-        let conf   = result.confidence
+        let result  = await classifier.classifyAsync(text)
+        let intent  = result.label
+        let conf    = result.confidence
+        let rescued = result.semanticRescue
 
-        if intent == "OUT_OF_SCOPE" || intent == "Default Fallback Intent" || conf < schema.confidenceThreshold {
+        // Semantic rescue already passed its own 0.55 gate inside classifyAsync.
+        // Do NOT re-apply Stage 2's 0.70 threshold to a semanticRescue result —
+        // doing so would drop every rescue (rescue conf 0.55–0.69 → false fallback).
+        let outOfScope = intent == "OUT_OF_SCOPE" || intent == "Default Fallback Intent"
+        if !rescued && (outOfScope || conf < schema.confidenceThreshold) {
             return .fallback(url: classifier.genaiURL(for: text), confidence: conf)
         }
-        let rescued = result.semanticRescue
 
         guard let cfg = schema.intents[intent] else {
             // Intent recognized but has no schema config — simple single-turn, no slot filling.
