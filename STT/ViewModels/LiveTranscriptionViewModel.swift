@@ -200,7 +200,7 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
         // Route the utterance through the multi-turn NLU engine. Inference runs off the
         // main thread; the engine drives the conversation serially (one turn at a time).
         Task.detached(priority: .userInitiated) { [nlu, weak self] in
-            let response = nlu.handle(text)
+            let response = await nlu.handle(text)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.apply(response, utterance: text)
@@ -228,9 +228,9 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
             pendingQuestion = question
             ask(question)
 
-        case .fulfill(let intent, _, let parameters, let message, let confidence):
+        case .fulfill(let intent, _, let parameters, let message, let confidence, let semanticRescue):
             appendConversationCard(
-                intent: .intent(label: intent, confidence: confidence),
+                intent: .intent(label: intent, confidence: confidence, semanticRescue: semanticRescue),
                 slots: parameters.isEmpty ? nil : parameters
             )
             announce(message)

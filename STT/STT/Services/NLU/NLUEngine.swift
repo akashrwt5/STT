@@ -41,7 +41,8 @@ public final class NLUEngine: @unchecked Sendable {
     // MARK: - Public API
 
     /// Processes one user utterance and returns the next conversational step.
-    public func handle(_ text: String) -> NLUResponse {
+    /// Async because Stage 3 (semantic rescue) runs CoreML inference.
+    public func handle(_ text: String) async -> NLUResponse {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if let confirm = activeConfirmation() {
@@ -50,7 +51,7 @@ public final class NLUEngine: @unchecked Sendable {
         if session.pendingIntent != nil {
             return handleSlotFilling(text)
         }
-        return handleNewIntent(text)
+        return await handleNewIntent(text)
     }
 
     /// Abandons any in-progress conversation (slot filling / confirmation).
@@ -141,19 +142,23 @@ public final class NLUEngine: @unchecked Sendable {
 
     // MARK: - New intent (priority 3)
 
-    private func handleNewIntent(_ text: String) -> NLUResponse {
+    private func handleNewIntent(_ text: String) async -> NLUResponse {
         session.decrementContexts()
-        let (intent, conf) = classifier.classify(text)
+        let result = await classifier.classifyAsync(text)
+        let intent = result.label
+        let conf   = result.confidence
 
         if intent == "OUT_OF_SCOPE" || intent == "Default Fallback Intent" || conf < schema.confidenceThreshold {
             return .fallback(url: classifier.genaiURL(for: text), confidence: conf)
         }
+        let rescued = result.semanticRescue
+
         guard let cfg = schema.intents[intent] else {
             // Intent recognized but has no schema config — simple single-turn, no slot filling.
-            return .fulfill(intent: intent, action: nil, parameters: [:], message: "", confidence: conf)
+            return .fulfill(intent: intent, action: nil, parameters: [:], message: "", confidence: conf, semanticRescue: rescued)
         }
 
-        // Intent that opens with a yes/no confirmation (e.g. PUSH_TO_TALK).
+        // Intent that opens with a yes/no confirmation (e.g. Cmd.SendMessage).
         if let fu = cfg.followup {
             session.setContext(fu.context, lifespan: fu.lifespan)
             return .confirm(intent: intent, action: cfg.action, question: fu.prompt)
@@ -172,7 +177,7 @@ public final class NLUEngine: @unchecked Sendable {
 
         // Simple single-turn intent.
         return .fulfill(intent: intent, action: cfg.action,
-                        parameters: [:], message: cfg.fulfillment ?? "", confidence: conf)
+                        parameters: [:], message: cfg.fulfillment ?? "", confidence: conf, semanticRescue: rescued)
     }
 
     // MARK: - Slot extraction helpers

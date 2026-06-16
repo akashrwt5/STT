@@ -6,7 +6,8 @@ import Foundation
 /// The outcome of running intent classification on a transcription result.
 public enum IntentResult: Sendable {
     /// A recognised intent with its label and model confidence (0–1).
-    case intent(label: String, confidence: Double)
+    /// `semanticRescue` is true when Stage 3 (MiniLM) produced this result.
+    case intent(label: String, confidence: Double, semanticRescue: Bool = false)
     /// Confidence below threshold — includes a GenAI fallback URL for the query.
     case genai(url: URL, confidence: Double)
 

@@ -85,11 +85,16 @@ struct TranscriptionResultCard: View {
     @ViewBuilder
     private func intentBadge(_ intent: IntentResult) -> some View {
         switch intent {
-        case .intent(let label, let confidence):
+        case .intent(let label, let confidence, let semanticRescue):
             HStack(spacing: 6) {
                 Image(systemName: intent.systemImage)
                 Text(intent.displayLabel)
                     .fontWeight(.semibold)
+                if semanticRescue {
+                    Image(systemName: "brain")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
                 Spacer()
                 Text(String(format: "%.0f%%", confidence * 100))
                     .foregroundStyle(.white.opacity(0.6))

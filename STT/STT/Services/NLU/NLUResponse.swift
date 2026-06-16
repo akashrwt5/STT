@@ -15,7 +15,8 @@ public enum NLUResponse: Sendable {
     case confirm(intent: String, action: String?, question: String)
 
     /// All slots collected (or none needed) — ready to execute `action`.
-    case fulfill(intent: String, action: String?, parameters: [String: String], message: String, confidence: Double)
+    /// `semanticRescue` is true when Stage 3 (MiniLM) classified this intent.
+    case fulfill(intent: String, action: String?, parameters: [String: String], message: String, confidence: Double, semanticRescue: Bool = false)
 
     /// Low confidence or out-of-scope — hand off to the GenAI fallback URL.
     case fallback(url: URL, confidence: Double)
