@@ -18,7 +18,7 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
     // MARK: - AudioInputProvider
 
     public var audioFormat: AVAudioFormat {
-        get async throws { await resolveFormat() }
+        get async throws { resolveFormat() }
     }
 
     public private(set) var state: AudioInputState = .idle

@@ -66,7 +66,7 @@ public final class AudioSessionManager {
     public func configure() async throws {
         do {
             // AVAudioSession is a thread-safe singleton; safe to use off the main actor.
-            nonisolated(unsafe) let session = self.session
+            let session = self.session
             try await Task.detached(priority: .userInitiated) {
                 // .allowBluetooth enables Bluetooth HFP input (hearing aids, headsets).
                 // .allowBluetoothA2DP is intentionally excluded — it is an output-only

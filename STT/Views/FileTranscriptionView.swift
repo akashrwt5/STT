@@ -280,7 +280,7 @@ struct FileTranscriptionView: View {
         HStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Color.red)
-            Text(error.localizedDescription ?? "An error occurred")
+            Text(error.localizedDescription)
                 .font(.system(size: 13))
                 .foregroundStyle(.white.opacity(0.85))
                 .fixedSize(horizontal: false, vertical: true)

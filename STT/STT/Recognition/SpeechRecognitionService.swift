@@ -222,7 +222,7 @@ public final class SpeechRecognitionService {
 
                     // `transcriber.results` is an async property in iOS 26.
                     logger.info("[Results] Awaiting transcriber.results async property…")
-                    let resultStream = await transcriber.results
+                    let resultStream =  transcriber.results
                     logger.info("[Results] Got result stream. Starting iteration…")
 
                     var resultCount = 0
@@ -343,8 +343,8 @@ public final class SpeechRecognitionService {
 
                 // Observe download progress.
                 let progress = request.progress
-                let observation = progress.observe(\.fractionCompleted, options: [.new]) { prog, _ in
-                    logger.info("[Assets] Download progress for \(targetID): \(Int(prog.fractionCompleted * 100))%")
+                let observation = progress.observe(\.fractionCompleted, options: [.new]) { [weak self] prog, _ in
+                    self?.logger.info("[Assets] Download progress for \(targetID): \(Int(prog.fractionCompleted * 100))%")
                 }
                 defer { observation.invalidate() }
 

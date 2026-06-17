@@ -169,7 +169,7 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     /// A 300ms settle delay gives the Bluetooth stack time to complete any route
     /// switch before the synthesizer queues audio.
     private func configureSessionForPlayback() async {
-        nonisolated(unsafe) let session = AVAudioSession.sharedInstance()
+        let session = AVAudioSession.sharedInstance()
         do {
             try await Task.detached(priority: .userInitiated) {
                 // Deactivate first to ensure a clean handoff from the now-stopped
