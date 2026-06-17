@@ -82,9 +82,9 @@ public final class LiveTranscriptionViewModel {
         speaker.onFinish = { [weak self] in self?.handleSpeechFinished() }
         speaker.onCancel = { [weak self] in self?.handleSpeechCancelled() }
 
-        // Warm the CoreML models off the main thread so the first utterance
-        // doesn't pay the model-load cost mid-conversation.
-        Task.detached(priority: .userInitiated) { _ = IntentClassifierService.shared }
+        // Warm the CoreML models off the main thread (load + ANE graph
+        // specialization) so the first utterance doesn't pay the cold-start cost.
+        Task.detached(priority: .userInitiated) { await IntentClassifierService.shared.warmUp() }
     }
 
     /// Called when the assistant finishes speaking normally. Decides whether to resume.

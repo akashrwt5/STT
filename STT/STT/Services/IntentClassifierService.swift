@@ -119,6 +119,19 @@ public final class IntentClassifierService: @unchecked Sendable {
 
     // MARK: - Public API
 
+    /// Pre-loads and pre-compiles the CoreML graphs (including Apple Neural Engine
+    /// specialization, which happens on the first prediction) on a background task,
+    /// so the first real classification has no cold-start latency. Safe to call
+    /// repeatedly; the heavy load runs once via the embedder Task.
+    public func warmUp() async {
+        if let embedder = await semanticEmbedderTask.value {
+            _ = await embedder.embed("hello")
+        }
+        if let model = coreMLModel {
+            _ = coreMLClassify("hello", model: model)
+        }
+    }
+
     /// Full 3-stage async classification. Use this from NLUEngine.
     /// Returns `semanticRescue: true` when Stage 3 saved a low-confidence Stage 2 result.
     public func classifyAsync(_ text: String) async -> ClassificationResult {
