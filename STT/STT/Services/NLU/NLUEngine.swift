@@ -49,7 +49,7 @@ public final class NLUEngine: @unchecked Sendable {
             return handleConfirmation(confirm.intent, confirm.followup, text)
         }
         if session.pendingIntent != nil {
-            return handleSlotFilling(text)
+            return await handleSlotFilling(text)
         }
         return await handleNewIntent(text)
     }
@@ -106,10 +106,10 @@ public final class NLUEngine: @unchecked Sendable {
 
     // MARK: - Slot filling (priority 2)
 
-    private func handleSlotFilling(_ text: String) -> NLUResponse {
+    private func handleSlotFilling(_ text: String) async -> NLUResponse {
         guard let intent = session.pendingIntent, let cfg = schema.intents[intent] else {
             session.resetSlotFilling()
-            return handleNewIntent(text)
+            return await handleNewIntent(text)
         }
 
         // The utterance answers the slot we last prompted for.
