@@ -13,7 +13,7 @@ public enum IntentResult: Sendable {
 
     public var confidence: Double {
         switch self {
-        case .intent(_, let c): return c
+        case .intent(_, let c, _): return c
         case .genai(_, let c): return c
         }
     }
@@ -21,7 +21,7 @@ public enum IntentResult: Sendable {
     /// Human-readable display label.
     public var displayLabel: String {
         switch self {
-        case .intent(let label, _): return Self.humanize(label)
+        case .intent(let label, _, _): return Self.humanize(label)
         case .genai: return "Unknown"
         }
     }
@@ -30,7 +30,7 @@ public enum IntentResult: Sendable {
     public var systemImage: String {
         switch self {
         case .genai: return "questionmark.circle"
-        case .intent(let label, _):
+        case .intent(let label, _, _):
             switch true {
             case label == "Default Fallback Intent":        return "questionmark.circle"
             case label == "reminders.add":                  return "bell.badge"
