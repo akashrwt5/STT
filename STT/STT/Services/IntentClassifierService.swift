@@ -56,7 +56,10 @@ public final class IntentClassifierService: @unchecked Sendable {
 
     // MARK: - Stage 3
 
-    private let semanticEmbedder: SemanticEmbedder?
+    // The MiniLM embedder loads a ~17 MB CoreML model and a 30k-line vocab.
+    // Loading it lazily on a background task keeps `shared` init cheap so it
+    // never blocks the main thread when the view model is constructed.
+    private let semanticEmbedderTask: Task<SemanticEmbedder?, Never>
     private let semanticClassifier: SemanticClassifier?
 
     // MARK: - Thresholds
@@ -104,13 +107,14 @@ public final class IntentClassifierService: @unchecked Sendable {
         genaiBaseURL     = obj["genai_base_url"]     as? String ?? ""
 
         // -- Stage 3: semantic rescue --
-        semanticEmbedder   = SemanticEmbedder()
-        semanticClassifier = SemanticClassifier()
+        // Load the heavy MiniLM embedder off the main thread; the SemanticHead
+        // is a tiny JSON linear layer so it stays synchronous.
+        semanticEmbedderTask = Task.detached(priority: .userInitiated) { SemanticEmbedder() }
+        semanticClassifier   = SemanticClassifier()
 
         let stage2 = coreMLModel != nil ? "CoreML" : "JSON weights"
-        let stage3 = semanticEmbedder != nil ? "enabled" : "disabled (artifacts missing)"
         Logger(subsystem: "com.stt.module", category: "IntentClassifier")
-            .info("IntentClassifier ready — Stage2: \(stage2), Stage3 semantic: \(stage3)")
+            .info("IntentClassifier ready — Stage2: \(stage2), Stage3 semantic: loading in background")
     }
 
     // MARK: - Public API
@@ -134,7 +138,7 @@ public final class IntentClassifierService: @unchecked Sendable {
         }
 
         // Stage 3 — only runs when Stage 2 is uncertain
-        if let embedder = semanticEmbedder, let head = semanticClassifier,
+        if let embedder = await semanticEmbedderTask.value, let head = semanticClassifier,
            let embedding = await embedder.embed(text) {
             let (semLabel, semConf) = head.classify(embedding)
             if semLabel != Self.fallbackLabel && semConf >= Self.semanticThreshold {
@@ -195,10 +199,14 @@ public final class IntentClassifierService: @unchecked Sendable {
         //   outputs: "classProbability" dict, "label" string
         let vec = tfidfVector(for: text)   // [Double], length == idf.count
         let n   = vec.count
+        // The exported model declares its "tfidf_vector" input as FLOAT64 (double).
+        // A neuralNetwork model rejects a mismatched dtype, so build a .double array —
+        // a .float32 array would make prediction throw and silently fall back to JSON.
         guard n > 0,
-              let arr = try? MLMultiArray(shape: [n as NSNumber], dataType: .float32)
+              let arr = try? MLMultiArray(shape: [n as NSNumber], dataType: .double)
         else { return nil }
-        for i in 0..<n { arr[i] = NSNumber(value: Float(vec[i])) }
+        let arrPtr = arr.dataPointer.assumingMemoryBound(to: Double.self)
+        for i in 0..<n { arrPtr[i] = vec[i] }
 
         guard
             let input    = try? MLDictionaryFeatureProvider(dictionary: [

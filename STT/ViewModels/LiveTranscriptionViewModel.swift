@@ -44,8 +44,10 @@ public final class LiveTranscriptionViewModel {
     // MARK: - Private
 
     private let coordinator: TranscriptionCoordinator
-    private let classifier = IntentClassifierService.shared
-    private let nlu = NLUEngine()
+    // Lazy so the throwaway view models SwiftUI builds on every re-render (see the
+    // note in `init`) don't construct the NLU stack on the main thread. The retained
+    // instance builds it on first use, after `activate()` has warmed it in background.
+    private lazy var nlu = NLUEngine()
     private let speaker = ConversationSpeaker()
     /// Accumulates the spoken text across a multi-turn exchange so the final card
     /// shows the complete phrase (e.g. "remind me" + "take medication" + "tomorrow").
@@ -79,6 +81,10 @@ public final class LiveTranscriptionViewModel {
         coordinator.silenceConfiguration = autoStopOnSilence ? .singleUtterance : .disabled
         speaker.onFinish = { [weak self] in self?.handleSpeechFinished() }
         speaker.onCancel = { [weak self] in self?.handleSpeechCancelled() }
+
+        // Warm the CoreML models off the main thread so the first utterance
+        // doesn't pay the model-load cost mid-conversation.
+        Task.detached(priority: .userInitiated) { _ = IntentClassifierService.shared }
     }
 
     /// Called when the assistant finishes speaking normally. Decides whether to resume.

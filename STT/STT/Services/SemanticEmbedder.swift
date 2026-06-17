@@ -19,7 +19,9 @@ import Foundation
 
 /// Embeds text into a 384-dimensional L2-normalised Float vector
 /// using MiniLM-L6-v2 via CoreML (Apple Neural Engine on A12+).
-final class SemanticEmbedder {
+// Immutable after init (model + vocab are `let`), so safe to hand across the
+// background load Task in IntentClassifierService.
+final class SemanticEmbedder: @unchecked Sendable {
 
     private let model: MLModel
     private let vocab: [String: Int]
@@ -68,10 +70,16 @@ final class SemanticEmbedder {
               let typeArray = try? MLMultiArray(shape: [1, n as NSNumber], dataType: .int32)
         else { return nil }
 
+        // Write straight into the backing buffers — the arrays are freshly
+        // allocated and contiguous, so element stride is 1. Avoids ~3n NSNumber
+        // boxing allocations per call.
+        let idsPtr  = idsArray.dataPointer.assumingMemoryBound(to: Int32.self)
+        let maskPtr = maskArray.dataPointer.assumingMemoryBound(to: Int32.self)
+        let typePtr = typeArray.dataPointer.assumingMemoryBound(to: Int32.self)
         for i in 0..<n {
-            idsArray[[0, i] as [NSNumber]]  = NSNumber(value: inputIDs[i])
-            maskArray[[0, i] as [NSNumber]] = NSNumber(value: mask[i])
-            typeArray[[0, i] as [NSNumber]] = NSNumber(value: tokenTypeIDs[i])
+            idsPtr[i]  = inputIDs[i]
+            maskPtr[i] = mask[i]
+            typePtr[i] = tokenTypeIDs[i]
         }
 
         guard let featureProvider = try? MLDictionaryFeatureProvider(dictionary: [
@@ -157,19 +165,55 @@ final class SemanticEmbedder {
         var pooled      = [Float](repeating: 0, count: dim)
         var totalWeight: Float = 0
 
-        for pos in 0..<seqLen {
-            let w = Float(mask[pos])
-            totalWeight += w
-            for d in 0..<dim {
-                let idx: [NSNumber] = [0, NSNumber(value: pos), NSNumber(value: d)]
-                pooled[d] += hidden[idx].floatValue * w
+        // The output is [1, seq, dim]. Read it through the raw backing buffer using
+        // the model's declared strides instead of MLMultiArray subscripting, which
+        // boxes every element into an NSNumber (~seq*dim allocations per call).
+        let strides   = hidden.strides.map { $0.intValue }
+        let rowStride = strides.count >= 3 ? strides[1] : dim
+        let colStride = strides.count >= 3 ? strides[2] : 1
+
+        func pool<T: BinaryFloatingPoint>(_ base: UnsafeMutablePointer<T>) {
+            for pos in 0..<seqLen {
+                let w = Float(mask[pos])
+                guard w != 0 else { continue }
+                totalWeight += w
+                let row = pos * rowStride
+                for d in 0..<dim {
+                    pooled[d] += Float(base[row + d * colStride]) * w
+                }
             }
         }
-        if totalWeight > 0 { pooled = pooled.map { $0 / totalWeight } }
+
+        func poolBySubscript() {
+            for pos in 0..<seqLen {
+                let w = Float(mask[pos])
+                guard w != 0 else { continue }
+                totalWeight += w
+                for d in 0..<dim {
+                    pooled[d] += hidden[[0, NSNumber(value: pos), NSNumber(value: d)]].floatValue * w
+                }
+            }
+        }
+
+        // NOTE: MLMultiArrayDataType.float16 is an iOS 16+ symbol, so it must be
+        // referenced only inside an availability guard (not a bare switch case).
+        // Pre-iOS16, CoreML hands back FP16 outputs as .float32 anyway.
+        let dt = hidden.dataType
+        if dt == .float32 {
+            pool(hidden.dataPointer.assumingMemoryBound(to: Float.self))
+        } else if dt == .double {
+            pool(hidden.dataPointer.assumingMemoryBound(to: Double.self))
+        } else if #available(iOS 16.0, *), dt == .float16 {
+            pool(hidden.dataPointer.assumingMemoryBound(to: Float16.self))
+        } else {
+            poolBySubscript()
+        }
+
+        if totalWeight > 0 { for d in 0..<dim { pooled[d] /= totalWeight } }
 
         // L2 normalise — mandatory; the head was trained on normalised embeddings
         let norm = sqrt(pooled.reduce(0) { $0 + $1 * $1 })
-        if norm > 0 { pooled = pooled.map { $0 / norm } }
+        if norm > 0 { for d in 0..<dim { pooled[d] /= norm } }
         return pooled
     }
 }
