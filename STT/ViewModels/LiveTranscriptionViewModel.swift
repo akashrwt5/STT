@@ -47,7 +47,9 @@ public final class LiveTranscriptionViewModel {
     // Lazy so the throwaway view models SwiftUI builds on every re-render (see the
     // note in `init`) don't construct the NLU stack on the main thread. The retained
     // instance builds it on first use, after `activate()` has warmed it in background.
-    private lazy var nlu = NLUEngine()
+    // @ObservationIgnored: keeps it a real stored property (the @Observable macro
+    // turns tracked vars into computed ones, which can't be `lazy`); nlu never drives UI.
+    @ObservationIgnored private lazy var nlu = NLUEngine()
     private let speaker = ConversationSpeaker()
     /// Accumulates the spoken text across a multi-turn exchange so the final card
     /// shows the complete phrase (e.g. "remind me" + "take medication" + "tomorrow").
