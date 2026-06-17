@@ -1,0 +1,12 @@
+{
+    "fileFormatVersion": "1.0.0",
+    "itemInfoEntries": {
+        "F33B48DC-3426-48B6-B6FC-48A53C97399B": {
+            "author": "com.apple.CoreML",
+            "description": "CoreML Model Specification",
+            "name": "model.mlmodel",
+            "path": "com.apple.CoreML/model.mlmodel"
+        }
+    },
+    "rootModelIdentifier": "F33B48DC-3426-48B6-B6FC-48A53C97399B"
+}
