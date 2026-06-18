@@ -220,9 +220,18 @@ public final class NLUEngine: @unchecked Sendable {
     /// the engine prompts for the time; a later bare-time answer ("3pm") is
     /// anchored to that parked day so "tomorrow" is not lost.
     private func resolveDateTime(_ text: String) -> (iso: String?, filled: Bool) {
-        let anchor = session.partialDateTime.flatMap { Self.parseLocalISO($0) }
-        guard let match = entities.extractDateTime(text, now: anchor ?? Date()) else {
+        // Probe with the real clock first. This reveals whether the answer
+        // carries its OWN day ("tomorrow at 9am") — in which case it wins and we
+        // must NOT anchor, or the parked day would advance.
+        guard var match = entities.extractDateTime(text, now: Date()) else {
             return (nil, false)
+        }
+        // Bare time with no day of its own — anchor it to the parked day so
+        // "tomorrow" is preserved (resolve against that day's midnight).
+        if !match.explicitDay,
+           let parked = session.partialDateTime.flatMap({ Self.parseLocalISO($0) }),
+           let anchored = entities.extractDateTime(text, now: parked) {
+            match = anchored
         }
         if match.timeExplicit {
             session.partialDateTime = nil

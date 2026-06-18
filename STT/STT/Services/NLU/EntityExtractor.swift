@@ -148,6 +148,10 @@ public final class EntityExtractor: @unchecked Sendable {
         public let iso: String
         public let span: String
         public let timeExplicit: Bool
+        /// True when the text named a day ("tomorrow", "friday"). The engine uses
+        /// this so a follow-up answer that repeats a day wins over a parked day
+        /// instead of anchoring onto it (which would advance the date).
+        public let explicitDay: Bool
     }
 
     public func extractDateTime(_ text: String, now: Date = Date()) -> DateTimeMatch? {
@@ -168,19 +172,21 @@ public final class EntityExtractor: @unchecked Sendable {
             default: break
             }
             if let date = cal.date(byAdding: comps, to: now) {
-                return DateTimeMatch(iso: isoMinutes(date), span: m.group(0), timeExplicit: true)
+                return DateTimeMatch(iso: isoMinutes(date), span: m.group(0),
+                                     timeExplicit: true, explicitDay: false)
             }
         }
 
         // Base day: tomorrow / today / tonight / weekday
         var baseDay = now
         var span: String?
+        var explicitDay = false
         if matchesWholeWord("tomorrow", in: t) {
             baseDay = cal.date(byAdding: .day, value: 1, to: now) ?? now
-            span = "tomorrow"
+            span = "tomorrow"; explicitDay = true
         } else if matchesWholeWord("today", in: t) || matchesWholeWord("tonight", in: t) {
             baseDay = now
-            span = "today"
+            span = "today"; explicitDay = true
         } else {
             let nowWeekday = (cal.component(.weekday, from: now) + 5) % 7 // Mon=0..Sun=6
             for (i, wd) in Self.weekdays.enumerated() {
@@ -188,7 +194,7 @@ public final class EntityExtractor: @unchecked Sendable {
                     var ahead = (i - nowWeekday) % 7
                     if ahead <= 0 { ahead += 7 }
                     baseDay = cal.date(byAdding: .day, value: ahead, to: now) ?? now
-                    span = wd
+                    span = wd; explicitDay = true
                     break
                 }
             }
@@ -235,7 +241,8 @@ public final class EntityExtractor: @unchecked Sendable {
             date = cal.date(byAdding: .day, value: 1, to: date) ?? date
         }
 
-        return DateTimeMatch(iso: isoMinutes(date), span: span ?? "", timeExplicit: timeExplicit)
+        return DateTimeMatch(iso: isoMinutes(date), span: span ?? "",
+                             timeExplicit: timeExplicit, explicitDay: explicitDay)
     }
 
     // MARK: - Topic stripping (for open slots)
