@@ -54,6 +54,11 @@ public final class IntentClassifierService: @unchecked Sendable {
     private let coef: [[Double]]
     private let intercept: [Double]
 
+    /// Per-class isotonic calibration (device logit → server-calibrated prob),
+    /// exported by export_ios_weights.py. `nil` for older bundles, in which case
+    /// Stage 2 falls back to plain softmax. See `calibratedProbs(from:)`.
+    private let calibrationMaps: [(x: [Double], y: [Double])]?
+
     // MARK: - Stage 3
 
     // The MiniLM embedder loads a ~17 MB CoreML model and a 30k-line vocab.
@@ -106,6 +111,21 @@ public final class IntentClassifierService: @unchecked Sendable {
         confGapThreshold = obj["conf_gap_threshold"] as? Double ?? 0.20
         genaiBaseURL     = obj["genai_base_url"]     as? String ?? ""
 
+        // Optional isotonic calibration tables. Each map is a clamped
+        // piecewise-linear curve (x = logits, y = calibrated probabilities)
+        // aligned with `labels`. Only used when the count matches.
+        if let cal  = obj["calibration"] as? [String: Any],
+           let rows = cal["maps"] as? [[String: Any]],
+           rows.count == labels.count {
+            let parsed: [(x: [Double], y: [Double])] = rows.map {
+                (($0["x"] as? [Double]) ?? [], ($0["y"] as? [Double]) ?? [])
+            }
+            calibrationMaps = parsed.allSatisfy { !$0.x.isEmpty && $0.x.count == $0.y.count }
+                ? parsed : nil
+        } else {
+            calibrationMaps = nil
+        }
+
         // -- Stage 3: semantic rescue --
         // Load the heavy MiniLM embedder off the main thread; the SemanticHead
         // is a tiny JSON linear layer so it stays synchronous.
@@ -128,7 +148,7 @@ public final class IntentClassifierService: @unchecked Sendable {
             _ = await embedder.embed("hello")
         }
         if let model = coreMLModel {
-            _ = coreMLClassify("hello", model: model)
+            _ = coreMLProbabilities("hello", model: model)
         }
     }
 
@@ -172,14 +192,18 @@ public final class IntentClassifierService: @unchecked Sendable {
     /// Classify and apply confidence/gap thresholds, returning an `IntentResult`.
     /// Prefer `classifyAsync` from async contexts for full semantic rescue.
     public func predict(_ text: String) -> IntentResult {
-        let (label, conf) = classify(text)
+        if let kw = keywordMatcher.match(text) {
+            return .intent(label: kw.label, confidence: kw.confidence)
+        }
+        let (probs, top) = stage2Scores(text)
+        guard !probs.isEmpty else { return .genai(url: genaiURL(for: text), confidence: 0.0) }
+        let conf = probs[top]
         if conf >= confThreshold {
-            let probs  = softmax(stage2Logits(text))
-            var sorted = probs.enumerated().map { ($0.offset, $0.element) }
-            sorted.sort { $0.1 > $1.1 }
-            let gap = conf - (sorted.count > 1 ? sorted[1].1 : 0.0)
-            if gap >= confGapThreshold {
-                return .intent(label: label, confidence: conf)
+            // Gap to the strongest competing class (the predicted label is the
+            // base-model argmax, which may not be the calibrated argmax).
+            let runnerUp = probs.indices.filter { $0 != top }.map { probs[$0] }.max() ?? 0.0
+            if conf - runnerUp >= confGapThreshold {
+                return .intent(label: labels[top], confidence: conf)
             }
         }
         return .genai(url: genaiURL(for: text), confidence: conf)
@@ -193,23 +217,79 @@ public final class IntentClassifierService: @unchecked Sendable {
 
     // MARK: - Stage 2 implementation
 
-    /// Tries CoreML first; falls back to pure-Swift TF-IDF + LogReg.
+    /// Returns the top intent and its (calibrated, when available) confidence.
     private func stage2Classify(_ text: String) -> (label: String, confidence: Double) {
-        if let model = coreMLModel, let result = coreMLClassify(text, model: model) {
-            return result
-        }
-        // JSON weights fallback
-        let probs = softmax(tfidfLogits(text))
-        let top   = probs.indices.max(by: { probs[$0] < probs[$1] })!
+        let (probs, top) = stage2Scores(text)
+        guard !probs.isEmpty else { return (Self.fallbackLabel, 0.0) }
         return (labels[top], probs[top])
+    }
+
+    /// Per-class Stage-2 probabilities (aligned with `labels`) plus the index of
+    /// the predicted intent.
+    ///
+    /// The predicted intent is always the base model's argmax (the softmax/logit
+    /// winner). When isotonic calibration tables are present we additionally
+    /// recalibrate the probabilities so the device's *confidence* matches the
+    /// server's CalibratedClassifierCV — without this, correct mid-confidence
+    /// intents fall below the 0.70 threshold. Crucially we DON'T let calibration
+    /// re-rank: each class has its own isotonic map, and the catch-all "Default
+    /// Fallback Intent" can otherwise steal probability mass after normalisation
+    /// and flip a confident command to a fallback. Keeping the label on the base
+    /// argmax preserves the model's decision while fixing only the confidence.
+    private func stage2Scores(_ text: String) -> (probs: [Double], top: Int) {
+        if let maps = calibrationMaps {
+            let logits = logitsForScoring(text)
+            // Label comes from the raw logits; calibration only rescales confidence.
+            let top = logits.indices.max(by: { logits[$0] < logits[$1] }) ?? 0
+            return (calibratedProbs(from: logits, maps: maps), top)
+        }
+        if let model = coreMLModel, let probs = coreMLProbabilities(text, model: model) {
+            return (probs, probs.indices.max(by: { probs[$0] < probs[$1] }) ?? 0)
+        }
+        let probs = softmax(tfidfLogits(text))
+        return (probs, probs.indices.max(by: { probs[$0] < probs[$1] }) ?? 0)
+    }
+
+    /// Logits for calibration — CoreML's linear layer if the model exposes a
+    /// "logits" output, otherwise the pure-Swift TF-IDF + LogReg computation.
+    private func logitsForScoring(_ text: String) -> [Double] {
+        if let model = coreMLModel, let logits = coreMLLogits(text, model: model) {
+            return logits
+        }
+        return tfidfLogits(text)
+    }
+
+    /// Apply the per-class isotonic maps to logits and renormalise to a
+    /// probability distribution. Falls back to softmax if the maps degenerate.
+    private func calibratedProbs(from logits: [Double],
+                                 maps: [(x: [Double], y: [Double])]) -> [Double] {
+        guard logits.count == maps.count else { return softmax(logits) }
+        let calibrated = logits.indices.map { interpolate(logits[$0], maps[$0].x, maps[$0].y) }
+        let sum = calibrated.reduce(0, +)
+        return sum > 0 ? calibrated.map { $0 / sum } : softmax(logits)
+    }
+
+    /// Clamped piecewise-linear interpolation over sorted breakpoints `xs`→`ys`.
+    private func interpolate(_ x: Double, _ xs: [Double], _ ys: [Double]) -> Double {
+        guard let first = xs.first, let firstY = ys.first else { return 0 }
+        if x <= first { return firstY }
+        if x >= xs[xs.count - 1] { return ys[ys.count - 1] }
+        // xs is ascending; find the bracketing segment.
+        var lo = 0, hi = xs.count - 1
+        while hi - lo > 1 {
+            let mid = (lo + hi) / 2
+            if xs[mid] <= x { lo = mid } else { hi = mid }
+        }
+        let span = xs[hi] - xs[lo]
+        guard span > 0 else { return ys[lo] }
+        let t = (x - xs[lo]) / span
+        return ys[lo] + t * (ys[hi] - ys[lo])
     }
 
     // MARK: - CoreML Stage 2
 
-    private func coreMLClassify(_ text: String, model: MLModel) -> (String, Double)? {
-        // CoreML model (generated by export_coreml.py via NeuralNetworkBuilder) expects:
-        //   input  : "tfidf_vector" — Float32 array of length n_features (same as idf count)
-        //   outputs: "classProbability" dict, "label" string
+    /// Builds the CoreML input feature provider for `text`, or nil on failure.
+    private func coreMLInput(for text: String) -> MLDictionaryFeatureProvider? {
         let vec = tfidfVector(for: text)   // [Double], length == idf.count
         let n   = vec.count
         // The exported model declares its "tfidf_vector" input as FLOAT64 (double).
@@ -220,34 +300,44 @@ public final class IntentClassifierService: @unchecked Sendable {
         else { return nil }
         let arrPtr = arr.dataPointer.assumingMemoryBound(to: Double.self)
         for i in 0..<n { arrPtr[i] = vec[i] }
+        return try? MLDictionaryFeatureProvider(dictionary: [
+            "tfidf_vector": MLFeatureValue(multiArray: arr)
+        ])
+    }
 
+    /// CoreML softmax probabilities aligned with `labels` (uncalibrated).
+    private func coreMLProbabilities(_ text: String, model: MLModel) -> [Double]? {
         guard
-            let input    = try? MLDictionaryFeatureProvider(dictionary: [
-                "tfidf_vector": MLFeatureValue(multiArray: arr)
-            ]),
+            let input    = coreMLInput(for: text),
             let output   = try? model.prediction(from: input),
             // dictionaryValue returns [AnyHashable: Any] with NSNumber probability values.
             let probDict = output.featureValue(for: "classProbability")?.dictionaryValue
                            as? [String: NSNumber]
         else { return nil }
+        // Re-align the dictionary into `labels` order so argmax stays consistent.
+        return labels.map { probDict[$0]?.doubleValue ?? 0.0 }
+    }
 
-        guard let best = probDict.max(by: { $0.value.doubleValue < $1.value.doubleValue })
+    /// CoreML raw logits aligned with `labels`, if the model exposes a "logits"
+    /// output (added by export_coreml.py). Returns nil for older bundles, so the
+    /// caller falls back to the pure-Swift logit computation.
+    private func coreMLLogits(_ text: String, model: MLModel) -> [Double]? {
+        guard
+            let input  = coreMLInput(for: text),
+            let output = try? model.prediction(from: input),
+            let logits = output.featureValue(for: "logits")?.multiArrayValue,
+            logits.count == labels.count
         else { return nil }
-        return (best.key, best.value.doubleValue)
+        return (0..<logits.count).map { logits[$0].doubleValue }
     }
 
     // MARK: - JSON weights TF-IDF (Stage 2 fallback)
 
     private func tfidfLogits(_ text: String) -> [Double] {
+        let vec = tfidfVector(for: text)   // compute once, reuse across all classes
         return coef.indices.map { c in
-            zip(coef[c], tfidfVector(for: text)).reduce(intercept[c]) { $0 + $1.0 * $1.1 }
+            zip(coef[c], vec).reduce(intercept[c]) { $0 + $1.0 * $1.1 }
         }
-    }
-
-    // Used only by predict() gap check when CoreML is unavailable.
-    private func stage2Logits(_ text: String) -> [Double] {
-        if coreMLModel != nil { return [] }  // gap check not applicable on CoreML path
-        return tfidfLogits(text)
     }
 
     private func tfidfVector(for text: String) -> [Double] {
