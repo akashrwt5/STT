@@ -116,8 +116,9 @@ public final class NLUEngine: @unchecked Sendable {
         if let awaiting = session.awaitingSlot,
            let slot = cfg.slots.first(where: { $0.name == awaiting }) {
             var value = entities.extract(slot.entity, from: text)
-            // Open free-text slots (e.g. @remind) accept the raw answer as a fallback.
-            if value == nil && slot.entity == "remind" {
+            // Open free-text entities (e.g. @remind) accept the raw answer as a
+            // fallback — a nil structured extraction is expected, not a failure.
+            if value == nil && entities.isOpen(slot.entity) {
                 value = text.trimmingCharacters(in: .whitespaces)
             }
             if let value { session.pendingSlots[slot.name] = value }
