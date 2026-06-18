@@ -113,19 +113,27 @@ public final class NLUEngine: @unchecked Sendable {
         }
 
         // The utterance answers the slot we last prompted for.
-        if let awaiting = session.awaitingSlot,
+        let awaiting = session.awaitingSlot
+        if let awaiting,
            let slot = cfg.slots.first(where: { $0.name == awaiting }) {
-            var value = entities.extract(slot.entity, from: text)
-            // Open free-text entities (e.g. @remind) accept the raw answer as a
-            // fallback — a nil structured extraction is expected, not a failure.
-            if value == nil && entities.isOpen(slot.entity) {
-                value = text.trimmingCharacters(in: .whitespaces)
+            if slot.entity == "sys.date-time" {
+                let (iso, filled) = resolveDateTime(text)
+                if filled, let iso { session.pendingSlots[slot.name] = iso }
+            } else {
+                var value = entities.extract(slot.entity, from: text)
+                // Open free-text entities (e.g. @remind) accept the raw answer as a
+                // fallback — a nil structured extraction is expected, not a failure.
+                if value == nil && entities.isOpen(slot.entity) {
+                    value = text.trimmingCharacters(in: .whitespaces)
+                }
+                if let value { session.pendingSlots[slot.name] = value }
             }
-            if let value { session.pendingSlots[slot.name] = value }
         }
 
-        // Opportunistically fill any other slots mentioned in the same answer.
-        extractAllSlots(cfg, text, into: &session.pendingSlots)
+        // Opportunistically fill OTHER slots mentioned in the same answer; skip the
+        // slot we just handled so a parked date-time isn't re-resolved (and the day
+        // double-advanced) by anchoring it to itself.
+        extractAllSlots(cfg, text, into: &session.pendingSlots, skip: awaiting)
         return advanceSlots(intent, cfg)
     }
 
@@ -187,13 +195,58 @@ public final class NLUEngine: @unchecked Sendable {
 
     // MARK: - Slot extraction helpers
 
-    private func extractAllSlots(_ cfg: IntentDef, _ text: String, into slots: inout [String: String]) {
-        for slot in cfg.slots where slots[slot.name] == nil {
+    private func extractAllSlots(_ cfg: IntentDef, _ text: String,
+                                 into slots: inout [String: String], skip: String? = nil) {
+        for slot in cfg.slots where slots[slot.name] == nil && slot.name != skip {
+            if slot.entity == "sys.date-time" {
+                // Only fill when a time was actually given; a day-only mention
+                // parks the day in session.partialDateTime and leaves the slot
+                // open so the engine prompts for the time.
+                let (iso, filled) = resolveDateTime(text)
+                if filled, let iso { slots[slot.name] = iso }
+                continue
+            }
             if let value = entities.extract(slot.entity, from: text) {
                 slots[slot.name] = value
             }
         }
     }
+
+    /// Resolve a date-time slot value from `text`.
+    ///
+    /// Returns `filled == true` only when an explicit time was given. When the
+    /// user supplies a day but no time, the resolved day is parked (at local
+    /// midnight) in `session.partialDateTime` and `(nil, false)` is returned so
+    /// the engine prompts for the time; a later bare-time answer ("3pm") is
+    /// anchored to that parked day so "tomorrow" is not lost.
+    private func resolveDateTime(_ text: String) -> (iso: String?, filled: Bool) {
+        let anchor = session.partialDateTime.flatMap { Self.parseLocalISO($0) }
+        guard let match = entities.extractDateTime(text, now: anchor ?? Date()) else {
+            return (nil, false)
+        }
+        if match.timeExplicit {
+            session.partialDateTime = nil
+            return (match.iso, true)
+        }
+        // Day given, no time — park the day at local midnight so a later answer
+        // like "6am" stays on this day instead of rolling forward.
+        if let day = Self.parseLocalISO(match.iso) {
+            var cal = Calendar(identifier: .gregorian)
+            cal.timeZone = .current
+            session.partialDateTime = Self.formatLocalISO(cal.startOfDay(for: day))
+        }
+        return (nil, false)
+    }
+
+    // Local wall-clock ISO (no zone), matching EntityExtractor.isoMinutes.
+    private static func localISOFormatter() -> DateFormatter {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm"
+        return f
+    }
+    private static func parseLocalISO(_ s: String) -> Date? { localISOFormatter().date(from: s) }
+    private static func formatLocalISO(_ d: Date) -> String { localISOFormatter().string(from: d) }
 
     /// Carrier phrases stripped to derive an open topic (e.g. "remind me to " → "").
     private static let carrierPatterns: [String] = [

@@ -30,6 +30,10 @@ public final class NLUSession {
     public var pendingSlots: [String: String] = [:]
     /// The specific slot whose prompt was last asked (the user's next utterance answers it).
     public var awaitingSlot: String?
+    /// When a date-time answer gives a day but no time ("tomorrow"), the resolved
+    /// day (ISO, local midnight) is parked here so the follow-up time answer can be
+    /// anchored to it, keeping the day instead of resolving against today.
+    public var partialDateTime: String?
 
     public init(sessionID: String) {
         self.sessionID = sessionID
@@ -65,6 +69,7 @@ public final class NLUSession {
         pendingIntent = nil
         pendingSlots = [:]
         awaitingSlot = nil
+        partialDateTime = nil
     }
 
     /// Full reset — drops contexts and slot-filling state. Used when starting over.

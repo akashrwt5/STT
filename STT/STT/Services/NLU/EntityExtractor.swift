@@ -140,7 +140,15 @@ public final class EntityExtractor: @unchecked Sendable {
                                    "friday", "saturday", "sunday"]
 
     /// Parsed date-time result with the ISO string and the matched text span.
-    public struct DateTimeMatch { public let iso: String; public let span: String }
+    /// `timeExplicit` is true when the user actually specified a time-of-day
+    /// (clock time, relative duration, or a named period like "morning"); false
+    /// when only a day was given and the time was defaulted. The engine uses it
+    /// to prompt for a missing time while keeping the resolved day.
+    public struct DateTimeMatch {
+        public let iso: String
+        public let span: String
+        public let timeExplicit: Bool
+    }
 
     public func extractDateTime(_ text: String, now: Date = Date()) -> DateTimeMatch? {
         let t = text.lowercased().trimmingCharacters(in: .whitespaces)
@@ -160,7 +168,7 @@ public final class EntityExtractor: @unchecked Sendable {
             default: break
             }
             if let date = cal.date(byAdding: comps, to: now) {
-                return DateTimeMatch(iso: isoMinutes(date), span: m.group(0))
+                return DateTimeMatch(iso: isoMinutes(date), span: m.group(0), timeExplicit: true)
             }
         }
 
@@ -210,6 +218,10 @@ public final class EntityExtractor: @unchecked Sendable {
 
         guard hour != nil || span != nil else { return nil }
 
+        // A day with no clock/named time is a day-only mention — keep the day but
+        // flag the time as defaulted so the engine can prompt for it.
+        let timeExplicit = hour != nil
+
         var comps = cal.dateComponents([.year, .month, .day], from: baseDay)
         comps.hour = hour ?? 9
         comps.minute = minute ?? 0
@@ -223,7 +235,7 @@ public final class EntityExtractor: @unchecked Sendable {
             date = cal.date(byAdding: .day, value: 1, to: date) ?? date
         }
 
-        return DateTimeMatch(iso: isoMinutes(date), span: span ?? "")
+        return DateTimeMatch(iso: isoMinutes(date), span: span ?? "", timeExplicit: timeExplicit)
     }
 
     // MARK: - Topic stripping (for open slots)
