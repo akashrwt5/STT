@@ -52,10 +52,20 @@ public final class AudioSessionManager {
 
     // MARK: - Setup
 
-    /// Configures the audio session for high-quality recording.
+    /// Configures the audio session for combined recording + playback.
     ///
-    /// Sets category to `.record` and mode to `.measurement` so the system applies
-    /// minimal signal processing, which yields cleaner input for the speech analyzer.
+    /// Uses a single `.playAndRecord` / `.spokenAudio` configuration shared by the
+    /// mic and the TTS voice. This is deliberate: previously the mic used
+    /// `.record`/`.measurement` and TTS flipped the session to `.playAndRecord` on
+    /// every prompt. That per-turn category churn left the session contested and made
+    /// `AVSpeechSynthesizer` silently drop the second prompt (it fired `didFinish`
+    /// without `didStart`, so no audio played). Keeping one category eliminates the
+    /// churn — `ConversationSpeaker` only needs to re-activate, never re-categorise.
+    ///
+    /// Trade-off: `.playAndRecord` cannot use `.measurement` mode, so STT input gets
+    /// the default signal processing rather than the minimal-processing path.
+    /// `.spokenAudio` is appropriate for speech and is the same configuration TTS
+    /// already used successfully.
     ///
     /// - Throws: `TranscriptionError.audioSessionSetupFailed` if configuration fails.
     ///
@@ -68,11 +78,13 @@ public final class AudioSessionManager {
             // AVAudioSession is a thread-safe singleton; safe to use off the main actor.
             nonisolated(unsafe) let session = self.session
             try await Task.detached(priority: .userInitiated) {
+                // .defaultToSpeaker routes TTS to the loudspeaker (not the earpiece).
+                // .duckOthers lowers other apps' audio while we speak.
                 // .allowBluetooth enables Bluetooth HFP input (hearing aids, headsets).
-                // .allowBluetoothA2DP is intentionally excluded — it is an output-only
-                // protocol and is incompatible with the .record category, causing
-                // "the operation could not be completed" at runtime.
-                try session.setCategory(.record, mode: .measurement, options: [.allowBluetooth])
+                // .allowBluetoothA2DP is intentionally excluded — it is output-only and
+                // incompatible with a record-capable category.
+                try session.setCategory(.playAndRecord, mode: .spokenAudio,
+                                        options: [.defaultToSpeaker, .duckOthers, .allowBluetooth])
                 try session.setActive(true)
             }.value
 
