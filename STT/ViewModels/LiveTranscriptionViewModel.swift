@@ -166,8 +166,11 @@ public final class LiveTranscriptionViewModel {
         }
     }
 
-    private func stopRecording() {
-        coordinator.stopLiveTranscription()
+    /// - Parameter deactivateSession: forwarded to the coordinator. The TTS handoff
+    ///   passes `false` so the shared audio session stays active and the prompt can be
+    ///   spoken immediately, without a deactivate/re-activate round-trip.
+    private func stopRecording(deactivateSession: Bool = true) {
+        coordinator.stopLiveTranscription(deactivateSession: deactivateSession)
         isListening = false
         stopAudioLevelAnimation()
     }
@@ -273,16 +276,18 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
         speakSerialized(message, receivedAt: receivedAt)
     }
 
-    /// Stops the mic, waits for the audio session/engine to fully tear down, then speaks.
+    /// Stops the mic engine, waits for the recognizer to drain, then speaks.
     ///
-    /// The wait is essential: without it the TTS playback session and the recording
-    /// session race over the shared `AVAudioSession`, leaving the engine started on a
-    /// dirty session (no buffers → frozen transcript) on the subsequent restart. Setting
-    /// `isSpeaking` synchronously also makes the `didReceiveFinalResult` guard drop any
-    /// audio captured during the handoff (no self-transcription).
+    /// We stop recording with `deactivateSession: false`: the recognizer and the mic
+    /// engine are stopped (so the recognizer can't transcribe our own TTS), but the
+    /// shared `.playAndRecord` session stays **active** so the synthesizer speaks
+    /// immediately on the live session — no deactivate/re-activate round-trip (~100ms
+    /// saved). The wait still serialises the handoff so we never start the synthesizer
+    /// while the engine is mid-stop. Setting `isSpeaking` synchronously also makes the
+    /// `didReceiveFinalResult` guard drop any audio captured during the handoff.
     private func speakSerialized(_ text: String, receivedAt: CFAbsoluteTime? = nil) {
         isSpeaking = true
-        if isListening { stopRecording() }
+        if isListening { stopRecording(deactivateSession: false) }
         Task { [weak self] in
             guard let self else { return }
             let teardownStart = CFAbsoluteTimeGetCurrent()

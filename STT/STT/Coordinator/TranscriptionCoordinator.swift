@@ -179,7 +179,15 @@ public final class TranscriptionCoordinator {
     /// Permits stopping from any pre-active state too (e.g. while permissions are being
     /// requested or audio is still being prepared on first launch), so a stop tap is
     /// never silently ignored.
-    public func stopLiveTranscription() {
+    ///
+    /// - Parameter deactivateSession: when `true` (default) the shared `AVAudioSession`
+    ///   is deactivated as part of teardown. The TTS handoff passes `false`: it stops
+    ///   the recognizer and the mic engine (so the recognizer can't transcribe our own
+    ///   voice) but leaves the session **active**, so the synthesizer can speak
+    ///   immediately on the live session instead of waiting ~100ms for a
+    ///   deactivate/re-activate round-trip. Both paths use the same `.playAndRecord`
+    ///   category, so no reconfiguration is needed between them.
+    public func stopLiveTranscription(deactivateSession: Bool = true) {
         guard state != .idle, state != .stopping else { return }
         transition(to: .stopping)
         teardownTask = Task {
@@ -191,11 +199,13 @@ public final class TranscriptionCoordinator {
             activeProvider?.stop()
             activeProvider = nil
             let t1 = CFAbsoluteTimeGetCurrent()
-            sessionManager.tearDown()
+            if deactivateSession {
+                sessionManager.tearDown()
+            }
             let tearMs = (CFAbsoluteTimeGetCurrent() - t1) * 1000
             transition(to: .idle)
-            latencyLog.info("teardown: stopTranscribing=\(stopMs, format: .fixed(precision: 1))ms sessionTearDown=\(tearMs, format: .fixed(precision: 1))ms")
-            logger.info("Live transcription stopped.")
+            latencyLog.info("teardown: stopTranscribing=\(stopMs, format: .fixed(precision: 1))ms sessionTearDown=\(tearMs, format: .fixed(precision: 1))ms deactivated=\(deactivateSession)")
+            logger.info("Live transcription stopped (deactivateSession: \(deactivateSession)).")
         }
     }
 
