@@ -69,6 +69,9 @@ public final class TranscriptionCoordinator {
     /// result-collection loop can terminate deterministically (instead of polling state).
     private var fileCompletionHandler: (() -> Void)?
     private let logger = Logger(subsystem: "com.stt.module", category: "TranscriptionCoordinator")
+    /// TTS-latency teardown breakdown. Filter by subsystem com.stt.module, category
+    /// Latency. Logging only — no behaviour change.
+    private let latencyLog = Logger(subsystem: "com.stt.module", category: "Latency")
 
     // MARK: - Init
 
@@ -180,11 +183,18 @@ public final class TranscriptionCoordinator {
         guard state != .idle, state != .stopping else { return }
         transition(to: .stopping)
         teardownTask = Task {
+            // Latency instrumentation (logging only): split the teardown so we can see
+            // whether SpeechAnalyzer drain or AVAudioSession teardown dominates.
+            let t0 = CFAbsoluteTimeGetCurrent()
             await recognitionService.stopTranscribing()
+            let stopMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
             activeProvider?.stop()
             activeProvider = nil
+            let t1 = CFAbsoluteTimeGetCurrent()
             sessionManager.tearDown()
+            let tearMs = (CFAbsoluteTimeGetCurrent() - t1) * 1000
             transition(to: .idle)
+            latencyLog.info("teardown: stopTranscribing=\(stopMs, format: .fixed(precision: 1))ms sessionTearDown=\(tearMs, format: .fixed(precision: 1))ms")
             logger.info("Live transcription stopped.")
         }
     }

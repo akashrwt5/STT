@@ -57,6 +57,9 @@ public final class LiveTranscriptionViewModel {
     private var levelTimer: Timer?
     private var animPhase: Double = 0
     private let logger = Logger(subsystem: "com.stt.module", category: "LiveTranscriptionViewModel")
+    /// Per-stage TTS latency timings. Filter Console.app / `log stream` by
+    /// subsystem com.stt.module, category Latency. Logging only — no behaviour change.
+    private let latencyLog = Logger(subsystem: "com.stt.module", category: "Latency")
 
     // MARK: - Init
 
@@ -205,13 +208,18 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
         guard !isSpeaking else { return }
 
         transcript = text
+        // Latency instrumentation: stamp the moment the final STT result arrived so
+        // every downstream stage can report its delta. Logging only.
+        let receivedAt = CFAbsoluteTimeGetCurrent()
         // Route the utterance through the multi-turn NLU engine. Inference runs off the
         // main thread; the engine drives the conversation serially (one turn at a time).
         Task.detached(priority: .userInitiated) { [nlu, weak self] in
             let response = await nlu.handle(text)
+            let nluMs = (CFAbsoluteTimeGetCurrent() - receivedAt) * 1000
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.apply(response, utterance: text)
+                self.latencyLog.info("NLU handle: \(nluMs, format: .fixed(precision: 1))ms")
+                self.apply(response, utterance: text, receivedAt: receivedAt)
             }
         }
     }
@@ -222,7 +230,7 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
     /// confirmation turns only drive the follow-up popup — they do NOT create cards.
     /// A single consolidated card is emitted when the intent is finally fulfilled
     /// (or falls back to GenAI), carrying the full spoken text and extracted slots.
-    private func apply(_ response: NLUResponse, utterance: String) {
+    private func apply(_ response: NLUResponse, utterance: String, receivedAt: CFAbsoluteTime? = nil) {
         conversationTranscripts.append(utterance)
 
         switch response {
@@ -230,18 +238,18 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
             // Still collecting — surface the question, speak it, no card yet.
             pendingQuestion = question
             collectedSlots = filled
-            ask(question)
+            ask(question, receivedAt: receivedAt)
 
         case .confirm(_, _, let question):
             pendingQuestion = question
-            ask(question)
+            ask(question, receivedAt: receivedAt)
 
         case .fulfill(let intent, _, let parameters, let message, let confidence, let semanticRescue):
             appendConversationCard(
                 intent: .intent(label: intent, confidence: confidence, semanticRescue: semanticRescue),
                 slots: parameters.isEmpty ? nil : parameters
             )
-            announce(message)
+            announce(message, receivedAt: receivedAt)
 
         case .fallback(let url, let confidence):
             appendConversationCard(
@@ -253,16 +261,16 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
 
     /// Asks a follow-up question. On normal completion, `handleSpeechFinished`
     /// auto-restarts listening to capture the answer.
-    private func ask(_ question: String) {
+    private func ask(_ question: String, receivedAt: CFAbsoluteTime? = nil) {
         guard voiceConversationEnabled else { return }
-        speakSerialized(question)
+        speakSerialized(question, receivedAt: receivedAt)
     }
 
     /// Speaks a terminal fulfillment message (e.g. "Reminder created.").
     /// Does NOT auto-listen afterward — the conversation is done.
-    private func announce(_ message: String) {
+    private func announce(_ message: String, receivedAt: CFAbsoluteTime? = nil) {
         guard voiceConversationEnabled, !message.isEmpty else { return }
-        speakSerialized(message)
+        speakSerialized(message, receivedAt: receivedAt)
     }
 
     /// Stops the mic, waits for the audio session/engine to fully tear down, then speaks.
@@ -272,16 +280,19 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
     /// dirty session (no buffers → frozen transcript) on the subsequent restart. Setting
     /// `isSpeaking` synchronously also makes the `didReceiveFinalResult` guard drop any
     /// audio captured during the handoff (no self-transcription).
-    private func speakSerialized(_ text: String) {
+    private func speakSerialized(_ text: String, receivedAt: CFAbsoluteTime? = nil) {
         isSpeaking = true
         if isListening { stopRecording() }
         Task { [weak self] in
             guard let self else { return }
+            let teardownStart = CFAbsoluteTimeGetCurrent()
             await self.coordinator.waitForTeardown()
+            let teardownMs = (CFAbsoluteTimeGetCurrent() - teardownStart) * 1000
+            self.latencyLog.info("waitForTeardown: \(teardownMs, format: .fixed(precision: 1))ms")
             // Re-check: a manual stop / clearResults during teardown may have cancelled
             // the conversation. `speaker.stop()` in clearResults sets isSpeaking = false.
             guard self.isSpeaking else { return }
-            self.speaker.speak(text, locale: self.currentLocale)
+            self.speaker.speak(text, locale: self.currentLocale, requestedAt: receivedAt)
         }
     }
 
