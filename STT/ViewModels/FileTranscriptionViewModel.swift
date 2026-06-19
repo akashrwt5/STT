@@ -108,11 +108,9 @@ public final class FileTranscriptionViewModel: NSObject {
                 progress = 1.0
                 logger.info("File transcription complete in \(Date().timeIntervalSince(startTime))s")
 
-                // Classify intent on background thread
-                let classified = await Task.detached(priority: .userInitiated) { [classifier] in
-                    classifier.predict(result)
-                }.value
-                intentResult = classified
+                // Classify intent off the main thread — `classifier` is an actor,
+                // so the `await` hops to its executor without a detached task.
+                intentResult = await classifier.predict(result)
 
             } catch let err as TranscriptionError {
                 self.error = err

@@ -9,13 +9,16 @@
 //   2. SLOT FILLING — a mid-collection intent
 //   3. CLASSIFY     — a fresh turn
 //
-// Thread-safety: a single NLUEngine instance is driven from one conversation
-// (the live transcription view model) on the main actor. Heavy classification
-// is delegated to IntentClassifierService, which is itself thread-safe.
+// Thread-safety: `NLUEngine` is an `actor`. Its methods run on the actor's own
+// serial executor (off the main thread), so heavy classification never blocks
+// the UI and the engine's mutable session state is automatically serialised —
+// no `@unchecked Sendable` and no manual `Task.detached` hop at the call site.
+// Callers on the main actor reach it with `await nlu.handle(...)`, which hops
+// off main for the duration of the call and back when it returns.
 
 import Foundation
 
-public final class NLUEngine: @unchecked Sendable {
+public actor NLUEngine {
 
     private let schema: NLUSchema
     private let classifier: IntentClassifierService
@@ -163,7 +166,7 @@ public final class NLUEngine: @unchecked Sendable {
         // doing so would drop every rescue (rescue conf 0.55–0.69 → false fallback).
         let outOfScope = intent == "OUT_OF_SCOPE" || intent == "Default Fallback Intent"
         if !rescued && (outOfScope || conf < schema.confidenceThreshold) {
-            return .fallback(url: classifier.genaiURL(for: text), confidence: conf)
+            return .fallback(url: await classifier.genaiURL(for: text), confidence: conf)
         }
 
         guard let cfg = schema.intents[intent] else {

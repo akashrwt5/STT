@@ -89,7 +89,9 @@ public final class LiveTranscriptionViewModel {
 
         // Warm the CoreML models off the main thread (load + ANE graph
         // specialization) so the first utterance doesn't pay the cold-start cost.
-        Task.detached(priority: .userInitiated) { await IntentClassifierService.shared.warmUp() }
+        // `warmUp()` is an actor method, so the `await` hops off the main thread on
+        // its own — a plain `Task` is enough (no `Task.detached` needed).
+        Task(priority: .userInitiated) { await IntentClassifierService.shared.warmUp() }
     }
 
     /// Called when the assistant finishes speaking normally. Decides whether to resume.
@@ -144,7 +146,8 @@ public final class LiveTranscriptionViewModel {
         conversationTranscripts.removeAll()
         isSpeaking = false
         speaker.stop()
-        nlu.reset()
+        // `reset()` is an actor method now; fire-and-forget the session cleanup.
+        Task { [nlu] in await nlu.reset() }
     }
 
     // MARK: - Private
@@ -216,7 +219,9 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
         let receivedAt = CFAbsoluteTimeGetCurrent()
         // Route the utterance through the multi-turn NLU engine. Inference runs off the
         // main thread; the engine drives the conversation serially (one turn at a time).
-        Task.detached(priority: .userInitiated) { [nlu, weak self] in
+        // `nlu` is an actor: `await nlu.handle(text)` runs inference off the main
+        // thread on its own, so a plain `Task` replaces the old detached hop.
+        Task(priority: .userInitiated) { [nlu, weak self] in
             let response = await nlu.handle(text)
             let nluMs = (CFAbsoluteTimeGetCurrent() - receivedAt) * 1000
             await MainActor.run { [weak self] in

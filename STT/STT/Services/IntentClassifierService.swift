@@ -32,7 +32,12 @@ public struct ClassificationResult: Sendable {
 
 // MARK: - Service
 
-public final class IntentClassifierService: @unchecked Sendable {
+// `actor` so its methods run on a serial executor off the main thread: callers
+// reach it with `await classifier.classifyAsync(...)`, which hops off main for
+// the call and back on return. This replaces the previous `@unchecked Sendable`
+// class + per-call `Task.detached` hop — the actor provides both off-main
+// execution and serialisation for free.
+public actor IntentClassifierService {
 
     // MARK: - Singleton
 
@@ -160,10 +165,9 @@ public final class IntentClassifierService: @unchecked Sendable {
             return ClassificationResult(label: kw.label, confidence: kw.confidence, semanticRescue: false)
         }
 
-        // Stage 2 — run off the current actor to avoid blocking the main thread
-        let (stage2Label, stage2Conf) = await Task.detached(priority: .userInitiated) { [self] in
-            self.stage2Classify(text)
-        }.value
+        // Stage 2 — already off the main thread: this method runs on the actor's
+        // own executor, so no extra detached hop is needed.
+        let (stage2Label, stage2Conf) = stage2Classify(text)
         let stage2Failed = stage2Label == Self.fallbackLabel || stage2Conf < confThreshold
 
         if !stage2Failed {
