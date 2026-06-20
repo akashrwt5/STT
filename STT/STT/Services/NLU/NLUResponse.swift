@@ -21,11 +21,17 @@ public enum NLUResponse: Sendable {
     /// Low confidence or out-of-scope — hand off to the GenAI fallback URL.
     case fallback(url: URL, confidence: Double)
 
+    /// The user switched topics mid slot-filling. `cancelledIntent` is the
+    /// abandoned flow; `result` is the outcome for the new intent (mirrors
+    /// Python NLUResult.interrupted_intent).
+    case interrupted(cancelledIntent: String, result: NLUResponse)
+
     /// The prompt/question the UI should surface this turn, if any.
     public var pendingQuestion: String? {
         switch self {
         case .prompt(_, let q, _):   return q
         case .confirm(_, _, let q):  return q
+        case .interrupted(_, let r): return r.pendingQuestion
         case .fulfill, .fallback:    return nil
         }
     }
@@ -33,8 +39,9 @@ public enum NLUResponse: Sendable {
     /// True when this turn finished a conversation (fulfilled or fell back).
     public var isTerminal: Bool {
         switch self {
-        case .fulfill, .fallback: return true
-        case .prompt, .confirm:   return false
+        case .fulfill, .fallback:    return true
+        case .interrupted(_, let r): return r.isTerminal
+        case .prompt, .confirm:      return false
         }
     }
 }

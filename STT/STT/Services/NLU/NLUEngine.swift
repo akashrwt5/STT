@@ -109,10 +109,31 @@ public actor NLUEngine {
 
     // MARK: - Slot filling (priority 2)
 
+    /// Confidence required for a new intent to interrupt an in-progress slot flow.
+    /// Higher than the base 0.70 to avoid abandoning a flow on an ambiguous answer.
+    /// Mirrors Python NLUEngine.INTERRUPT_THRESHOLD = 0.75.
+    private static let interruptThreshold: Double = 0.75
+
     private func handleSlotFilling(_ text: String) async -> NLUResponse {
         guard let intent = session.pendingIntent, let cfg = schema.intents[intent] else {
             session.resetSlotFilling()
             return await handleNewIntent(text)
+        }
+
+        // Re-classify every slot-filling turn. A different intent at high
+        // confidence means the user switched topics — abandon the pending flow
+        // and handle the new intent immediately (mirrors Python _handle_slot_filling).
+        let probe = await classifier.classifyAsync(text)
+        let isNewIntent = probe.label != intent
+            && probe.label != "Default Fallback Intent"
+            && probe.label != "OUT_OF_SCOPE"
+            && probe.confidence >= Self.interruptThreshold
+            && schema.intents[probe.label] != nil
+        if isNewIntent {
+            let abandoned = intent
+            session.resetSlotFilling()
+            let newResult = await handleNewIntent(text)
+            return .interrupted(cancelledIntent: abandoned, result: newResult)
         }
 
         // The utterance answers the slot we last prompted for.

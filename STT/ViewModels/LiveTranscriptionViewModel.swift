@@ -264,6 +264,17 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
                 intent: .genai(url: url, confidence: confidence),
                 slots: nil
             )
+
+        case .interrupted(let cancelledIntent, let newResult):
+            // User switched topics mid slot-filling: show the cancellation notice
+            // then apply the new intent's result as if it arrived on a fresh turn.
+            pendingQuestion = nil
+            collectedSlots = [:]
+            appendConversationCard(
+                intent: .interrupted(cancelledIntent: cancelledIntent),
+                slots: nil
+            )
+            apply(newResult, utterance: utterance, receivedAt: receivedAt)
         }
     }
 

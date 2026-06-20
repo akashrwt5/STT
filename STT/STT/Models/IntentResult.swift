@@ -10,26 +10,31 @@ public enum IntentResult: Sendable {
     case intent(label: String, confidence: Double, semanticRescue: Bool = false)
     /// Confidence below threshold — includes a GenAI fallback URL for the query.
     case genai(url: URL, confidence: Double)
+    /// User switched topics mid slot-filling — shows the abandoned intent name.
+    case interrupted(cancelledIntent: String)
 
     public var confidence: Double {
         switch self {
         case .intent(_, let c, _): return c
-        case .genai(_, let c): return c
+        case .genai(_, let c):     return c
+        case .interrupted:         return 0
         }
     }
 
     /// Human-readable display label.
     public var displayLabel: String {
         switch self {
-        case .intent(let label, _, _): return Self.humanize(label)
-        case .genai: return "Unknown"
+        case .intent(let label, _, _):          return Self.humanize(label)
+        case .genai:                             return "Unknown"
+        case .interrupted(let c):               return "Interrupted: \(Self.humanize(c)) flow cancelled"
         }
     }
 
     /// SF Symbol name for this intent.
     public var systemImage: String {
         switch self {
-        case .genai: return "questionmark.circle"
+        case .genai:                  return "questionmark.circle"
+        case .interrupted:            return "xmark.circle"
         case .intent(let label, _, _):
             switch true {
             case label == "Default Fallback Intent":        return "questionmark.circle"

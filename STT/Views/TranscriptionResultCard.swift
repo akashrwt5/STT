@@ -131,6 +131,23 @@ struct TranscriptionResultCard: View {
                         .stroke(Color(red: 0.4, green: 0.4, blue: 0.9).opacity(0.3), lineWidth: 0.5)
                 )
             }
+
+        case .interrupted:
+            HStack(spacing: 6) {
+                Image(systemName: "xmark.circle")
+                Text(intent.displayLabel)
+                    .fontWeight(.medium)
+                Spacer()
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(Color.orange)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.orange.opacity(0.3), lineWidth: 0.5)
+            )
         }
     }
 
