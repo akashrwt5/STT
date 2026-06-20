@@ -313,7 +313,7 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
             // Re-check: a manual stop / clearResults during teardown may have cancelled
             // the conversation. `speaker.stop()` in clearResults sets isSpeaking = false.
             guard self.isSpeaking else { return }
-            self.speaker.speak(text, locale: self.currentLocale, requestedAt: receivedAt)
+            await self.speaker.speak(text, locale: self.currentLocale, requestedAt: receivedAt)
         }
     }
 

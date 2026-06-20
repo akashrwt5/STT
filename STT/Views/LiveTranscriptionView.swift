@@ -105,7 +105,16 @@ struct LiveTranscriptionView: View {
                 }
             }
             .onChange(of: viewModel.transcript) { _, _ in
-                withAnimation { proxy.scrollTo("transcript", anchor: .bottom) }
+                // Partial STT results stream in faster than 60 Hz, so a synchronous
+                // `withAnimation { scrollTo }` here accumulates multiple state
+                // mutations per render frame and SwiftUI logs "onChange action tried
+                // to update multiple times per frame". Hopping to a Task defers the
+                // scroll past the current frame, breaking the cascade.
+                Task { @MainActor in
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        proxy.scrollTo("transcript", anchor: .bottom)
+                    }
+                }
             }
         }
         .overlay(alignment: .topTrailing) {

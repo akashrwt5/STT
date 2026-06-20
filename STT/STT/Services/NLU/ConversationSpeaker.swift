@@ -48,40 +48,50 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         synthesizer.delegate = self
     }
 
-    /// Speaks `text`. Re-activates the shared audio session for playback first so
-    /// the voice is audible even right after recording.
+    /// Speaks `text` on the already-active shared audio session.
     ///
-    /// The session category is owned by `AudioSessionManager` (a single
-    /// `.playAndRecord` configuration shared by mic and TTS) — we deliberately do NOT
-    /// switch categories here. Switching `.record` ↔ `.playAndRecord` on every turn
-    /// left the session in a contested state and made the synthesizer silently drop
-    /// the utterance on the second turn.
+    /// The session is owned by `AudioSessionManager` (a single `.playAndRecord`
+    /// configuration shared by mic and TTS) and is guaranteed active here: the live
+    /// TTS handoff stops the mic with `deactivateSession: false`, so the session
+    /// stays up across the recogniser→synthesiser switch.
+    ///
+    /// `AVSpeechSynthesisVoice(language:)` and `AVSpeechSynthesizer.speak(_:)` both
+    /// dispatch_sync into the speech daemon, which the Swift runtime flags as
+    /// `unsafeForcedSync` from any Swift concurrency context — including `Task.detached`,
+    /// which leaves the task tree but still runs on the cooperative thread pool. We
+    /// hop onto a GCD background queue (genuinely outside the Swift concurrency
+    /// executor) via a continuation so the synchronous bridge runs where libdispatch
+    /// is happy. The watchdog is armed back on the main actor afterwards so
+    /// generation bookkeeping stays consistent.
     ///
     /// - Parameter requestedAt: optional `CFAbsoluteTimeGetCurrent()` captured when
     ///   the triggering STT result arrived, used only to log end-to-end latency.
-    public func speak(_ text: String, locale: Locale, requestedAt: CFAbsoluteTime? = nil) {
+    public func speak(_ text: String, locale: Locale, requestedAt: CFAbsoluteTime? = nil) async {
         self.requestedAt = requestedAt
-
-        let configStart = CFAbsoluteTimeGetCurrent()
-        activateSessionForPlayback()
-        let configMs = (CFAbsoluteTimeGetCurrent() - configStart) * 1000
 
         speakGeneration &+= 1
         let generation = speakGeneration
         didStartCurrentUtterance = false
         isSpeaking = true
 
+        let identifier = locale.identifier
+        nonisolated(unsafe) let synth = synthesizer
         let voiceStart = CFAbsoluteTimeGetCurrent()
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: locale.identifier)
-            ?? AVSpeechSynthesisVoice(language: "en-US")
-        let voiceMs = (CFAbsoluteTimeGetCurrent() - voiceStart) * 1000
 
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
-        utterance.postUtteranceDelay = 0.1
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let utterance = AVSpeechUtterance(string: text)
+                utterance.voice = AVSpeechSynthesisVoice(language: identifier)
+                    ?? AVSpeechSynthesisVoice(language: "en-US")
+                utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+                utterance.postUtteranceDelay = 0.1
+                synth.speak(utterance)
+                continuation.resume()
+            }
+        }
 
-        Self.latencyLog.info("speak() activateSession=\(configMs, format: .fixed(precision: 1))ms voiceLoad=\(voiceMs, format: .fixed(precision: 1))ms")
-        synthesizer.speak(utterance)
+        let elapsedMs = (CFAbsoluteTimeGetCurrent() - voiceStart) * 1000
+        Self.latencyLog.info("speak() voiceLoad+enqueue=\(elapsedMs, format: .fixed(precision: 1))ms")
         armWatchdog(for: generation)
     }
 
@@ -108,18 +118,6 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         guard synthesizer.isSpeaking else { return }
         synthesizer.stopSpeaking(at: .immediate)
         isSpeaking = false
-    }
-
-    /// Re-activates the shared session for playback. The category is configured once
-    /// by `AudioSessionManager` (`.playAndRecord`) and intentionally left untouched
-    /// here. Errors are logged rather than swallowed so a failed activation on a
-    /// contested session is visible instead of producing silent dead air.
-    private func activateSessionForPlayback() {
-        do {
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            logger.error("setActive(true) for playback failed: \(error.localizedDescription)")
-        }
     }
 
     // MARK: - AVSpeechSynthesizerDelegate

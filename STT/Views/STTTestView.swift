@@ -16,7 +16,7 @@ struct STTTestView: View {
         var icon: String {
             switch self {
             case .live: return "mic.fill"
-            case .file: return "doc.waveform"
+            case .file: return "waveform"
             }
         }
     }

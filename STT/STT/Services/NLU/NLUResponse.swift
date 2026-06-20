@@ -6,7 +6,7 @@
 
 import Foundation
 
-public enum NLUResponse: Sendable {
+public indirect enum NLUResponse: Sendable {
     /// A required slot is missing — ask `question` and keep listening.
     /// `intent` and `filled` carry the in-progress state for display.
     case prompt(intent: String, question: String, filled: [String: String])
