@@ -51,6 +51,11 @@ public final class SpeechRecognitionService {
     private var prewarmedTranscriber: SpeechTranscriber?
     private var prewarmedAnalyzer: SpeechAnalyzer?
     private var prewarmedLocale: Locale?
+    /// The in-flight prewarm. `startTranscribing` awaits this so a tap that lands while
+    /// prewarm is still running reuses its result instead of starting a *competing*
+    /// model install/reserve for the same locale (concurrent AssetInventory access
+    /// on one locale can stall — that race was the first-tap hang).
+    private var prewarmTask: Task<Void, Never>?
     /// Incremented on every `startTranscribing`. A finishing analysis task only touches
     /// shared state (`feedTask`, completion delegate) if its captured generation still
     /// matches — so a stale, slow-to-finish task can never cancel a *newer* session's
@@ -70,23 +75,28 @@ public final class SpeechRecognitionService {
 
     // MARK: - Pre-warm
 
-    /// Runs the expensive one-time setup (locale resolution, model install/reserve,
-    /// SpeechTranscriber + SpeechAnalyzer creation) in the background at launch so
-    /// the first mic tap finds everything ready and starts instantly.
+    /// Kicks off the expensive one-time setup (locale resolution, model install/reserve,
+    /// SpeechTranscriber + SpeechAnalyzer creation) in the background at launch so the
+    /// first mic tap finds everything ready. Returns immediately; the work runs in a
+    /// stored task that `startTranscribing` awaits.
     ///
-    /// Safe to call multiple times — skips silently if already warmed for the same locale.
-    public func prewarm() async {
+    /// Idempotent — a second call while a prewarm is in flight (or already done) no-ops.
+    public func prewarm() {
+        guard prewarmTask == nil else { return }
+        prewarmTask = Task { [weak self] in await self?.performPrewarm() }
+    }
+
+    private func performPrewarm() async {
         let savedOverride = UserDefaults.standard.string(forKey: "stt.userSelectedLocale")
         guard let resolvedLocale = try? await resolveTranscriberLocale(
             await SpeechRecognitionService.resolveLocale(userOverride: savedOverride)
         ) else {
-            logger.warning("[Prewarm] Locale resolution failed — skipping prewarm.")
+            logger.warning("[Prewarm] Locale resolution failed — first tap will run full setup.")
             return
         }
 
-        // Skip if we already have a warm pair for this locale.
+        // Already warm for this locale? Nothing to do.
         if let cached = prewarmedLocale, cached.identifier(.bcp47) == resolvedLocale.identifier(.bcp47) {
-            logger.info("[Prewarm] Already warmed for \(resolvedLocale.identifier(.bcp47)) — skipping.")
             return
         }
 
@@ -134,6 +144,12 @@ public final class SpeechRecognitionService {
         let resolvedLocale: Locale
         let transcriber: SpeechTranscriber
         let analyzer: SpeechAnalyzer
+
+        // Wait for any in-flight prewarm to finish so we reuse its transcriber/analyzer
+        // instead of starting a second, competing model install/reserve for the same
+        // locale (which can stall on AssetInventory). If prewarm already finished or was
+        // never started, this returns immediately.
+        await prewarmTask?.value
 
         let targetLocale = try await resolveTranscriberLocale(currentLocale)
         if let pw = prewarmedTranscriber,

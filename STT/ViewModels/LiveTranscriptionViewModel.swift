@@ -99,7 +99,7 @@ public final class LiveTranscriptionViewModel {
         // Pre-load the Apple speech model (locale resolve → asset install/reserve →
         // SpeechTranscriber + SpeechAnalyzer creation) in the background so the first
         // mic tap is instant instead of waiting several seconds for model setup.
-        Task(priority: .userInitiated) { [coordinator] in await coordinator.prewarm() }
+        coordinator.prewarm()
     }
 
     /// Called when the assistant finishes speaking normally. Decides whether to resume.
