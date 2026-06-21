@@ -34,6 +34,10 @@ public final class NLUSession {
     /// day (ISO, local midnight) is parked here so the follow-up time answer can be
     /// anchored to it, keeping the day instead of resolving against today.
     public var partialDateTime: String?
+    /// Number of consecutive turns where the awaited slot remained unfilled.
+    /// Mirrors Python NLUEngine.MAX_SLOT_ATTEMPTS = 3: at 3 failures the engine
+    /// abandons the flow and falls back to GenAI so the user is never trapped.
+    public var slotAttempts: Int = 0
 
     public init(sessionID: String) {
         self.sessionID = sessionID
@@ -70,6 +74,7 @@ public final class NLUSession {
         pendingSlots = [:]
         awaitingSlot = nil
         partialDateTime = nil
+        slotAttempts = 0
     }
 
     /// Full reset — drops contexts and slot-filling state. Used when starting over.

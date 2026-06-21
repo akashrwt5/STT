@@ -96,8 +96,17 @@ public actor NLUEngine {
                                     "dont know", "i don't know", "no idea", "unsure"]
 
     /// Returns true for yes, false for no, nil for ambiguous/uncertain.
+    /// Polite-negative idioms ("no worries", "no problem", etc.) that Python strips before
+    /// polarity scanning (_NO_IDIOMS). Without this pass the word "no" inside the phrase
+    /// would fire a false negative on a confirmation prompt.
+    private static let noIdioms = [
+        "no worries", "no problem", "no doubt", "no biggie", "no probs",
+        "no sweat", "not a problem"
+    ]
+
     private func yesNo(_ text: String) -> Bool? {
-        let t = text.lowercased().trimmingCharacters(in: .whitespaces)
+        var t = text.lowercased().trimmingCharacters(in: .whitespaces)
+        for idiom in Self.noIdioms { t = t.replacingOccurrences(of: idiom, with: "") }
         if Self.uncertain.contains(where: { t.contains($0) }) { return nil }
         let neg = negative.contains { wholeWord($0, in: t) }
         let pos = affirmative.contains { wholeWord($0, in: t) }
@@ -158,6 +167,21 @@ public actor NLUEngine {
         // slot we just handled so a parked date-time isn't re-resolved (and the day
         // double-advanced) by anchoring it to itself.
         extractAllSlots(cfg, text, into: &session.pendingSlots, skip: awaiting)
+
+        // Track consecutive failures on the awaited slot. Mirrors Python MAX_SLOT_ATTEMPTS = 3:
+        // after 3 turns without progress we abandon the flow so the user is never trapped.
+        if let awaiting {
+            if session.pendingSlots[awaiting] != nil {
+                session.slotAttempts = 0
+            } else {
+                session.slotAttempts += 1
+                if session.slotAttempts >= 3 {
+                    session.resetSlotFilling()
+                    return .fallback(url: await classifier.genaiURL(for: text), confidence: 0)
+                }
+            }
+        }
+
         return advanceSlots(intent, cfg)
     }
 

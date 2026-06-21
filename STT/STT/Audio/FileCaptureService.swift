@@ -27,7 +27,9 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
 
     private let fileURL: URL
     private let logger = Logger(subsystem: "com.stt.module", category: "FileCaptureService")
-    private var isCancelled = false
+    /// Lock-protected so `stop()` (called on the main actor) and `streamFile()`
+    /// (running on a background Task.detached) can safely read/write without a race.
+    private let cancelled = OSAllocatedUnfairLock(initialState: false)
     private let readBufferSize: AVAudioFrameCount = 8192
     private let progressContinuation: AsyncStream<Double>.Continuation
 
@@ -45,7 +47,7 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
 
     /// Opens the file and begins streaming raw buffers.
     public func start() -> AsyncStream<AVAudioPCMBuffer> {
-        isCancelled = false
+        cancelled.withLock { $0 = false }
         state = .preparing
         return AsyncStream<AVAudioPCMBuffer> { [weak self] continuation in
             guard let self else {
@@ -61,7 +63,7 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
 
     /// Signals the file reader to stop yielding buffers.
     public func stop() {
-        isCancelled = true
+        cancelled.withLock { $0 = true }
         state = .stopped
         logger.info("FileCaptureService cancelled.")
     }
@@ -93,7 +95,7 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
             state = .active
             let totalFrames = max(file.length, 1)
 
-            while file.framePosition < file.length && !isCancelled {
+            while file.framePosition < file.length && !cancelled.withLock({ $0 }) {
                 guard let buffer = AVAudioPCMBuffer(
                     pcmFormat: file.processingFormat,
                     frameCapacity: readBufferSize
@@ -112,8 +114,9 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
                 progressContinuation.yield(min(progress, 1.0))
             }
 
-            if !isCancelled { progressContinuation.yield(1.0) }
-            state = isCancelled ? .stopped : .idle
+            let wasCancelled = cancelled.withLock { $0 }
+            if !wasCancelled { progressContinuation.yield(1.0) }
+            state = wasCancelled ? .stopped : .idle
             logger.info("FileCaptureService finished streaming.")
         } catch {
             logger.error("FileCaptureService failed: \(error)")

@@ -54,6 +54,7 @@ public final class LiveTranscriptionViewModel {
     /// Accumulates the spoken text across a multi-turn exchange so the final card
     /// shows the complete phrase (e.g. "remind me" + "take medication" + "tomorrow").
     private var conversationTranscripts: [String] = []
+    private var recordingTask: Task<Void, Never>?
     private var levelTimer: Timer?
     private var animPhase: Double = 0
     private let logger = Logger(subsystem: "com.stt.module", category: "LiveTranscriptionViewModel")
@@ -154,7 +155,8 @@ public final class LiveTranscriptionViewModel {
 
     private func startRecording() {
         error = nil
-        Task {
+        recordingTask?.cancel()
+        recordingTask = Task {
             do {
                 try await coordinator.startLiveTranscription()
                 isListening = true
@@ -173,6 +175,8 @@ public final class LiveTranscriptionViewModel {
     ///   passes `false` so the shared audio session stays active and the prompt can be
     ///   spoken immediately, without a deactivate/re-activate round-trip.
     private func stopRecording(deactivateSession: Bool = true) {
+        recordingTask?.cancel()
+        recordingTask = nil
         coordinator.stopLiveTranscription(deactivateSession: deactivateSession)
         isListening = false
         stopAudioLevelAnimation()

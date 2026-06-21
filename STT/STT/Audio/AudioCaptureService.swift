@@ -27,7 +27,12 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
 
     private let engine: AVAudioEngine
     private let logger = Logger(subsystem: "com.stt.module", category: "AudioCaptureService")
-    private var streamContinuation: AsyncStream<AVAudioPCMBuffer>.Continuation?
+    /// Lock-protected so `start()` (AsyncStream closure) and `stop()` can safely
+    /// read/write the continuation from any calling context without a data race.
+    /// In practice both are called from @MainActor, but this is not compiler-enforced.
+    private let continuationLock = OSAllocatedUnfairLock<
+        AsyncStream<AVAudioPCMBuffer>.Continuation?
+    >(initialState: nil)
     private let bufferSize: AVAudioFrameCount = 4096
     /// Set the instant `stop()` is called. The tap closure checks it so a not-yet-torn-down
     /// engine can't keep yielding buffers after stop (the actual `engine.stop()` runs on a
@@ -55,7 +60,7 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
                 continuation.finish()
                 return
             }
-            self.streamContinuation = continuation
+            continuationLock.withLock { $0 = continuation }
             continuation.onTermination = { [weak self] _ in
                 Task { @MainActor [weak self] in self?.tearDownEngine() }
             }
@@ -68,8 +73,10 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
     /// Stops the audio engine and finishes the buffer stream.
     public func stop() {
         stopped.withLock { $0 = true }
-        streamContinuation?.finish()
-        streamContinuation = nil
+        continuationLock.withLock {
+            $0?.finish()
+            $0 = nil
+        }
         state = .stopped
         Task { @MainActor [weak self] in self?.tearDownEngine() }
         logger.info("AudioCaptureService stopped.")
