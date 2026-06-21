@@ -260,6 +260,9 @@ public actor IntentClassifierService {
         if let model = coreMLModel, let logits = coreMLLogits(text, model: model) {
             return logits
         }
+        // CM-3: log every time we miss CoreML logits so silent calibration degradation
+        // is visible in Console.app (filter by subsystem com.stt.module, category IntentClassifier).
+        logger.warning("coreMLLogits() returned nil — isotonic calibration falling back to Swift TF-IDF logits. Check that IntentClassifier.mlpackage exposes a 'logits' output.")
         return tfidfLogits(text)
     }
 

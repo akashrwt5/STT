@@ -20,7 +20,13 @@ public final class NLUConversationContext {
 }
 
 /// Per-session mutable state: active contexts and in-progress slot filling.
-public final class NLUSession {
+///
+/// **Thread safety**: `NLUSession` is `final class` (not an actor), but it is safe
+/// to mark `@unchecked Sendable` because it is owned exclusively by `NLUEngine`,
+/// which is declared `actor`. All reads and writes therefore happen on `NLUEngine`'s
+/// serial executor — never concurrently. Do NOT vend this object outside `NLUEngine`
+/// or store it on another actor without a new synchronisation strategy.
+public final class NLUSession: @unchecked Sendable {
     public let sessionID: String
     public private(set) var contexts: [String: NLUConversationContext] = [:]
 
