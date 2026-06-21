@@ -55,6 +55,7 @@ public actor IntentClassifierService {
 
     // vocab + idf are loaded at init — they're needed to vectorize text for the CoreML
     // model's tfidf_vector input, so they can't be deferred.
+    private let labels: [String]
     private let vocab: [String: Int]
     private let idf: [Double]
 
