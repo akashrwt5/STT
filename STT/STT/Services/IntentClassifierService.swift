@@ -53,11 +53,23 @@ public actor IntentClassifierService {
 
     // MARK: - Stage 2 — JSON weights fallback
 
-    private let labels: [String]
+    // vocab + idf are loaded at init — they're needed to vectorize text for the CoreML
+    // model's tfidf_vector input, so they can't be deferred.
     private let vocab: [String: Int]
     private let idf: [Double]
-    private let coef: [[Double]]
-    private let intercept: [Double]
+
+    /// LogReg coefficient matrix and intercepts — only needed when CoreML prediction
+    /// itself fails. Deferred so the ~5-25 MB coef array is never allocated when
+    /// CoreML is healthy. Struct is value-type so it can be nilled to reclaim memory.
+    private struct LogRegWeights {
+        let coef: [[Double]]
+        let intercept: [Double]
+    }
+
+    /// Nil until the first CoreML prediction failure triggers the pure-Swift fallback.
+    private var logRegWeights: LogRegWeights?
+    /// Stored so the lazy loader can open the file without hitting Bundle.main again.
+    private let weightsURL: URL?
 
     /// Per-class isotonic calibration (device logit → server-calibrated prob),
     /// exported by export_ios_weights.py. `nil` for older bundles, in which case
@@ -98,27 +110,30 @@ public actor IntentClassifierService {
             coreMLModel = nil
         }
 
-        // -- Stage 2 fallback: JSON weights --
+        // -- Stage 2 fallback: JSON weights (metadata only — heavy arrays deferred) --
+        // Parse only the small fields needed at init: labels, thresholds, genai URL,
+        // and calibration maps (used even in the CoreML path to rescale confidence).
+        // The heavy vocab/idf/coef arrays (~6-30 MB) are loaded lazily on first
+        // fallback so they're never allocated when CoreML is healthy.
+        let jsonURL = Bundle.main.url(forResource: "intent_classifier_weights",
+                                      withExtension: "json")
         guard
-            let url = Bundle.main.url(forResource: "intent_classifier_weights",
-                                      withExtension: "json"),
+            let url  = jsonURL,
             let data = try? Data(contentsOf: url),
             let obj  = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
             fatalError("IntentClassifierService: intent_classifier_weights.json not found in bundle.")
         }
+        weightsURL       = jsonURL
         labels           = obj["labels"]            as! [String]
         vocab            = obj["vocab"]              as! [String: Int]
         idf              = obj["idf"]                as! [Double]
-        coef             = obj["coef"]               as! [[Double]]
-        intercept        = obj["intercept"]          as! [Double]
         confThreshold    = obj["conf_threshold"]     as? Double ?? 0.70
         confGapThreshold = obj["conf_gap_threshold"] as? Double ?? 0.20
         genaiBaseURL     = obj["genai_base_url"]     as? String ?? ""
 
-        // Optional isotonic calibration tables. Each map is a clamped
-        // piecewise-linear curve (x = logits, y = calibrated probabilities)
-        // aligned with `labels`. Only used when the count matches.
+        // Calibration maps are small (~KB) and used on every CoreML classification
+        // to rescale raw logits → calibrated probabilities — load them now.
         if let cal  = obj["calibration"] as? [String: Any],
            let rows = cal["maps"] as? [[String: Any]],
            rows.count == labels.count {
@@ -340,10 +355,34 @@ public actor IntentClassifierService {
 
     // MARK: - JSON weights TF-IDF (Stage 2 fallback)
 
+    /// Loads coef + intercept on first call and caches them. Only triggered when CoreML
+    /// prediction itself fails — never allocated when CoreML is healthy.
+    /// Safe without locks — IntentClassifierService is an actor.
+    @discardableResult
+    private func ensureLogRegWeights() -> LogRegWeights? {
+        if let w = logRegWeights { return w }
+        guard
+            let url  = weightsURL,
+            let data = try? Data(contentsOf: url),
+            let obj  = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            logger.error("LogReg fallback: failed to reload intent_classifier_weights.json")
+            return nil
+        }
+        let w = LogRegWeights(
+            coef:      obj["coef"]      as! [[Double]],
+            intercept: obj["intercept"] as! [Double]
+        )
+        logger.warning("CoreML prediction failed — loaded LogReg weights into memory")
+        logRegWeights = w
+        return w
+    }
+
     private func tfidfLogits(_ text: String) -> [Double] {
-        let vec = tfidfVector(for: text)   // compute once, reuse across all classes
-        return coef.indices.map { c in
-            zip(coef[c], vec).reduce(intercept[c]) { $0 + $1.0 * $1.1 }
+        guard let w = ensureLogRegWeights() else { return [Double](repeating: 0, count: labels.count) }
+        let vec = tfidfVector(for: text)
+        return w.coef.indices.map { c in
+            zip(w.coef[c], vec).reduce(w.intercept[c]) { $0 + $1.0 * $1.1 }
         }
     }
 
