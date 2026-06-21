@@ -185,7 +185,7 @@ struct LiveTranscriptionView: View {
     private var micButton: some View {
         PulsingMicButton(
             isListening: viewModel.isListening,
-            isProcessing: viewModel.transcriptionState == .preparingAudio
+            isProcessing: viewModel.isStarting || viewModel.transcriptionState == .preparingAudio
         ) {
             viewModel.toggleRecording()
         }

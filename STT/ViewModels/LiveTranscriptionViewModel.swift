@@ -14,6 +14,10 @@ public final class LiveTranscriptionViewModel {
 
     public private(set) var transcript: String = ""
     public private(set) var isListening: Bool = false
+    /// True while the mic session is starting up (permissions → model load → analyzer
+    /// creation). Prevents double-tap from cancelling an in-flight setup, and lets the
+    /// UI show a "connecting…" state so the user knows the tap registered.
+    public private(set) var isStarting: Bool = false
     public private(set) var audioLevel: Float = 0.0
     public private(set) var currentLocale: Locale
     public private(set) var audioSource: String = "iPhone Mic"
@@ -90,9 +94,12 @@ public final class LiveTranscriptionViewModel {
 
         // Warm the CoreML models off the main thread (load + ANE graph
         // specialization) so the first utterance doesn't pay the cold-start cost.
-        // `warmUp()` is an actor method, so the `await` hops off the main thread on
-        // its own — a plain `Task` is enough (no `Task.detached` needed).
         Task(priority: .userInitiated) { await IntentClassifierService.shared.warmUp() }
+
+        // Pre-load the Apple speech model (locale resolve → asset install/reserve →
+        // SpeechTranscriber + SpeechAnalyzer creation) in the background so the first
+        // mic tap is instant instead of waiting several seconds for model setup.
+        Task(priority: .userInitiated) { [coordinator] in await coordinator.prewarm() }
     }
 
     /// Called when the assistant finishes speaking normally. Decides whether to resume.
@@ -122,7 +129,10 @@ public final class LiveTranscriptionViewModel {
 
     /// Toggles recording on/off.
     public func toggleRecording() {
-        if isListening { stopRecording() } else { startRecording() }
+        if isListening { stopRecording() }
+        else if !isStarting { startRecording() }
+        // isStarting == true: tap during setup is silently ignored — the UI already
+        // shows a "connecting…" indicator so the user knows the first tap landed.
     }
 
     /// Switches the active transcription locale and restarts the session if needed.
@@ -155,18 +165,21 @@ public final class LiveTranscriptionViewModel {
 
     private func startRecording() {
         error = nil
-        recordingTask?.cancel()
+        isStarting = true
         recordingTask = Task {
             do {
                 try await coordinator.startLiveTranscription()
+                isStarting  = false
                 isListening = true
                 startAudioLevelAnimation()
             } catch let err as TranscriptionError {
-                self.error = err
+                isStarting  = false
                 isListening = false
+                self.error  = err
             } catch {
-                self.error = .analyzerFailed(error)
+                isStarting  = false
                 isListening = false
+                self.error  = .analyzerFailed(error)
             }
         }
     }
@@ -177,8 +190,9 @@ public final class LiveTranscriptionViewModel {
     private func stopRecording(deactivateSession: Bool = true) {
         recordingTask?.cancel()
         recordingTask = nil
-        coordinator.stopLiveTranscription(deactivateSession: deactivateSession)
+        isStarting  = false
         isListening = false
+        coordinator.stopLiveTranscription(deactivateSession: deactivateSession)
         stopAudioLevelAnimation()
     }
 

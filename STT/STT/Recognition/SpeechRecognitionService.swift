@@ -45,6 +45,12 @@ public final class SpeechRecognitionService {
     private var currentLocale: Locale
     private var analysisTask: Task<Void, Never>?
     private var feedTask: Task<Void, Never>?
+
+    /// Pre-warmed pair cached by `prewarm()`. Consumed on the first `startTranscribing`
+    /// so that call skips the entire model-install + transcriber/analyzer creation path.
+    private var prewarmedTranscriber: SpeechTranscriber?
+    private var prewarmedAnalyzer: SpeechAnalyzer?
+    private var prewarmedLocale: Locale?
     /// Incremented on every `startTranscribing`. A finishing analysis task only touches
     /// shared state (`feedTask`, completion delegate) if its captured generation still
     /// matches — so a stale, slow-to-finish task can never cancel a *newer* session's
@@ -60,6 +66,43 @@ public final class SpeechRecognitionService {
 
     public init(locale: Locale) {
         self.currentLocale = locale
+    }
+
+    // MARK: - Pre-warm
+
+    /// Runs the expensive one-time setup (locale resolution, model install/reserve,
+    /// SpeechTranscriber + SpeechAnalyzer creation) in the background at launch so
+    /// the first mic tap finds everything ready and starts instantly.
+    ///
+    /// Safe to call multiple times — skips silently if already warmed for the same locale.
+    public func prewarm() async {
+        let savedOverride = UserDefaults.standard.string(forKey: "stt.userSelectedLocale")
+        guard let resolvedLocale = try? await resolveTranscriberLocale(
+            await SpeechRecognitionService.resolveLocale(userOverride: savedOverride)
+        ) else {
+            logger.warning("[Prewarm] Locale resolution failed — skipping prewarm.")
+            return
+        }
+
+        // Skip if we already have a warm pair for this locale.
+        if let cached = prewarmedLocale, cached.identifier(.bcp47) == resolvedLocale.identifier(.bcp47) {
+            logger.info("[Prewarm] Already warmed for \(resolvedLocale.identifier(.bcp47)) — skipping.")
+            return
+        }
+
+        let t = SpeechTranscriber(locale: resolvedLocale, preset: .progressiveTranscription)
+        do {
+            try await ensureModelInstalled(for: t, locale: resolvedLocale)
+        } catch {
+            logger.error("[Prewarm] Model install failed: \(error) — first tap will retry.")
+            return
+        }
+
+        let a = SpeechAnalyzer(modules: [t])
+        prewarmedTranscriber = t
+        prewarmedAnalyzer    = a
+        prewarmedLocale      = resolvedLocale
+        logger.info("[Prewarm] ✅ SpeechTranscriber + SpeechAnalyzer ready for \(resolvedLocale.identifier(.bcp47)).")
     }
 
     // MARK: - Transcription
@@ -84,27 +127,41 @@ public final class SpeechRecognitionService {
         generation += 1
         let myGeneration = generation
 
-        // ── 1. Locale resolution ──────────────────────────────────────────────
-        logger.info("[1/6] Resolving locale for: \(self.currentLocale.identifier(.bcp47))")
-        let resolvedLocale = try await resolveTranscriberLocale(currentLocale)
-        logger.info("[1/6] Locale resolved → \(resolvedLocale.identifier(.bcp47))")
+        // ── 1-4. Locale resolution, model install, transcriber + analyzer creation ──
+        // Reuse the prewarmed pair when it matches the requested locale — avoids the
+        // multi-second setup on the first tap. Falls back to the full path if prewarm
+        // didn't complete in time or the locale changed.
+        let resolvedLocale: Locale
+        let transcriber: SpeechTranscriber
+        let analyzer: SpeechAnalyzer
 
-        // ── 2. Transcriber creation ───────────────────────────────────────────
-        logger.info("[2/6] Creating SpeechTranscriber with locale: \(resolvedLocale.identifier(.bcp47)), preset: \(String(describing: preset))")
-        let transcriber = SpeechTranscriber(locale: resolvedLocale, preset: preset)
+        let targetLocale = try await resolveTranscriberLocale(currentLocale)
+        if let pw = prewarmedTranscriber,
+           let pa = prewarmedAnalyzer,
+           let pl = prewarmedLocale,
+           pl.identifier(.bcp47) == targetLocale.identifier(.bcp47) {
+            logger.info("[1-4/6] ⚡ Using prewarmed SpeechTranscriber + SpeechAnalyzer for \(targetLocale.identifier(.bcp47)).")
+            resolvedLocale = pl
+            transcriber    = pw
+            analyzer       = pa
+            prewarmedTranscriber = nil
+            prewarmedAnalyzer    = nil
+            prewarmedLocale      = nil
+        } else {
+            logger.info("[1/6] Prewarm miss — running full setup for \(targetLocale.identifier(.bcp47)).")
+            resolvedLocale = targetLocale
+            let t = SpeechTranscriber(locale: resolvedLocale, preset: preset)
+            logger.info("[3/6] Ensuring model assets are installed and allocated…")
+            try await ensureModelInstalled(for: t, locale: resolvedLocale)
+            logger.info("[3/6] Model asset check complete.")
+            logger.info("[4/6] Creating SpeechAnalyzer…")
+            let a = SpeechAnalyzer(modules: [t])
+            logger.info("[4/6] SpeechAnalyzer created.")
+            transcriber = t
+            analyzer    = a
+        }
         self.transcriber = transcriber
-        logger.info("[2/6] SpeechTranscriber created.")
-
-        // ── 3. Model asset installation ───────────────────────────────────────
-        logger.info("[3/6] Ensuring model assets are installed and allocated…")
-        try await ensureModelInstalled(for: transcriber, locale: resolvedLocale)
-        logger.info("[3/6] Model asset check complete.")
-
-        // ── 4. Analyzer creation + audio format ───────────────────────────────
-        logger.info("[4/6] Creating SpeechAnalyzer…")
-        let analyzer = SpeechAnalyzer(modules: [transcriber])
-        self.analyzer = analyzer
-        logger.info("[4/6] SpeechAnalyzer created.")
+        self.analyzer    = analyzer
 
         let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
         if let fmt = analyzerFormat {

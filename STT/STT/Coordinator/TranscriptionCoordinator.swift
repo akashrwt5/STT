@@ -118,6 +118,15 @@ public final class TranscriptionCoordinator {
         )
     }
 
+    // MARK: - Pre-warm
+
+    /// Pre-loads the Apple speech model (locale resolve → install/reserve →
+    /// SpeechTranscriber + SpeechAnalyzer creation) so the first mic tap is instant.
+    /// Call from the view's `.onAppear` alongside CoreML warm-up.
+    public func prewarm() async {
+        await recognitionService.prewarm()
+    }
+
     // MARK: - Permission Check
 
     /// Checks both microphone and speech recognition permissions without requesting them.
