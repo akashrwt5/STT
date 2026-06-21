@@ -87,6 +87,10 @@ public final class SpeechRecognitionService {
     }
 
     private func performPrewarm() async {
+        #if DEBUG
+        let probePrewarmStart = MemoryProbe.snapshot(label: "prewarm START")
+        #endif
+
         let savedOverride = UserDefaults.standard.string(forKey: "stt.userSelectedLocale")
         guard let resolvedLocale = try? await resolveTranscriberLocale(
             await SpeechRecognitionService.resolveLocale(userOverride: savedOverride)
@@ -113,6 +117,11 @@ public final class SpeechRecognitionService {
         prewarmedAnalyzer    = a
         prewarmedLocale      = resolvedLocale
         logger.info("[Prewarm] ✅ SpeechTranscriber + SpeechAnalyzer ready for \(resolvedLocale.identifier(.bcp47)).")
+
+        #if DEBUG
+        let probePrewarmEnd = MemoryProbe.snapshot(label: "prewarm END")
+        MemoryProbe.logDiff(before: probePrewarmStart, after: probePrewarmEnd)
+        #endif
     }
 
     // MARK: - Transcription
@@ -434,6 +443,12 @@ public final class SpeechRecognitionService {
         // ── 4. Reserve (allocate) the locale — the step that fixes the warning ─
         let reservedBefore = await AssetInventory.reservedLocales
         logger.info("[Assets] reservedLocales BEFORE: \(reservedBefore.map { $0.identifier(.bcp47) }.joined(separator: ", "))")
+        #if DEBUG
+        // Probe outside the branch so we measure on every launch, including
+        // when the locale was reserved by a previous run (Δ should be ≈ 0 then,
+        // which is itself useful — confirms reserve doesn't re-allocate).
+        let probeBefore = MemoryProbe.snapshot(label: "before reserve check (\(targetID))")
+        #endif
         if reservedBefore.contains(where: { $0.identifier(.bcp47) == targetID }) {
             logger.info("[Assets] \(targetID) already reserved/allocated.")
         } else {
@@ -445,6 +460,10 @@ public final class SpeechRecognitionService {
                 logger.error("[Assets] ⚠️ AssetInventory.reserve(locale:) failed for \(targetID): \(error)")
             }
         }
+        #if DEBUG
+        let probeAfter = MemoryProbe.snapshot(label: "after reserve check (\(targetID))")
+        MemoryProbe.logDiff(before: probeBefore, after: probeAfter)
+        #endif
         let reservedAfter = await AssetInventory.reservedLocales
         logger.info("[Assets] reservedLocales AFTER: \(reservedAfter.map { $0.identifier(.bcp47) }.joined(separator: ", "))")
 
