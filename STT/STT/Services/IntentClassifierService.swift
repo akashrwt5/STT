@@ -110,11 +110,15 @@ public actor IntentClassifierService {
             coreMLModel = nil
         }
 
-        // -- Stage 2 fallback: JSON weights (metadata only — heavy arrays deferred) --
-        // Parse only the small fields needed at init: labels, thresholds, genai URL,
-        // and calibration maps (used even in the CoreML path to rescale confidence).
-        // The heavy vocab/idf/coef arrays (~6-30 MB) are loaded lazily on first
-        // fallback so they're never allocated when CoreML is healthy.
+        // -- Stage 2 fallback: JSON weights --
+        // vocab + idf are needed on every classification (they build the tfidf_vector
+        // input the CoreML model consumes), so they load eagerly here. The LogReg
+        // coef matrix + intercepts (~5-25 MB) are NOT retained — they're re-loaded
+        // lazily by ensureLogRegWeights() only if a CoreML prediction fails, so they
+        // never sit in idle memory when CoreML is healthy.
+        // NOTE: JSONSerialization below still parses the whole file (incl. coef) into a
+        // transient dictionary at launch; that peak is unchanged. Only the *retained*
+        // footprint shrinks. Splitting coef into its own file would remove the peak too.
         let jsonURL = Bundle.main.url(forResource: "intent_classifier_weights",
                                       withExtension: "json")
         guard
