@@ -39,8 +39,8 @@ All 5 specialist agents have reported. Shared memory artifacts written.
 **CoreML BLOCKER (Phase 1 addendum)**:
 | Task | Description | Status | Priority |
 |------|-------------|--------|----------|
-| CM-1 | Regenerate IntentClassifier.mlpackage with logits output | 🔴 Not started | CRITICAL |
-| CM-2 | Verify 3 outputs: classProbability, logits, label | 🔴 Not started | CRITICAL |
+| CM-1 | Regenerate IntentClassifier.mlpackage with logits output | ✅ Done (pulled from remote) | CRITICAL |
+| CM-2 | Verify 3 outputs: classProbability, logits, label | ✅ Done (verified) | CRITICAL |
 | CM-3 | Add logging when coreMLLogits() falls back | 🔴 Not started | MEDIUM |
 
 ---
