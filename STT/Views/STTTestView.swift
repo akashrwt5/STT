@@ -60,6 +60,57 @@ struct STTTestView: View {
 
             Spacer()
 
+            // Diagnostic lifecycle buttons.
+            //  Init IC / Free IC : create or release the entire IntentClassifier
+            //  Load 3 / Free 3   : load or release Stage 3 (MiniLM) on the
+            //                       currently-loaded IntentClassifier
+            // Each tap brackets the operation with MemoryProbe so the console
+            // shows phys_footprint Δ. Combined with the [Deinit] logs on
+            // IntentClassifierService / SemanticEmbedder / SemanticClassifier,
+            // we can verify both deallocation AND memory reclaim.
+            HStack(spacing: 4) {
+                memoryLifecycleButton(title: "IC+", icon: "plus.circle") {
+                    #if DEBUG
+                    let before = MemoryProbe.snapshot(label: "before Init IC")
+                    #endif
+                    coordinator.initIntentClassifier()
+                    #if DEBUG
+                    let after = MemoryProbe.snapshot(label: "after Init IC")
+                    MemoryProbe.logDiff(before: before, after: after)
+                    #endif
+                }
+                memoryLifecycleButton(title: "IC-", icon: "minus.circle") {
+                    #if DEBUG
+                    let before = MemoryProbe.snapshot(label: "before Free IC")
+                    #endif
+                    coordinator.freeIntentClassifier()
+                    #if DEBUG
+                    let after = MemoryProbe.snapshot(label: "after Free IC")
+                    MemoryProbe.logDiff(before: before, after: after)
+                    #endif
+                }
+                memoryLifecycleButton(title: "S3+", icon: "arrow.down.to.line") {
+                    #if DEBUG
+                    let before = MemoryProbe.snapshot(label: "before Stage3 Load")
+                    #endif
+                    await coordinator.loadStage3()
+                    #if DEBUG
+                    let after = MemoryProbe.snapshot(label: "after Stage3 Load")
+                    MemoryProbe.logDiff(before: before, after: after)
+                    #endif
+                }
+                memoryLifecycleButton(title: "S3-", icon: "arrow.up.to.line") {
+                    #if DEBUG
+                    let before = MemoryProbe.snapshot(label: "before Stage3 Release")
+                    #endif
+                    await coordinator.releaseStage3()
+                    #if DEBUG
+                    let after = MemoryProbe.snapshot(label: "after Stage3 Release")
+                    MemoryProbe.logDiff(before: before, after: after)
+                    #endif
+                }
+            }
+
             Button {
                 showLanguagePicker = true
             } label: {
@@ -74,6 +125,28 @@ struct STTTestView: View {
         .padding(.horizontal, 20)
         .padding(.top, 16)
         .padding(.bottom, 12)
+    }
+
+    private func memoryLifecycleButton(
+        title: String,
+        icon: String,
+        action: @escaping () async -> Void
+    ) -> some View {
+        Button {
+            Task { await action() }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(0.75))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.white.opacity(0.08), in: Capsule())
+        }
+        .accessibilityLabel("\(title) speech model")
     }
 
     private var headerSubtitle: String {

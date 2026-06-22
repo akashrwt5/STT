@@ -29,7 +29,7 @@ public actor NLUEngine {
 
     public init(
         schema: NLUSchema = .loadFromBundle(),
-        classifier: IntentClassifierService = .shared,
+        classifier: IntentClassifierService,
         entities: EntityExtractor = EntityExtractor(),
         sessionID: String = "default"
     ) {

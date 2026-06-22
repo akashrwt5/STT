@@ -29,6 +29,10 @@ final class SemanticEmbedder: @unchecked Sendable {
     // Matches Python's max_len=64 in _tokenise()
     private static let maxLen = 64
 
+    deinit {
+        print("[Deinit] SemanticEmbedder (MLModel + vocab released)")
+    }
+
     // MARK: - Init
 
     init?() {

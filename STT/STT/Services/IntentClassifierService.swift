@@ -39,9 +39,15 @@ public struct ClassificationResult: Sendable {
 // execution and serialisation for free.
 public actor IntentClassifierService {
 
-    // MARK: - Singleton
+    // MARK: - Lifecycle (instance-based, no singleton)
+    //
+    // The singleton was removed so we can test whether dropping the last strong
+    // reference actually deinits the service (and downstream MiniLM state).
+    // Owners pass an instance around explicitly.
 
-    public static let shared = IntentClassifierService()
+    deinit {
+        print("[Deinit] IntentClassifierService")
+    }
 
     // MARK: - Stage 1
 
@@ -79,11 +85,10 @@ public actor IntentClassifierService {
 
     // MARK: - Stage 3
 
-    // The MiniLM embedder loads a ~17 MB CoreML model and a 30k-line vocab.
-    // Loading it lazily on a background task keeps `shared` init cheap so it
-    // never blocks the main thread when the view model is constructed.
-    private let semanticEmbedderTask: Task<SemanticEmbedder?, Never>
-    private let semanticClassifier: SemanticClassifier?
+    // Both nil until `loadStage3()` is called (manual lifecycle for memory
+    // experiment). When loaded, MiniLM weights + ANE specialization live here.
+    private var semanticEmbedder: SemanticEmbedder?
+    private var semanticClassifier: SemanticClassifier?
 
     // MARK: - Thresholds
 
@@ -98,7 +103,7 @@ public actor IntentClassifierService {
 
     // MARK: - Init
 
-    private init() {
+    public init() {
         // -- Stage 2 primary: CoreML --
         // Xcode compiles .mlpackage → .mlmodelc at build time; try compiled form first.
         let intentURL = Bundle.main.url(forResource: "IntentClassifier", withExtension: "mlmodelc")
@@ -151,11 +156,9 @@ public actor IntentClassifierService {
             calibrationMaps = nil
         }
 
-        // -- Stage 3: semantic rescue --
-        // Load the heavy MiniLM embedder off the main thread; the SemanticHead
-        // is a tiny JSON linear layer so it stays synchronous.
-        semanticEmbedderTask = Task.detached(priority: .userInitiated) { SemanticEmbedder() }
-        semanticClassifier   = SemanticClassifier()
+        // Stage 3 deliberately not loaded at init — call `loadStage3()` to
+        // bring it up on demand. `semanticEmbedder` and `semanticClassifier`
+        // stay nil until then; Stage 3 calls in `classifyAsync` are skipped.
 
         let stage2 = coreMLModel != nil ? "CoreML" : "JSON weights"
         Logger(subsystem: "com.stt.module", category: "IntentClassifier")
@@ -169,12 +172,38 @@ public actor IntentClassifierService {
     /// so the first real classification has no cold-start latency. Safe to call
     /// repeatedly; the heavy load runs once via the embedder Task.
     public func warmUp() async {
-        if let embedder = await semanticEmbedderTask.value {
+        if let embedder = semanticEmbedder {
             _ = await embedder.embed("hello")
         }
         if let model = coreMLModel {
             _ = coreMLProbabilities("hello", model: model)
         }
+    }
+
+    /// Manually load Stage 3 (MiniLM embedder + semantic head) and trigger its
+    /// ANE specialization. Idempotent — no-op if already loaded.
+    public func loadStage3() async {
+        if semanticEmbedder == nil {
+            // Off the actor's executor: MiniLM init reads a 16 MB model file
+            // and a 228 KB vocab.
+            let task = Task.detached(priority: .userInitiated) { SemanticEmbedder() }
+            semanticEmbedder = await task.value
+        }
+        if semanticClassifier == nil {
+            semanticClassifier = SemanticClassifier()
+        }
+        // Trigger ANE compile / weight load — without this, the heavy memory
+        // hit doesn't materialize until the first real `embed()` call.
+        if let embedder = semanticEmbedder {
+            _ = await embedder.embed("hello")
+        }
+    }
+
+    /// Manually release Stage 3 refs. Pair with `MemoryProbe` to verify whether
+    /// CoreML actually frees the ANE-resident weights when our handles drop.
+    public func releaseStage3() {
+        semanticEmbedder = nil
+        semanticClassifier = nil
     }
 
     /// Full 3-stage async classification. Use this from NLUEngine.
@@ -194,8 +223,9 @@ public actor IntentClassifierService {
             return ClassificationResult(label: stage2Label, confidence: stage2Conf, semanticRescue: false)
         }
 
-        // Stage 3 — only runs when Stage 2 is uncertain
-        if let embedder = await semanticEmbedderTask.value, let head = semanticClassifier,
+        // Stage 3 — only runs when Stage 2 is uncertain AND Stage 3 has been
+        // explicitly loaded via `loadStage3()`.
+        if let embedder = semanticEmbedder, let head = semanticClassifier,
            let embedding = await embedder.embed(text) {
             let (semLabel, semConf) = head.classify(embedding)
             if semLabel != Self.fallbackLabel && semConf >= Self.semanticThreshold {

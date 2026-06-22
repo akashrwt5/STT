@@ -1,5 +1,5 @@
 # Performance Report — iOS NLU Platform
-_Last updated: 2026-06-20 | Agents: Performance Engineer + CoreML Engineer_
+_Last updated: 2026-06-22 | Agents: Performance Engineer + CoreML Engineer + Memory Diagnostics_
 
 ---
 
@@ -50,14 +50,21 @@ Stage 3 is optional; only activates on Stage 2 low-confidence results.
 
 ## Memory Profile
 
-| Component | Size | Load Time | Resident |
+> ⚠️ **The table below underestimates real memory cost by ~5×.** Empirical
+> measurement (see [Memory Investigation — CoreML Lifecycle](#memory-investigation--coreml-lifecycle-2026-06-2122)
+> below) shows the NLU stack adds **~100 MB phys_footprint** when fully loaded,
+> not 27 MB. The discrepancy is the ANE-resident weight replication and
+> activation arenas, which are not visible from on-disk file sizes alone.
+
+| Component | Size on disk | Load Time | Real cost in process |
 |-----------|------|-----------|---------|
-| IntentClassifier.mlpackage | ~2MB | ~30ms | ~4MB compiled |
-| MiniLM embedder | ~17MB | ~200ms (background) | ~20MB |
-| minilm-vocab.txt | ~800KB | ~50ms (background) | ~1MB |
-| intent_classifier_weights.json | ~500KB | ~50ms sync | ~2MB parsed |
-| nlu_schema.json | ~50KB | ~5ms sync | ~200KB |
-| **Total NLU stack** | **~20MB** | | **~27MB resident** |
+| IntentClassifier.mlpackage | 320 KB | ~30ms | ~3–4 MB after init + warmUp |
+| MiniLM embedder (.mlpackage) | 16 MB | ~200ms (background) | **~85 MB dirty after ANE compile** |
+| minilm-vocab.txt | 228 KB | ~50ms (background) | ~1.5 MB retained Swift dict |
+| intent_classifier_weights.json | 692 KB | ~50ms sync | ~2 MB retained (labels/vocab/idf) |
+| SemanticHead.mlpackage | 96 KB | ~5ms | ~1–3 MB |
+| nlu_schema.json | 50 KB | ~5ms sync | ~200 KB |
+| **Total NLU stack** | **~17 MB** | | **~95–100 MB phys_footprint** |
 
 ---
 
@@ -140,3 +147,222 @@ Stage 3 is optional; only activates on Stage 2 low-confidence results.
 | Stream NLU start during final STT processing | ~100ms/turn | L — pipeline change |
 | Replace 30Hz Timer with `TimelineView` | CPU reduction | S |
 | Async `IntentClassifierService` init | ~145ms startup | M |
+
+---
+
+## Memory Investigation — CoreML Lifecycle (2026-06-21/22)
+
+A multi-day root-cause investigation into the +100 MB phys_footprint observed
+after NLU prewarm. **Critical findings — read before redesigning the NLU
+lifecycle or adding new CoreML models.**
+
+### Background
+
+Observed: app launch footprint ~30 MB → after NLU prewarm ~150 MB. The +100 MB
+appears stuck — does not return after teardown. Initial assumption was that
+Apple's Speech framework was the culprit; this turned out to be wrong.
+
+### Methodology
+
+Built three diagnostic tools, all DEBUG-gated:
+
+1. **`STT/STT/STT/Services/MemoryProbe.swift`** — VM region walker using Mach
+   APIs (`task_info(TASK_VM_INFO)` for process totals, `vm_region_recurse_64`
+   for per-region breakdown bucketed by `user_tag`). Captures `phys_footprint`
+   (jetsam-relevant), `resident_size`, anonymous-dirty, file-backed-clean, and
+   per-allocation-tag deltas.
+2. **Lifecycle buttons** in `STTTestView` header (`IC+` / `IC-` / `S3+` / `S3-`)
+   to manually load/release the IntentClassifier and its Stage 3 components
+   while measuring memory before/after each operation.
+3. **Deinit logging** on `IntentClassifierService`, `SemanticEmbedder`, and
+   `SemanticClassifier` to verify Swift-level deallocation actually runs.
+
+The singleton `IntentClassifierService.shared` was temporarily removed and the
+service moved to coordinator-owned `var intentClassifier: IntentClassifierService?`
+ownership so the actor could actually deinit when released. All NLU call sites
+were temporarily disabled (TEMP-NLU-OFF markers) so no path could hold a
+phantom reference.
+
+### Three hypotheses tested
+
+| Hypothesis | Description |
+|---|---|
+| **A** — CoreML runtime cache | `MLModel.deinit` runs, but ANE-resident weights / compiled graphs / activation arenas stay in CoreML's process-scoped cache |
+| **B** — Strong reference retention | Some object (singleton, closure, Task, observer) still holds the model, preventing Swift-level deinit |
+| **C** — App-owned memory | Models deallocate cleanly but app retains large data structures (vocab dict, embedding cache, etc.) |
+
+### Apple Speech Framework — ruled out as the major contributor
+
+A minimal app (Speech only, no NLU) loaded the iOS 26 SpeechAnalyzer +
+SpeechTranscriber for en-IN and measured:
+
+```
+prewarm.before: phys=25.77 MB
+prewarm.after:  phys=24.67 MB   (Δ -1.09 MB)
+```
+
+**Apple Speech costs ~0 MB phys_footprint.** The 16 MB en-IN model is mmap'd
+clean from the system asset store — resident grows ~100 MB (file-backed) but
+phys_footprint barely moves. The user's original hypothesis from the start of
+the investigation was correct. Earlier verdicts that blamed Speech were a
+measurement artifact from concurrent CoreML warmup running in parallel with
+Speech prewarm during `LiveTranscriptionViewModel.activate()`.
+
+### Stage-by-stage memory cost (measured)
+
+Each stage's contribution isolated by disabling the others in
+`IntentClassifierService.init` (using `TEMP-NLU-STAGE*-OFF` markers).
+
+| Configuration | phys_footprint at idle | Δ vs baseline |
+|---|---|---|
+| App baseline (no NLU loaded) | ~22 MB | — |
+| Stage 1 only (KeywordMatcher + Stage 1+2 JSON) | ~32 MB | +10 MB |
+| Stage 1 + Stage 2 (CoreML IntentClassifier) | ~35 MB | +13 MB |
+| **Stage 1 + Stage 2 + Stage 3 (full)** | **~130 MB** | **+108 MB** |
+
+**Stage 3 (MiniLM-L6-v2) is responsible for ~95% of the NLU memory budget.**
+
+### Stage 3 load/release experiment — the critical test
+
+With the singleton removed, deinit logging in place, and NLU disabled at all
+call sites (so nothing could phantom-retain), the manual lifecycle test:
+
+```
+[MemoryProbe] before Init IC:   phys=26.7 MB
+[MemoryProbe] after  Init IC:   phys=30.4 MB    (Δ +3.7 MB)
+
+[MemoryProbe] before Stage3 Load: phys=28.3 MB
+[MemoryProbe] after  Stage3 Load: phys=198.1 MB  (Δ +169.8 MB peak)
+  Top-tag deltas (after S3 Load):
+    MALLOC_LARGE: +83.9 MB / 5 new regions / 100% dirty   ← MiniLM weight replication
+    MALLOC_SMALL: +62.8 MB / 17 new regions / 100% dirty  ← ANE activation arenas
+
+(idle for some seconds — iOS naturally reclaimed ~69 MB of transient buffers)
+
+[MemoryProbe] before Stage3 Release: phys=128.9 MB
+[Deinit] SemanticEmbedder (MLModel + vocab released)    ← FIRED
+[Deinit] SemanticClassifier (MLModel released)          ← FIRED
+[MemoryProbe] after  Stage3 Release: phys=128.7 MB      (Δ -128 KB)
+
+(idle for some seconds — iOS naturally reclaimed another ~37 MB)
+
+[MemoryProbe] before Free IC: phys=92.1 MB
+[Deinit] IntentClassifierService                        ← FIRED
+[MemoryProbe] after  Free IC: phys=92.1 MB              (Δ -0 KB)
+```
+
+### Findings
+
+1. **All three deinits fire.** Swift-level deallocation is clean. The singleton
+   was removed; ownership chain leaves no stranded references when the
+   coordinator drops its `intentClassifier`. → **Hypothesis B is conclusively
+   ruled out.**
+
+2. **Releasing the Swift handles does not synchronously return memory.** The
+   tap-time delta on both `S3-` (-128 KB) and `IC-` (0 KB) is essentially noise.
+   `MLModel.deinit` runs, but CoreML's process-scoped ANE/Espresso runtime
+   cache survives. → **Hypothesis A confirmed.**
+
+3. **iOS does reclaim some memory asynchronously.** Between snapshots (during
+   idle periods), phys_footprint dropped 69 MB and then another 37 MB without
+   any user action. This is iOS draining purgeable memory, malloc returning
+   cached pages, and CoreML doing late cleanup of transient buffers. None of
+   this can be triggered on demand from app code.
+
+4. **A persistent ~65 MB floor survives even full IntentClassifier teardown.**
+   Final phys_footprint after every Swift object has deinit'd: 92.1 MB. Baseline:
+   26.7 MB. The +65 MB gap is the CoreML/Espresso/ANE runtime cache, which
+   only releases on process termination (or extreme memory pressure jetsam).
+
+5. **App-owned memory is minor.** The WordPiece vocab dict (~1.5 MB) is the
+   only material app-retained allocation; it deallocates with `SemanticEmbedder`.
+   Hypothesis C contributes <2 MB, swamped by A.
+
+### Final root-cause confidence
+
+| Hypothesis | Confidence | Status |
+|---|---|---|
+| A — CoreML/Espresso/ANE process-wide runtime cache | **~90%** | Confirmed by experiment |
+| B — Strong reference retention | **0%** | Ruled out — all deinits fire |
+| C — App-owned memory (vocab dict, retained JSON state) | **~5%** | Minor contribution (~2 MB) |
+| iOS lazy reclaim path (delayed page returns) | **~5%** | Real but partial; cannot be triggered on demand |
+
+### Why on-disk size doesn't predict in-memory size
+
+The MiniLM `.mlpackage` is 16 MB on disk (mostly `weights/weight.bin`). In
+memory it becomes ~85 MB dirty. The expansion comes from CoreML's multi-stage
+runtime layout:
+
+| Allocation | Where | Size | Reason |
+|---|---|---|---|
+| 1. mmap of `weight.bin` | file-backed clean | ~16 MB | Initial bundle read |
+| 2. ANE-format weight replica | dirty | ~16 MB | ANE requires tiled/packed weight layout in its own accessible memory; CoreML reformats and copies |
+| 3. Per-layer activation arenas | dirty | ~10–20 MB | 6-layer transformer × max_len=64 × 384 dim × FP16 outputs |
+| 4. Attention Q/K/V scratch | dirty | ~5–10 MB | Materialized per inference; cached for reuse |
+| 5. CoreML runtime overhead | dirty | ~3–8 MB | Compiled ANE kernels, dispatch tables, MLDispatchQueue |
+
+Rule of thumb for transformer models on Apple Neural Engine: expect
+**3–4× on-disk size as in-memory dirty cost** after first prediction.
+
+### What this rules out as a memory-saving strategy
+
+The experiment definitively rules out the following as viable optimizations
+for reclaiming Stage 3 memory once loaded:
+
+- ❌ **Per-mic-tap load/release cycles** — Swift teardown succeeds but memory doesn't return synchronously; user pays cold-start cost without saving memory
+- ❌ **Idle-timeout teardown** — same reason
+- ❌ **Per-view-lifecycle ownership** — view dismiss → VM deinit → service deinit, but ANE cache outlives all Swift objects
+- ❌ **Releasing `MLModel` refs proactively** — releases the Swift wrapper, not the CoreML cache
+- ❌ **Making the service non-singleton** — necessary for proper deinit but does not by itself reclaim memory
+- ❌ **`onDisappear` / `onBackground` Swift-side cleanup** — same boundary problem
+
+### What remains as a viable memory-saving lever
+
+| Strategy | Memory saved | Implementation cost |
+|---|---|---|
+| **Lazy-load Stage 3** on first Stage 2 low-confidence result | Up to ~100 MB until first miss; once loaded, ratcheted for process lifetime | S — refactor `classifyAsync` to defer `SemanticEmbedder()` / `SemanticClassifier()` instantiation |
+| **Quantize MiniLM to INT8** (re-export `.mlpackage`) | ~50–60 MB (halves the ANE weight replica + activation precision) | M — re-run `export_coreml.py` with int8 quantization, validate accuracy |
+| **Smaller embedder architecture** (distilled 64–128-dim) | ~70–80 MB | L — train and export new model |
+| **Drop Stage 3 entirely** (Stages 1+2 only) | ~100 MB | S — measure rescue trigger rate first to bound accuracy loss |
+| **Server-side semantic rescue** for low-confidence Stage 2 | ~100 MB local | M — network call, privacy review, latency budget |
+
+**Recommended next step**: measure how often Stage 2 returns sub-threshold
+(`conf < 0.70`) on a representative utterance set. If <5%, dropping Stage 3
+entirely is the highest-leverage win. If 10–20%, lazy-load is the right call.
+If >20%, Stage 3 is doing important work and quantization is the path forward.
+
+### Architecture decision recorded
+
+The singleton `IntentClassifierService.shared` was removed during this
+investigation to enable proper deinit testing. After the experiment, the
+service ownership pattern of choice is:
+
+- **Production**: keep a `lazy var` instance owned by the view model that needs
+  it; restore singleton only if multiple owners need to share the loaded state
+  (in which case the +100 MB is paid once across owners).
+- **Diagnostic build**: keep the coordinator-owned `var intentClassifier: IntentClassifierService?`
+  pattern so memory profiling tools can drop the reference deterministically.
+
+The diagnostic Load/Free buttons (`IC+`/`IC-`/`S3+`/`S3-`) and the
+`MemoryProbe` utility remain in the codebase, DEBUG-gated, for future regression
+testing when CoreML version changes or new on-device models are added.
+
+### Files added during this investigation
+
+- `STT/STT/STT/Services/MemoryProbe.swift` — DEBUG-only VM region walker
+- `[Deinit]` prints in `IntentClassifierService.swift`, `SemanticEmbedder.swift`, `SemanticClassifier.swift`
+- `loadStage3()` / `releaseStage3()` / `initIntentClassifier()` / `freeIntentClassifier()` on `TranscriptionCoordinator`
+- Header lifecycle buttons in `STTTestView`
+- `TEMP-NLU-OFF` and `TEMP-NLU-STAGE*-OFF` markers tagging the temporarily-disabled NLU call sites (grep these to restore production NLU flow)
+
+### Open questions for future work
+
+1. Does iOS reclaim CoreML cache under simulated memory-pressure
+   notifications (`os_proc_available_memory()` drops)? Untested.
+2. Does `MLModelConfiguration.computeUnits = .cpuOnly` produce a smaller
+   persistent floor than `.all`? May trade memory for latency.
+3. Would explicitly compiling the model with smaller `maxSequenceLength`
+   reduce activation arena size?
+
+These would clarify whether there are additional levers without changing
+the model architecture.

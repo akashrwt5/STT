@@ -127,6 +127,50 @@ public final class TranscriptionCoordinator {
         recognitionService.prewarm()
     }
 
+    /// Awaitable Load — kicks off prewarm and returns when it's done. Used by
+    /// the diagnostic Load button so the MemoryProbe brackets a finished cycle.
+    public func loadNow() async {
+        await recognitionService.awaitPrewarm()
+    }
+
+    /// Releases every speech-related ref held by the recognition service.
+    /// Diagnostic — used by the Unload button to measure whether the speech
+    /// framework returns its dirty memory when we drop our handles.
+    public func unload() async {
+        await recognitionService.unload()
+    }
+
+    // MARK: - IntentClassifier Lifecycle (Diagnostic)
+
+    /// The IntentClassifier instance — when nil, no NLU is available. Owned
+    /// here so dropping our reference is the *only* thing keeping it alive,
+    /// which lets `freeIntentClassifier()` truly deinit the service.
+    public private(set) var intentClassifier: IntentClassifierService?
+
+    /// Diagnostic — create the IntentClassifier instance. Idempotent.
+    public func initIntentClassifier() {
+        if intentClassifier == nil {
+            intentClassifier = IntentClassifierService()
+        }
+    }
+
+    /// Diagnostic — drop our reference to the IntentClassifier. If nothing
+    /// else holds it, the actor deinits (watch console for `[Deinit]`).
+    public func freeIntentClassifier() {
+        intentClassifier = nil
+    }
+
+    /// Diagnostic — manually load Stage 3 (MiniLM + SemanticHead) on the
+    /// current IntentClassifier instance. No-op if IC not initialized.
+    public func loadStage3() async {
+        await intentClassifier?.loadStage3()
+    }
+
+    /// Diagnostic — release Stage 3 refs on the current IntentClassifier.
+    public func releaseStage3() async {
+        await intentClassifier?.releaseStage3()
+    }
+
     // MARK: - Permission Check
 
     /// Checks both microphone and speech recognition permissions without requesting them.

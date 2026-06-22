@@ -48,7 +48,10 @@ public final class FileTranscriptionViewModel: NSObject {
     // MARK: - Private
 
     private let coordinator: TranscriptionCoordinator
-    private let classifier = IntentClassifierService.shared
+    // TEMP-NLU-OFF: IntentClassifier no longer a singleton — IC ownership now
+    // lives on `coordinator.intentClassifier`. Restore by reading from there
+    // (and un-commenting the predict() call below).
+    // private let classifier = IntentClassifierService.shared
     private var transcriptionTask: Task<Void, Never>?
     private nonisolated(unsafe) var scopedURL: URL?
     private let logger = Logger(subsystem: "com.stt.module", category: "FileTranscriptionViewModel")
@@ -108,9 +111,8 @@ public final class FileTranscriptionViewModel: NSObject {
                 progress = 1.0
                 logger.info("File transcription complete in \(Date().timeIntervalSince(startTime))s")
 
-                // Classify intent off the main thread — `classifier` is an actor,
-                // so the `await` hops to its executor without a detached task.
-                intentResult = await classifier.predict(result)
+                // TEMP-NLU-OFF: see classifier note above.
+                // intentResult = await classifier.predict(result)
 
             } catch let err as TranscriptionError {
                 self.error = err

@@ -22,6 +22,10 @@ final class SemanticClassifier {
 
     private let backend: Backend
 
+    deinit {
+        print("[Deinit] SemanticClassifier (MLModel released)")
+    }
+
     /// Minimum softmax probability to accept the head's answer.
     /// Matches Python DEFAULT_THRESHOLD = 0.55 (tuned on semantic_holdout_100.csv).
     let threshold: Double = 0.55

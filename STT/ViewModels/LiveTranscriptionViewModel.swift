@@ -53,7 +53,11 @@ public final class LiveTranscriptionViewModel {
     // instance builds it on first use, after `activate()` has warmed it in background.
     // @ObservationIgnored: keeps it a real stored property (the @Observable macro
     // turns tracked vars into computed ones, which can't be `lazy`); nlu never drives UI.
-    @ObservationIgnored private lazy var nlu = NLUEngine()
+    // TEMP-NLU-OFF: NLU disabled for IC-lifecycle experiment. The IntentClassifier
+    // is now owned by `coordinator.intentClassifier` and must be created via
+    // the "Init IC" button. Restore by un-commenting and pointing NLUEngine at
+    // `coordinator.intentClassifier` instead of the (now-removed) singleton.
+    // @ObservationIgnored private lazy var nlu = NLUEngine()
     private let speaker = ConversationSpeaker()
     /// Accumulates the spoken text across a multi-turn exchange so the final card
     /// shows the complete phrase (e.g. "remind me" + "take medication" + "tomorrow").
@@ -92,9 +96,9 @@ public final class LiveTranscriptionViewModel {
         speaker.onFinish = { [weak self] in self?.handleSpeechFinished() }
         speaker.onCancel = { [weak self] in self?.handleSpeechCancelled() }
 
-        // Warm the CoreML models off the main thread (load + ANE graph
-        // specialization) so the first utterance doesn't pay the cold-start cost.
-        Task(priority: .userInitiated) { await IntentClassifierService.shared.warmUp() }
+        // TEMP-NLU-OFF: warmUp removed for IC-lifecycle experiment — IC is now
+        // instantiated explicitly via the "Init IC" button.
+        // Task(priority: .userInitiated) { await IntentClassifierService.shared.warmUp() }
 
         // Pre-load the Apple speech model (locale resolve → asset install/reserve →
         // SpeechTranscriber + SpeechAnalyzer creation) in the background so the first
@@ -157,8 +161,8 @@ public final class LiveTranscriptionViewModel {
         conversationTranscripts.removeAll()
         isSpeaking = false
         speaker.stop()
-        // `reset()` is an actor method now; fire-and-forget the session cleanup.
-        Task { [nlu] in await nlu.reset() }
+        // TEMP-NLU-OFF: nlu property removed for IC-lifecycle experiment.
+        // Task { [nlu] in await nlu.reset() }
     }
 
     // MARK: - Private
@@ -232,22 +236,18 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
         guard !isSpeaking else { return }
 
         transcript = text
-        // Latency instrumentation: stamp the moment the final STT result arrived so
-        // every downstream stage can report its delta. Logging only.
-        let receivedAt = CFAbsoluteTimeGetCurrent()
-        // Route the utterance through the multi-turn NLU engine. Inference runs off the
-        // main thread; the engine drives the conversation serially (one turn at a time).
-        // `nlu` is an actor: `await nlu.handle(text)` runs inference off the main
-        // thread on its own, so a plain `Task` replaces the old detached hop.
-        Task(priority: .userInitiated) { [nlu, weak self] in
-            let response = await nlu.handle(text)
-            let nluMs = (CFAbsoluteTimeGetCurrent() - receivedAt) * 1000
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.latencyLog.info("NLU handle: \(nluMs, format: .fixed(precision: 1))ms")
-                self.apply(response, utterance: text, receivedAt: receivedAt)
-            }
-        }
+        // TEMP-NLU-OFF: NLU pipeline disabled for IC-lifecycle experiment.
+        // Restore by un-commenting (and re-introducing the `nlu` property).
+        // let receivedAt = CFAbsoluteTimeGetCurrent()
+        // Task(priority: .userInitiated) { [nlu, weak self] in
+        //     let response = await nlu.handle(text)
+        //     let nluMs = (CFAbsoluteTimeGetCurrent() - receivedAt) * 1000
+        //     await MainActor.run { [weak self] in
+        //         guard let self else { return }
+        //         self.latencyLog.info("NLU handle: \(nluMs, format: .fixed(precision: 1))ms")
+        //         self.apply(response, utterance: text, receivedAt: receivedAt)
+        //     }
+        // }
     }
 
     /// Applies an NLU turn result.

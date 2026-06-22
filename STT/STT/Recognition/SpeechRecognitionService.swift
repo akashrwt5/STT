@@ -374,6 +374,28 @@ public final class SpeechRecognitionService {
         logger.info("SpeechRecognitionService stopped.")
     }
 
+    // MARK: - Manual Lifecycle (Diagnostic)
+
+    /// Releases every speech-related ref held by this service. Pair with the
+    /// MemoryProbe to verify whether the framework actually returns the dirty
+    /// blocks to the OS when our handles drop.
+    public func unload() async {
+        logger.info("[Unload] Releasing speech state…")
+        await stopTranscribing()
+        prewarmedTranscriber = nil
+        prewarmedAnalyzer    = nil
+        prewarmedLocale      = nil
+        prewarmTask          = nil
+        logger.info("[Unload] Done.")
+    }
+
+    /// Kicks off a prewarm (if not already running) and awaits its completion.
+    /// Used by the diagnostic Load button so probes can wrap a complete cycle.
+    public func awaitPrewarm() async {
+        prewarm()
+        await prewarmTask?.value
+    }
+
     /// Switches to a new locale for the next session.
     ///
     /// - Parameter identifier: BCP-47 locale identifier (e.g. "en-IN", "hi-IN").
