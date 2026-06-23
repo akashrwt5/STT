@@ -26,8 +26,10 @@ final class SemanticEmbedder: @unchecked Sendable {
     private let model: MLModel
     private let vocab: [String: Int]
 
-    // Matches Python's max_len=64 in _tokenise()
-    private static let maxLen = 64
+    // Must match the fixed sequence length the CoreML model was exported with.
+    // The model description declares shape (1 x 32) for all three inputs;
+    // sending a shorter sequence without padding causes a shape-mismatch crash.
+    private static let maxLen = 32
 
     deinit {
         print("[Deinit] SemanticEmbedder (MLModel + vocab released)")
@@ -104,6 +106,7 @@ final class SemanticEmbedder: @unchecked Sendable {
     // MARK: - Tokenisation (mirrors semantic.py _tokenise)
 
     private func tokenize(_ text: String) -> (ids: [Int32], mask: [Int32], types: [Int32]) {
+        let pad = Int32(vocab["[PAD]"] ?? 0)
         let unk = Int32(vocab["[UNK]"] ?? 100)
         let cls = Int32(vocab["[CLS]"] ?? 101)
         let sep = Int32(vocab["[SEP]"] ?? 102)
@@ -115,8 +118,18 @@ final class SemanticEmbedder: @unchecked Sendable {
         }
         ids.append(sep)
 
-        let mask  = [Int32](repeating: 1, count: ids.count)
-        let types = [Int32](repeating: 0, count: ids.count)
+        // Mask: 1 for real tokens, 0 for padding. The model's fixed shape requires
+        // all three arrays to be exactly maxLen regardless of actual text length.
+        var mask  = [Int32](repeating: 1, count: ids.count)
+        var types = [Int32](repeating: 0, count: ids.count)
+
+        let padCount = Self.maxLen - ids.count
+        if padCount > 0 {
+            ids   += [Int32](repeating: pad, count: padCount)
+            mask  += [Int32](repeating: 0,   count: padCount)
+            types += [Int32](repeating: 0,   count: padCount)
+        }
+
         return (ids, mask, types)
     }
 

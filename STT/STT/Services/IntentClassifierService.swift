@@ -28,6 +28,8 @@ public struct ClassificationResult: Sendable {
     public let confidence: Double
     /// True when Stage 3 (MiniLM semantic rescue) produced this result.
     public let semanticRescue: Bool
+    /// Per-stage detail for the eye-button debug panel.
+    public let breakdown: ClassificationBreakdown
 }
 
 // MARK: - Service
@@ -211,16 +213,21 @@ public actor IntentClassifierService {
     public func classifyAsync(_ text: String) async -> ClassificationResult {
         // Stage 1
         if let kw = keywordMatcher.match(text) {
-            return ClassificationResult(label: kw.label, confidence: kw.confidence, semanticRescue: false)
+            let bd = ClassificationBreakdown(winningStage: 1, stage2: nil, stage3: nil)
+            return ClassificationResult(label: kw.label, confidence: kw.confidence,
+                                        semanticRescue: false, breakdown: bd)
         }
 
         // Stage 2 — already off the main thread: this method runs on the actor's
         // own executor, so no extra detached hop is needed.
         let (stage2Label, stage2Conf) = stage2Classify(text)
+        let s2 = ClassificationBreakdown.StageResult(stage: 2, intent: stage2Label, confidence: stage2Conf)
         let stage2Failed = stage2Label == Self.fallbackLabel || stage2Conf < confThreshold
 
         if !stage2Failed {
-            return ClassificationResult(label: stage2Label, confidence: stage2Conf, semanticRescue: false)
+            let bd = ClassificationBreakdown(winningStage: 2, stage2: s2, stage3: nil)
+            return ClassificationResult(label: stage2Label, confidence: stage2Conf,
+                                        semanticRescue: false, breakdown: bd)
         }
 
         // Stage 3 — only runs when Stage 2 is uncertain AND Stage 3 has been
@@ -228,13 +235,23 @@ public actor IntentClassifierService {
         if let embedder = semanticEmbedder, let head = semanticClassifier,
            let embedding = await embedder.embed(text) {
             let (semLabel, semConf) = head.classify(embedding)
+            let s3 = ClassificationBreakdown.StageResult(stage: 3, intent: semLabel, confidence: semConf)
             if semLabel != Self.fallbackLabel && semConf >= Self.semanticThreshold {
                 logger.info("Semantic rescue: '\(text)' → \(semLabel) (\(String(format: "%.2f", semConf)))")
-                return ClassificationResult(label: semLabel, confidence: semConf, semanticRescue: true)
+                let bd = ClassificationBreakdown(winningStage: 3, stage2: s2, stage3: s3)
+                return ClassificationResult(label: semLabel, confidence: semConf,
+                                            semanticRescue: true, breakdown: bd)
             }
+            // Stage 3 ran but neither stage met threshold → GENAI fallback.
+            let bd = ClassificationBreakdown(winningStage: nil, stage2: s2, stage3: s3)
+            return ClassificationResult(label: stage2Label, confidence: stage2Conf,
+                                        semanticRescue: false, breakdown: bd)
         }
 
-        return ClassificationResult(label: stage2Label, confidence: stage2Conf, semanticRescue: false)
+        // Stage 3 not loaded → GENAI fallback, only Stage 2 data available.
+        let bd = ClassificationBreakdown(winningStage: nil, stage2: s2, stage3: nil)
+        return ClassificationResult(label: stage2Label, confidence: stage2Conf,
+                                    semanticRescue: false, breakdown: bd)
     }
 
     /// Sync Stages 1+2 only. Used by `predict()` and legacy callers.

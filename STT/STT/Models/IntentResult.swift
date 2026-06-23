@@ -3,6 +3,25 @@
 
 import Foundation
 
+/// Per-stage debug breakdown produced by the 3-stage classification pipeline.
+/// Attached to cards so the eye button can show exactly which stage answered and why.
+public struct ClassificationBreakdown: Sendable {
+    public struct StageResult: Sendable {
+        /// 1 = keyword rule, 2 = TF-IDF CoreML, 3 = MiniLM semantic
+        public let stage: Int
+        public let intent: String
+        public let confidence: Double
+    }
+
+    /// Stage that produced the winning answer (1–3).
+    /// `nil` when no stage met the confidence threshold → GENAI fallback.
+    public let winningStage: Int?
+    /// Stage 2 (TF-IDF) result. `nil` only for pure keyword (stage 1) hits.
+    public let stage2: StageResult?
+    /// Stage 3 (MiniLM) result. `nil` if Stage 3 not loaded or not triggered.
+    public let stage3: StageResult?
+}
+
 /// The outcome of running intent classification on a transcription result.
 public enum IntentResult: Sendable {
     /// A recognised intent with its label and model confidence (0–1).

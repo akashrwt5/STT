@@ -24,6 +24,8 @@ public struct TranscriptionResult: Identifiable, Sendable {
     public var intentResult: IntentResult?
     /// Extracted slot parameters when a multi-turn intent is fulfilled (e.g. REMINDER → name, date-time).
     public var slots: [String: String]?
+    /// Per-stage debug breakdown for the eye-button detail panel.
+    public var classificationBreakdown: ClassificationBreakdown?
 
     public init(
         id: UUID = UUID(),

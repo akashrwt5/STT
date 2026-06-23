@@ -7,7 +7,14 @@ import SwiftUI
 struct STTTestView: View {
     @State private var selectedTab: Tab = .live
     @State private var showLanguagePicker = false
-    @State private var coordinator = TranscriptionCoordinator()
+    @State private var coordinator: TranscriptionCoordinator
+    @State private var liveViewModel: LiveTranscriptionViewModel
+
+    init() {
+        let c = TranscriptionCoordinator()
+        _coordinator = State(initialValue: c)
+        _liveViewModel = State(initialValue: LiveTranscriptionViewModel(coordinator: c))
+    }
 
     enum Tab: String, CaseIterable {
         case live = "Live"
@@ -61,9 +68,8 @@ struct STTTestView: View {
             Spacer()
 
             // Diagnostic lifecycle buttons.
-            //  Init IC / Free IC : create or release the entire IntentClassifier
-            //  Load 3 / Free 3   : load or release Stage 3 (MiniLM) on the
-            //                       currently-loaded IntentClassifier
+            //  IC+ / IC- : create or release the coordinator's diagnostic IntentClassifier
+            //  S3+ / S3- : load or release Stage 3 (MiniLM) on the live NLU classifier
             // Each tap brackets the operation with MemoryProbe so the console
             // shows phys_footprint Δ. Combined with the [Deinit] logs on
             // IntentClassifierService / SemanticEmbedder / SemanticClassifier,
@@ -93,7 +99,7 @@ struct STTTestView: View {
                     #if DEBUG
                     let before = MemoryProbe.snapshot(label: "before Stage3 Load")
                     #endif
-                    await coordinator.loadStage3()
+                    await liveViewModel.loadStage3()
                     #if DEBUG
                     let after = MemoryProbe.snapshot(label: "after Stage3 Load")
                     MemoryProbe.logDiff(before: before, after: after)
@@ -103,7 +109,7 @@ struct STTTestView: View {
                     #if DEBUG
                     let before = MemoryProbe.snapshot(label: "before Stage3 Release")
                     #endif
-                    await coordinator.releaseStage3()
+                    await liveViewModel.releaseStage3()
                     #if DEBUG
                     let after = MemoryProbe.snapshot(label: "after Stage3 Release")
                     MemoryProbe.logDiff(before: before, after: after)
@@ -194,7 +200,7 @@ struct STTTestView: View {
     private var tabContent: some View {
         switch selectedTab {
         case .live:
-            LiveTranscriptionView(coordinator: coordinator)
+            LiveTranscriptionView(viewModel: liveViewModel)
                 .transition(.asymmetric(
                     insertion: .move(edge: .leading),
                     removal: .move(edge: .leading)

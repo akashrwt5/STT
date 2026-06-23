@@ -5,13 +5,9 @@ import SwiftUI
 
 /// Hero screen for real-time microphone transcription.
 struct LiveTranscriptionView: View {
-    @State private var viewModel: LiveTranscriptionViewModel
+    @Bindable var viewModel: LiveTranscriptionViewModel
     @State private var showLanguagePicker = false
     @State private var transcriptOpacity = 1.0
-
-    init(coordinator: TranscriptionCoordinator) {
-        _viewModel = State(initialValue: LiveTranscriptionViewModel(coordinator: coordinator))
-    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -293,6 +289,7 @@ struct LiveTranscriptionView: View {
 }
 
 #Preview {
-    LiveTranscriptionView(coordinator: TranscriptionCoordinator())
+    let c = TranscriptionCoordinator()
+    LiveTranscriptionView(viewModel: LiveTranscriptionViewModel(coordinator: c))
         .preferredColorScheme(.dark)
 }

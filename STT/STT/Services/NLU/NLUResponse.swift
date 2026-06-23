@@ -16,10 +16,10 @@ public indirect enum NLUResponse: Sendable {
 
     /// All slots collected (or none needed) — ready to execute `action`.
     /// `semanticRescue` is true when Stage 3 (MiniLM) classified this intent.
-    case fulfill(intent: String, action: String?, parameters: [String: String], message: String, confidence: Double, semanticRescue: Bool = false)
+    case fulfill(intent: String, action: String?, parameters: [String: String], message: String, confidence: Double, semanticRescue: Bool = false, breakdown: ClassificationBreakdown? = nil)
 
     /// Low confidence or out-of-scope — hand off to the GenAI fallback URL.
-    case fallback(url: URL, confidence: Double)
+    case fallback(url: URL, confidence: Double, breakdown: ClassificationBreakdown? = nil)
 
     /// The user switched topics mid slot-filling. `cancelledIntent` is the
     /// abandoned flow; `result` is the outcome for the new intent (mirrors

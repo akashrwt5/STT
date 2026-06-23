@@ -182,10 +182,11 @@ public actor NLUEngine {
             }
         }
 
-        return advanceSlots(intent, cfg)
+        return advanceSlots(intent, cfg, breakdown: session.pendingBreakdown)
     }
 
-    private func advanceSlots(_ intent: String, _ cfg: IntentDef) -> NLUResponse {
+    private func advanceSlots(_ intent: String, _ cfg: IntentDef,
+                               breakdown: ClassificationBreakdown? = nil) -> NLUResponse {
         for slot in cfg.slots where slot.required && session.pendingSlots[slot.name] == nil {
             session.pendingIntent = intent
             session.awaitingSlot = slot.name
@@ -194,29 +195,31 @@ public actor NLUEngine {
         let params = session.pendingSlots
         session.resetSlotFilling()
         return .fulfill(intent: intent, action: cfg.action,
-                        parameters: params, message: cfg.fulfillment ?? "", confidence: 1.0)
+                        parameters: params, message: cfg.fulfillment ?? "", confidence: 1.0,
+                        breakdown: breakdown)
     }
 
     // MARK: - New intent (priority 3)
 
     private func handleNewIntent(_ text: String) async -> NLUResponse {
         session.decrementContexts()
-        let result  = await classifier.classifyAsync(text)
-        let intent  = result.label
-        let conf    = result.confidence
-        let rescued = result.semanticRescue
+        let result   = await classifier.classifyAsync(text)
+        let intent   = result.label
+        let conf     = result.confidence
+        let rescued  = result.semanticRescue
+        let breakdown = result.breakdown
 
         // Semantic rescue already passed its own 0.55 gate inside classifyAsync.
         // Do NOT re-apply Stage 2's 0.70 threshold to a semanticRescue result —
         // doing so would drop every rescue (rescue conf 0.55–0.69 → false fallback).
         let outOfScope = intent == "OUT_OF_SCOPE" || intent == "Default Fallback Intent"
         if !rescued && (outOfScope || conf < schema.confidenceThreshold) {
-            return .fallback(url: await classifier.genaiURL(for: text), confidence: conf)
+            return .fallback(url: await classifier.genaiURL(for: text), confidence: conf, breakdown: breakdown)
         }
 
         guard let cfg = schema.intents[intent] else {
             // Intent recognized but has no schema config — simple single-turn, no slot filling.
-            return .fulfill(intent: intent, action: nil, parameters: [:], message: "", confidence: conf, semanticRescue: rescued)
+            return .fulfill(intent: intent, action: nil, parameters: [:], message: "", confidence: conf, semanticRescue: rescued, breakdown: breakdown)
         }
 
         // Intent that opens with a yes/no confirmation (e.g. Cmd.SendMessage).
@@ -233,12 +236,13 @@ public actor NLUEngine {
             session.pendingIntent = intent
             session.pendingSlots = slots
             session.awaitingSlot = nil
-            return advanceSlots(intent, cfg)
+            session.pendingBreakdown = breakdown
+            return advanceSlots(intent, cfg, breakdown: breakdown)
         }
 
         // Simple single-turn intent.
         return .fulfill(intent: intent, action: cfg.action,
-                        parameters: [:], message: cfg.fulfillment ?? "", confidence: conf, semanticRescue: rescued)
+                        parameters: [:], message: cfg.fulfillment ?? "", confidence: conf, semanticRescue: rescued, breakdown: breakdown)
     }
 
     // MARK: - Slot extraction helpers
@@ -335,6 +339,19 @@ public actor NLUEngine {
         }
         let stripped = entities.stripDateTime(t)
         return stripped.isEmpty ? nil : stripped
+    }
+
+    // MARK: - Stage 3 lifecycle
+
+    /// Loads MiniLM + SemanticHead and triggers ANE specialization.
+    /// After this call, low-confidence Stage 2 results are rescued by Stage 3.
+    public func loadStage3() async {
+        await classifier.loadStage3()
+    }
+
+    /// Releases Stage 3 refs. Stage 3 is skipped on future classifications.
+    public func releaseStage3() async {
+        await classifier.releaseStage3()
     }
 
     // MARK: - Misc

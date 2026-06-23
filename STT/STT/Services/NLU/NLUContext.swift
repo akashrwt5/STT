@@ -44,6 +44,9 @@ public final class NLUSession: @unchecked Sendable {
     /// Mirrors Python NLUEngine.MAX_SLOT_ATTEMPTS = 3: at 3 failures the engine
     /// abandons the flow and falls back to GenAI so the user is never trapped.
     public var slotAttempts: Int = 0
+    /// The classification breakdown from the first turn of a slot-filling flow.
+    /// Preserved across turns so the final `.fulfill` card can show the eye button.
+    public var pendingBreakdown: ClassificationBreakdown?
 
     public init(sessionID: String) {
         self.sessionID = sessionID
@@ -81,6 +84,7 @@ public final class NLUSession: @unchecked Sendable {
         awaitingSlot = nil
         partialDateTime = nil
         slotAttempts = 0
+        pendingBreakdown = nil
     }
 
     /// Full reset — drops contexts and slot-filling state. Used when starting over.

@@ -48,16 +48,11 @@ public final class LiveTranscriptionViewModel {
     // MARK: - Private
 
     private let coordinator: TranscriptionCoordinator
-    // Lazy so the throwaway view models SwiftUI builds on every re-render (see the
-    // note in `init`) don't construct the NLU stack on the main thread. The retained
-    // instance builds it on first use, after `activate()` has warmed it in background.
     // @ObservationIgnored: keeps it a real stored property (the @Observable macro
-    // turns tracked vars into computed ones, which can't be `lazy`); nlu never drives UI.
-    // TEMP-NLU-OFF: NLU disabled for IC-lifecycle experiment. The IntentClassifier
-    // is now owned by `coordinator.intentClassifier` and must be created via
-    // the "Init IC" button. Restore by un-commenting and pointing NLUEngine at
-    // `coordinator.intentClassifier` instead of the (now-removed) singleton.
-    // @ObservationIgnored private lazy var nlu = NLUEngine()
+    // turns tracked vars into computed ones); nlu never drives UI.
+    // Initialized in activate() on the @State-retained instance (not in init, which
+    // runs on throwaway view models SwiftUI creates on every parent re-render).
+    @ObservationIgnored private var nlu: NLUEngine?
     private let speaker = ConversationSpeaker()
     /// Accumulates the spoken text across a multi-turn exchange so the final card
     /// shows the complete phrase (e.g. "remind me" + "take medication" + "tomorrow").
@@ -96,9 +91,11 @@ public final class LiveTranscriptionViewModel {
         speaker.onFinish = { [weak self] in self?.handleSpeechFinished() }
         speaker.onCancel = { [weak self] in self?.handleSpeechCancelled() }
 
-        // TEMP-NLU-OFF: warmUp removed for IC-lifecycle experiment — IC is now
-        // instantiated explicitly via the "Init IC" button.
-        // Task(priority: .userInitiated) { await IntentClassifierService.shared.warmUp() }
+        if nlu == nil {
+            let ic = IntentClassifierService()   // Stage 2 only; loadStage3() never called
+            nlu = NLUEngine(classifier: ic)
+            Task(priority: .userInitiated) { await ic.warmUp() }
+        }
 
         // Pre-load the Apple speech model (locale resolve → asset install/reserve →
         // SpeechTranscriber + SpeechAnalyzer creation) in the background so the first
@@ -152,6 +149,17 @@ public final class LiveTranscriptionViewModel {
         }
     }
 
+    /// Loads Stage 3 (MiniLM semantic rescue) on the NLU's classifier.
+    /// After this call, low-confidence Stage 2 results are rescued by Stage 3.
+    public func loadStage3() async {
+        await nlu?.loadStage3()
+    }
+
+    /// Releases Stage 3 refs. Stage 3 is skipped on future classifications.
+    public func releaseStage3() async {
+        await nlu?.releaseStage3()
+    }
+
     /// Clears all stored final results and the current transcript.
     public func clearResults() {
         results.removeAll()
@@ -161,8 +169,7 @@ public final class LiveTranscriptionViewModel {
         conversationTranscripts.removeAll()
         isSpeaking = false
         speaker.stop()
-        // TEMP-NLU-OFF: nlu property removed for IC-lifecycle experiment.
-        // Task { [nlu] in await nlu.reset() }
+        Task { [nlu] in await nlu?.reset() }
     }
 
     // MARK: - Private
@@ -236,18 +243,17 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
         guard !isSpeaking else { return }
 
         transcript = text
-        // TEMP-NLU-OFF: NLU pipeline disabled for IC-lifecycle experiment.
-        // Restore by un-commenting (and re-introducing the `nlu` property).
-        // let receivedAt = CFAbsoluteTimeGetCurrent()
-        // Task(priority: .userInitiated) { [nlu, weak self] in
-        //     let response = await nlu.handle(text)
-        //     let nluMs = (CFAbsoluteTimeGetCurrent() - receivedAt) * 1000
-        //     await MainActor.run { [weak self] in
-        //         guard let self else { return }
-        //         self.latencyLog.info("NLU handle: \(nluMs, format: .fixed(precision: 1))ms")
-        //         self.apply(response, utterance: text, receivedAt: receivedAt)
-        //     }
-        // }
+        guard let nlu else { return }
+        let receivedAt = CFAbsoluteTimeGetCurrent()
+        Task(priority: .userInitiated) { [nlu, weak self] in
+            let response = await nlu.handle(text)
+            let nluMs = (CFAbsoluteTimeGetCurrent() - receivedAt) * 1000
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.latencyLog.info("NLU handle: \(nluMs, format: .fixed(precision: 1))ms")
+                self.apply(response, utterance: text, receivedAt: receivedAt)
+            }
+        }
     }
 
     /// Applies an NLU turn result.
@@ -270,17 +276,19 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
             pendingQuestion = question
             ask(question, receivedAt: receivedAt)
 
-        case .fulfill(let intent, _, let parameters, let message, let confidence, let semanticRescue):
+        case .fulfill(let intent, _, let parameters, let message, let confidence, let semanticRescue, let breakdown):
             appendConversationCard(
                 intent: .intent(label: intent, confidence: confidence, semanticRescue: semanticRescue),
-                slots: parameters.isEmpty ? nil : parameters
+                slots: parameters.isEmpty ? nil : parameters,
+                breakdown: breakdown
             )
             announce(message, receivedAt: receivedAt)
 
-        case .fallback(let url, let confidence):
+        case .fallback(let url, let confidence, let breakdown):
             appendConversationCard(
                 intent: .genai(url: url, confidence: confidence),
-                slots: nil
+                slots: nil,
+                breakdown: breakdown
             )
 
         case .interrupted(let cancelledIntent, let newResult):
@@ -336,7 +344,8 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
     }
 
     /// Builds one card from the full accumulated conversation and resets the buffer.
-    private func appendConversationCard(intent: IntentResult, slots: [String: String]?) {
+    private func appendConversationCard(intent: IntentResult, slots: [String: String]?,
+                                        breakdown: ClassificationBreakdown? = nil) {
         let fullText = conversationTranscripts.joined(separator: " ")
         var card = TranscriptionResult(
             text: fullText,
@@ -346,6 +355,7 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
         )
         card.intentResult = intent
         card.slots = slots
+        card.classificationBreakdown = breakdown
         results.append(card)
 
         pendingQuestion = nil
