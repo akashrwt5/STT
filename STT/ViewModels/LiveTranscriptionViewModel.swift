@@ -172,6 +172,14 @@ public final class LiveTranscriptionViewModel {
         Task { [nlu] in await nlu?.reset() }
     }
 
+    /// Stops recording and TTS immediately. Call before releasing this instance
+    /// (e.g., from PVASheetView.onDisappear) so in-flight tasks can cancel cleanly.
+    public func teardown() {
+        if isListening || isStarting { stopRecording() }
+        speaker.stop()
+        isSpeaking = false
+    }
+
     // MARK: - Private
 
     private func startRecording() {
@@ -225,6 +233,10 @@ public final class LiveTranscriptionViewModel {
         levelTimer?.invalidate()
         levelTimer = nil
         audioLevel = 0.0
+    }
+
+    deinit {
+        print("[Deinit] LiveTranscriptionViewModel")
     }
 }
 

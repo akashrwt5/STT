@@ -120,6 +120,10 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         isSpeaking = false
     }
 
+    deinit {
+        print("[Deinit] ConversationSpeaker")
+    }
+
     // MARK: - AVSpeechSynthesizerDelegate
 
     public nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,

@@ -3,30 +3,17 @@
 
 import SwiftUI
 
-/// Root test screen with tab switching between Live and File transcription modes.
+/// Root landing screen.
+///
+/// Provides a prominent launch point for the onDevice PVA session (full sheet with
+/// S1/S2/S3 pipeline) and secondary access to file transcription.
 struct STTTestView: View {
-    @State private var selectedTab: Tab = .live
+    @State private var coordinator = TranscriptionCoordinator()
     @State private var showLanguagePicker = false
-    @State private var coordinator: TranscriptionCoordinator
-    @State private var liveViewModel: LiveTranscriptionViewModel
-
-    init() {
-        let c = TranscriptionCoordinator()
-        _coordinator = State(initialValue: c)
-        _liveViewModel = State(initialValue: LiveTranscriptionViewModel(coordinator: c))
-    }
-
-    enum Tab: String, CaseIterable {
-        case live = "Live"
-        case file = "File"
-
-        var icon: String {
-            switch self {
-            case .live: return "mic.fill"
-            case .file: return "waveform"
-            }
-        }
-    }
+    @State private var showFileTranscription = false
+    /// Non-nil while a PVA sheet is open. Setting this to nil dismisses the sheet
+    /// and triggers full deallocation of the coordinator + NLU pipeline it owns.
+    @State private var pvaViewModel: PVAViewModel?
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -34,11 +21,21 @@ struct STTTestView: View {
 
             VStack(spacing: 0) {
                 header
-                customTabBar
-                tabContent
+                Spacer()
+                pvaLauncher
+                Spacer()
+                fileTranscriptionLink
+                    .padding(.bottom, 52)
             }
         }
         .preferredColorScheme(.dark)
+        .sheet(item: $pvaViewModel) { vm in
+            PVASheetView(viewModel: vm)
+        }
+        .sheet(isPresented: $showFileTranscription) {
+            FileTranscriptionView(coordinator: coordinator)
+                .preferredColorScheme(.dark)
+        }
         .sheet(isPresented: $showLanguagePicker) {
             LanguageSelectorView(currentLocale: coordinator.currentLocale) { identifier in
                 Task { try? await coordinator.switchLocale(to: identifier) }
@@ -46,13 +43,13 @@ struct STTTestView: View {
         }
     }
 
-    // MARK: - Subviews
+    // MARK: - Header
 
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Speech Engine")
-                    .font(.system(size: 28, weight: .bold, design: .default))
+                    .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(.white)
 
                 HStack(spacing: 6) {
@@ -66,56 +63,6 @@ struct STTTestView: View {
             }
 
             Spacer()
-
-            // Diagnostic lifecycle buttons.
-            //  IC+ / IC- : create or release the coordinator's diagnostic IntentClassifier
-            //  S3+ / S3- : load or release Stage 3 (MiniLM) on the live NLU classifier
-            // Each tap brackets the operation with MemoryProbe so the console
-            // shows phys_footprint Δ. Combined with the [Deinit] logs on
-            // IntentClassifierService / SemanticEmbedder / SemanticClassifier,
-            // we can verify both deallocation AND memory reclaim.
-            HStack(spacing: 4) {
-                memoryLifecycleButton(title: "IC+", icon: "plus.circle") {
-                    #if DEBUG
-                    let before = MemoryProbe.snapshot(label: "before Init IC")
-                    #endif
-                    coordinator.initIntentClassifier()
-                    #if DEBUG
-                    let after = MemoryProbe.snapshot(label: "after Init IC")
-                    MemoryProbe.logDiff(before: before, after: after)
-                    #endif
-                }
-                memoryLifecycleButton(title: "IC-", icon: "minus.circle") {
-                    #if DEBUG
-                    let before = MemoryProbe.snapshot(label: "before Free IC")
-                    #endif
-                    coordinator.freeIntentClassifier()
-                    #if DEBUG
-                    let after = MemoryProbe.snapshot(label: "after Free IC")
-                    MemoryProbe.logDiff(before: before, after: after)
-                    #endif
-                }
-                memoryLifecycleButton(title: "S3+", icon: "arrow.down.to.line") {
-                    #if DEBUG
-                    let before = MemoryProbe.snapshot(label: "before Stage3 Load")
-                    #endif
-                    await liveViewModel.loadStage3()
-                    #if DEBUG
-                    let after = MemoryProbe.snapshot(label: "after Stage3 Load")
-                    MemoryProbe.logDiff(before: before, after: after)
-                    #endif
-                }
-                memoryLifecycleButton(title: "S3-", icon: "arrow.up.to.line") {
-                    #if DEBUG
-                    let before = MemoryProbe.snapshot(label: "before Stage3 Release")
-                    #endif
-                    await liveViewModel.releaseStage3()
-                    #if DEBUG
-                    let after = MemoryProbe.snapshot(label: "after Stage3 Release")
-                    MemoryProbe.logDiff(before: before, after: after)
-                    #endif
-                }
-            }
 
             Button {
                 showLanguagePicker = true
@@ -133,85 +80,98 @@ struct STTTestView: View {
         .padding(.bottom, 12)
     }
 
-    private func memoryLifecycleButton(
-        title: String,
-        icon: String,
-        action: @escaping () async -> Void
-    ) -> some View {
-        Button {
-            Task { await action() }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 11, weight: .semibold))
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-            }
-            .foregroundStyle(.white.opacity(0.75))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.white.opacity(0.08), in: Capsule())
-        }
-        .accessibilityLabel("\(title) speech model")
-    }
-
     private var headerSubtitle: String {
         let lang = Locale.current.localizedString(forIdentifier: coordinator.currentLocale.identifier)
             ?? coordinator.currentLocale.identifier
-        let route = coordinator.currentRoute.name
-        return "\(lang) · \(route)"
+        return "\(lang) · on-device"
     }
 
-    private var customTabBar: some View {
-        HStack(spacing: 0) {
-            ForEach(Tab.allCases, id: \.self) { tab in
-                Button {
-                    withAnimation(.spring(duration: 0.3)) { selectedTab = tab }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 13, weight: .semibold))
-                        Text(tab.rawValue)
-                            .font(.system(size: 14, weight: .semibold))
-                    }
-                    .foregroundStyle(selectedTab == tab ? .white : .white.opacity(0.35))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 40)
-                    .background {
-                        if selectedTab == tab {
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(.white.opacity(0.12))
-                                .matchedGeometryEffect(id: "tab", in: tabNamespace)
-                        }
-                    }
-                }
-                .accessibilityAddTraits(selectedTab == tab ? [.isSelected] : [])
+    // MARK: - PVA launcher
+
+    private var pvaLauncher: some View {
+        VStack(spacing: 28) {
+
+            // Icon cluster
+            ZStack {
+                Circle()
+                    .fill(Color(red: 0.1, green: 0.3, blue: 0.9).opacity(0.18))
+                    .frame(width: 96, height: 96)
+                Circle()
+                    .fill(Color(red: 0.15, green: 0.4, blue: 1.0).opacity(0.10))
+                    .frame(width: 70, height: 70)
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: 38))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.55, green: 0.78, blue: 1.0),
+                                Color(red: 0.3,  green: 0.55, blue: 1.0)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
             }
+
+            // Labels
+            VStack(spacing: 8) {
+                Text("onDevice PVA")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundStyle(.white)
+
+                Text("3-stage on-device intent classification\nKeyword · TF-IDF · MiniLM-L6-v2")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(0.38))
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
+
+            // Primary CTA
+            Button {
+                pvaViewModel = PVAViewModel()
+            } label: {
+                Text("Try onDevice PVA")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 264, height: 56)
+                    .background(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.25, green: 0.55, blue: 1.0),
+                                Color(red: 0.15, green: 0.40, blue: 0.95)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        in: RoundedRectangle(cornerRadius: 18)
+                    )
+                    .shadow(color: Color(red: 0.2, green: 0.45, blue: 1.0).opacity(0.40),
+                            radius: 16, x: 0, y: 6)
+            }
+            .accessibilityLabel("Start onDevice PVA session")
         }
-        .padding(4)
-        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
-        .padding(.horizontal, 20)
-        .padding(.bottom, 12)
     }
 
-    @Namespace private var tabNamespace
+    // MARK: - File transcription link
 
-    @ViewBuilder
-    private var tabContent: some View {
-        switch selectedTab {
-        case .live:
-            LiveTranscriptionView(viewModel: liveViewModel)
-                .transition(.asymmetric(
-                    insertion: .move(edge: .leading),
-                    removal: .move(edge: .leading)
-                ))
-        case .file:
-            FileTranscriptionView(coordinator: coordinator)
-                .transition(.asymmetric(
-                    insertion: .move(edge: .trailing),
-                    removal: .move(edge: .trailing)
-                ))
+    private var fileTranscriptionLink: some View {
+        Button {
+            showFileTranscription = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 13))
+                Text("File Transcription")
+                    .font(.system(size: 14, weight: .medium))
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(0.35))
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .background(.white.opacity(0.05), in: Capsule())
         }
+        .accessibilityLabel("Open file transcription")
     }
 }
 

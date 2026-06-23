@@ -118,6 +118,10 @@ public final class TranscriptionCoordinator {
         )
     }
 
+    deinit {
+        print("[Deinit] TranscriptionCoordinator")
+    }
+
     // MARK: - Pre-warm
 
     /// Pre-loads the Apple speech model (locale resolve → install/reserve →

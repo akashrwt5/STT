@@ -354,6 +354,10 @@ public actor NLUEngine {
         await classifier.releaseStage3()
     }
 
+    deinit {
+        print("[Deinit] NLUEngine")
+    }
+
     // MARK: - Misc
 
     private func wholeWord(_ word: String, in text: String) -> Bool {

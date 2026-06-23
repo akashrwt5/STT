@@ -92,4 +92,8 @@ public final class NLUSession: @unchecked Sendable {
         contexts.removeAll()
         resetSlotFilling()
     }
+
+    deinit {
+        print("[Deinit] NLUSession")
+    }
 }
