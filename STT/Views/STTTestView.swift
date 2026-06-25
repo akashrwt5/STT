@@ -14,6 +14,10 @@ struct STTTestView: View {
     /// Non-nil while a PVA sheet is open. Setting this to nil dismisses the sheet
     /// and triggers full deallocation of the coordinator + NLU pipeline it owns.
     @State private var pvaViewModel: PVAViewModel?
+    /// Persisted NLU pipeline selection. NLUVariant.RawValue == String satisfies
+    /// AppStorage's RawRepresentable requirement directly, so the choice survives
+    /// app restarts with no extra storage glue.
+    @AppStorage("selectedNLUVariant") private var variant: NLUVariant = .english
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -126,9 +130,30 @@ struct STTTestView: View {
                     .lineSpacing(3)
             }
 
+            // NLU variant selector — persisted across launches.
+            Picker("NLU Variant", selection: $variant) {
+                ForEach(NLUVariant.allCases) { v in
+                    Text(v.displayName).tag(v)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 32)
+            // Full teardown on switch: nil-ing pvaViewModel releases the entire
+            // pipeline (PVAViewModel → TranscriptionCoordinator →
+            // LiveTranscriptionViewModel → NLUEngine → classifier →
+            // SemanticEmbedder) before a new session is constructed, avoiding
+            // doubled ANE memory and audio-session conflicts. Verified by the
+            // [Deinit] log chain in the Xcode console.
+            .onChange(of: variant) { _, _ in
+                if pvaViewModel != nil {
+                    pvaViewModel?.teardown()
+                    pvaViewModel = nil
+                }
+            }
+
             // Primary CTA
             Button {
-                pvaViewModel = PVAViewModel()
+                pvaViewModel = PVAViewModel(variant: variant)
             } label: {
                 Text("Try onDevice PVA")
                     .font(.system(size: 17, weight: .semibold))
