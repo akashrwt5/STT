@@ -112,8 +112,8 @@ public actor IntentClassifierService {
     public init() {
         // -- Stage 2 primary: CoreML --
         // Xcode compiles .mlpackage → .mlmodelc at build time; try compiled form first.
-        let intentURL = Bundle.main.url(forResource: "IntentClassifier_multilingual", withExtension: "mlmodelc")
-                     ?? Bundle.main.url(forResource: "IntentClassifier_multilingual", withExtension: "mlpackage")
+        let intentURL = Bundle.main.url(forResource: "IntentClassifier", withExtension: "mlmodelc")
+                     ?? Bundle.main.url(forResource: "IntentClassifier", withExtension: "mlpackage")
         if let modelURL = intentURL {
             let config = MLModelConfiguration()
             config.computeUnits = .all
@@ -131,7 +131,7 @@ public actor IntentClassifierService {
         // NOTE: JSONSerialization below still parses the whole file (incl. coef) into a
         // transient dictionary at launch; that peak is unchanged. Only the *retained*
         // footprint shrinks. Splitting coef into its own file would remove the peak too.
-        let jsonURL = Bundle.main.url(forResource: "multilingual_intent_classifier_weights",
+        let jsonURL = Bundle.main.url(forResource: "intent_classifier_weights",
                                       withExtension: "json")
         guard
             let url  = jsonURL,
