@@ -1,10 +1,48 @@
 # Multilingual NLU — Localized Prompts & Cross-Language Slot Filling
 
-**Status:** PLAN / SPEC — **DO NOT IMPLEMENT until explicitly approved ("go ahead").**
-**Branch:** `claude/coreml-temperature-ios`
+**Status:** PLAN / SPEC — code still gated. **Data drafting has begun** (see §0.1). Engine/parser
+implementation remains **DO NOT IMPLEMENT until explicitly approved ("go ahead").**
+**Branch:** `claude/coreml-temperature-ios` (STT) · `claude/coreml-export` (IntentClassifier).
 **Owner persona:** Principal ML Engineer (on-device NLU, calibration, server↔device parity) + Swift/iOS.
 **Related:** `docs/MULTILINGUAL_NLU_IMPLEMENTATION.md` (the model-variant work, already shipped),
 `docs/MULTILINGUAL_TEST_RESOURCE_WIRING.md` (test-target wiring).
+
+---
+
+## 0.1 Drafting progress (data artifacts landed)
+
+The multilingual classifier targets **four languages — en, fr, de, da** (per
+`scripts/nlu_cli_multilingual.py --model`). English is canonical; the **fr / de / da** data drafts
+are now committed as **draft-for-native-review** artifacts, mirrored in both repos:
+
+- **IntentClassifier (source of truth):** `data/localization/nlu_{entities,schema,lexicon}.<lang>.json`
+- **STT (mirror):** `docs/localization-drafts/nlu_{entities,schema,lexicon}.<lang>.json`
+
+Three file families per language (12 data files total: 3 langs × {entities, schema, lexicon}, plus
+the pre-existing canonical en):
+
+| Family | Role | Parity verified |
+|--------|------|-----------------|
+| `nlu_entities.<lang>.json` | Enum synonyms, English canonical keys, English synonyms retained + target added | memory 38 / recurrence 21 / remind 6 — keys identical to canonical, 0 English synonyms dropped |
+| `nlu_schema.<lang>.json` | Localization **overlay**: slot prompts, fulfillments, affirmative/negative (brand names untranslated) | all 59 canonical intents present, no missing/extra, same order |
+| `nlu_lexicon.<lang>.json` | Date/time grammar + yes/no/uncertain + carrier-phrase regexes | weekdays 7 / months 12 / numbers 0–31 each language |
+
+**Note on naming vs §3:** §3 proposes the idealized `structure.json` + `strings.<lang>.json` +
+`enums.<lang>.json` + `lexicon.<lang>.json` split. The first drafts were instead authored against the
+**existing canonical file shapes** (`nlu_entities.json` and a `nlu_schema.json` *overlay*) so native
+reviewers vet them in the structure they already know, and so they diff cleanly against the canonical
+English. The structure/strings decoupling in §3 remains the **Phase 0 code refactor** target — the
+drafted data maps onto it 1:1 (overlay `intents[].prompt` → `strings.<lang>.json` keyed prompts;
+`nlu_entities.<lang>` → `enums.<lang>`; `nlu_lexicon.<lang>` → `lexicon.<lang>`).
+
+**Parser traps the lexicons already flag** (must be honored when the lexicon-driven date engine in
+§3.4 / Phase 2 is built, or every affected reminder lands an hour off):
+- German **`halb drei` = 02:30** and Danish **`halv tre` = 02:30** — "half" counts *down* to the named hour.
+- French **`moins le quart`** subtracts from the *next* hour.
+
+**Still NOT done (unchanged gating):** keyword-trigger and back-reference **regexes are not localized**
+(language-specific grammar, authored separately); no code consumes these files yet; per-language
+golden fixtures and calibration are Phase 2/3.
 
 ---
 
@@ -288,11 +326,17 @@ defended in review, not the default.
 - **Phase 0 — Decouple (English-preserving, ~1–2 days):** split structure/strings; key-based prompts;
   move English statics into the `en` pack; thread language from ASR locale. Behavior identical to today,
   fully testable. Lands the seams safely.
-- **Phase 1 — Prompts + enum slots in N languages (data):** add `strings.fr/de.json` + `enums.fr/de.json`.
-  French/German users get localized prompts and enum slots immediately; date parsing still English
-  (documented). Visible win, low risk.
+- **Phase 1 — Prompts + enum slots in N languages (data):** add `strings.<lang>.json` +
+  `enums.<lang>.json`. French/German/Danish users get localized prompts and enum slots immediately;
+  date parsing still English (documented). Visible win, low risk.
+  **→ DATA DRAFTED (see §0.1):** `nlu_{entities,schema}.{fr,de,da}.json` exist in both repos as
+  draft-for-native-review. Remaining Phase-1 work: native review sign-off, then the Phase-0 decouple
+  so code reads the localized strings/enums by language.
 - **Phase 2 — Date grammar engine (hard):** refactor `extractDateTime` (Swift + Python) to lexicon+flags;
-  author `lexicon.fr/de.json`; per-language golden fixtures; parity gate green per language.
+  author `lexicon.<lang>.json`; per-language golden fixtures; parity gate green per language.
+  **→ LEXICON DATA DRAFTED (see §0.1):** `nlu_lexicon.{fr,de,da}.json` exist (weekdays/months/numbers/
+  time-of-day/relative units + carrier phrases + flagged `halb drei`/`halv tre`/`moins le quart` traps).
+  The lexicon-driven *engine* refactor and golden fixtures remain gated.
 - **Phase 3 — Calibration & gates:** per-language temperature/threshold tuning; reliability validation;
   extend gate-agreement parity test.
 - **Phase 4 (long-term/optional):** ML span tagger for languages where rule grammar plateaus; Android

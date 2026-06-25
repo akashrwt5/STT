@@ -1,30 +1,41 @@
 # Localization drafts (data only — NOT wired into the build)
 
-These are **draft data artifacts** for the multilingual NLU work
-(`docs/MULTILINGUAL_NLU_LOCALIZATION_PLAN.md`). They are intentionally kept under `docs/`
-(outside the synchronized `STT/` app group) so they are **not** bundled into the app yet.
-Nothing here changes app behavior. Wiring them in is the separate, approval-gated code work.
+**Draft data artifacts** for the multilingual NLU work (`../MULTILINGUAL_NLU_LOCALIZATION_PLAN.md`).
+Kept under `docs/` (outside the synchronized `STT/` app group) so they are **not** bundled into the
+app yet. Nothing here changes app behavior — wiring them in is the separate, approval-gated code work.
 
-## `nlu_entities.fr.json` — French enum entities
+These files are the **mirror** of the source of truth in the IntentClassifier repo
+(`IntentClassifier/data/localization/`). Keep the two copies byte-identical when either changes.
 
-Built from the French synonyms provided by the product owner, corrected to the production schema:
+## Scope: fr · de · da
 
-- **English canonical keys preserved** (`"Car"`, `"Take Medication"`, …) — only the *synonym lists*
-  are French. The owner's draft had the French word in the `value` field, which would break the
-  slot→action mapping and server parity; that has been flipped back.
-- **Full coverage:** memory 38/38, recurrence 21/21 (the missing `Biweekly`, `3 Months`, `6 Months`
-  were added), remind 6/6.
-- **English synonyms retained** alongside French for code-switching robustness.
-- **Quality fixes applied:** `Custom One` → "première coutume"; `Pick Up Prescription` → "récupérer /
-  aller chercher une ordonnance"; `Clean Hearing Aids` → "nettoyer les aides auditives"; "en plein air";
-  weekday plurals ("les vendredis").
+The multilingual classifier supports four languages — **en, fr, de, da**. English is canonical
+(it ships as `STT/STT/Resources/nlu_entities.json` + `nlu_schema.json`); this directory holds the
+**French, German, Danish** drafts. They are **machine-drafted and NOT yet native-reviewed**.
 
-### Still needs native review
-- Colloquial synonym expansion (e.g. Car → "auto"/"bagnole", Work → "boulot") — kept conservative here.
-- **False-positive risk:** the numeric memory names `one/two/three/four` include bare French words
-  `un`/`deux` which are extremely common tokens. They are only matched while filling the `MemoryName`
-  slot of the `Cmd.MemoryChange` intent (entity extraction is per-pending-slot), which bounds the risk,
-  but a native pass should confirm.
+## Three file families per language
 
-This file does **not** cover `sys.date-time` / `sys.number-integer` — those are grammar/code
-(the date lexicon), not synonym data. See the plan's §3.4 and §5.
+| File | What it localizes |
+|------|-------------------|
+| `nlu_entities.<lang>.json` | Enum synonyms (memory 38, recurrence 21, remind 6). English keys preserved; English synonyms kept + target synonyms added. |
+| `nlu_schema.<lang>.json` | **Overlay** carrying only translatable strings: slot prompts, fulfillments, affirmative/negative. Brand names left untranslated. `keyword_triggers`/`back_reference` regexes are **pending** (language-specific grammar). |
+| `nlu_lexicon.<lang>.json` | Date/time grammar (weekdays, months, numbers 0–31, ordinals, time-of-day, relative units), yes/no/uncertain words, and carrier-phrase regexes that strip reminder preambles. |
+
+`nlu_entities.fr.json` was hand-corrected earlier from the product owner's synonyms (English keys
+flipped back into place, missing recurrence values added); de/da entities were drafted to match its
+structure and quality bar.
+
+## ⚠️ Date-parser traps the drafts flag (honor these when the lexicon-driven parser lands)
+- **German `halb drei` = 02:30**, **Danish `halv tre` = 02:30** — "half" counts DOWN to the named
+  hour; a naive `X:30` reading is an hour late.
+- **French `moins le quart`** subtracts from the *next* hour.
+
+## Still needs native review (highlights)
+- **fr:** "programme" vs "mémoire" for the hearing-aid memory term; carrier `de|d'` over-stripping.
+- **de:** `halb drei` mapping; regional `dreiviertel`/`viertel`; broad synonyms (Speech→Gespräch/Sprache).
+- **da:** `halv tre` mapping; bare article "en"/"et" vs number 1; "jo"/"næ" particles; program vs hukommelse.
+- All: colloquial synonym expansion was kept conservative; numeric memory names (one/two/…) include
+  very common bare words, bounded only because entity extraction is per-pending-slot.
+
+The lexicon files cover `sys.date-time` / `sys.number-integer` (grammar/code), which the entity
+files intentionally do not. See the plan's §3.4 and §5.
