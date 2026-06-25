@@ -18,10 +18,13 @@
 
 import Foundation
 
-public actor NLUEngine {
+public actor NLUEngine: ConversationEngine {
 
     private let schema: NLUSchema
-    private let classifier: IntentClassifierService
+    // Depends on the abstraction, never a concrete classifier. The factory injects
+    // either IntentClassifierService or MultilingualIntentClassifierService; the
+    // orchestration body below is language-agnostic and identical for both.
+    private let classifier: any IntentClassifying
     private let entities: EntityExtractor
     private let session: NLUSession
     private let affirmative: Set<String>
@@ -29,7 +32,7 @@ public actor NLUEngine {
 
     public init(
         schema: NLUSchema = .loadFromBundle(),
-        classifier: IntentClassifierService,
+        classifier: any IntentClassifying,
         entities: EntityExtractor = EntityExtractor(),
         sessionID: String = "default"
     ) {
@@ -58,13 +61,21 @@ public actor NLUEngine {
     }
 
     /// Abandons any in-progress conversation (slot filling / confirmation).
-    public func reset() {
+    /// `async` to satisfy `ConversationEngine` (callers on the main actor await
+    /// every actor call uniformly); the body itself is synchronous.
+    public func reset() async {
         session.resetAll()
     }
 
     /// True when the engine is mid-conversation and the next utterance is an answer.
     public var isCollecting: Bool {
         session.pendingIntent != nil || activeConfirmation() != nil
+    }
+
+    /// Pre-warms the underlying classifier's CoreML graphs (ANE specialisation).
+    /// Delegates to the classifier so callers have a single warm-up entry point.
+    public func warmUp() async {
+        await classifier.warmUp()
     }
 
     // MARK: - Confirmation (priority 1)
