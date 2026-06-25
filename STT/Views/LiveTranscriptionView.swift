@@ -290,6 +290,9 @@ struct LiveTranscriptionView: View {
 
 #Preview {
     let c = TranscriptionCoordinator()
-    LiveTranscriptionView(viewModel: LiveTranscriptionViewModel(coordinator: c))
+    LiveTranscriptionView(viewModel: LiveTranscriptionViewModel(
+        coordinator: c,
+        factory: NLUEngineFactoryProvider.make(for: .english)
+    ))
         .preferredColorScheme(.dark)
 }

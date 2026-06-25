@@ -54,10 +54,14 @@ final class PVAViewModel: Identifiable {
 
     // MARK: - Init / deinit
 
-    init() {
+    /// - Parameter variant: selects the NLU pipeline. The matching factory is built
+    ///   here and injected into the live view model so no lower layer names a
+    ///   concrete classifier type.
+    init(variant: NLUVariant) {
         let c = TranscriptionCoordinator()
         self.coordinator = c
-        self.liveViewModel = LiveTranscriptionViewModel(coordinator: c)
+        let factory = NLUEngineFactoryProvider.make(for: variant)
+        self.liveViewModel = LiveTranscriptionViewModel(coordinator: c, factory: factory)
     }
 
     deinit {
