@@ -26,8 +26,13 @@ calibration contract.
 
 ## 1. How English works today (ground truth)
 
-Nothing *generates* `nlu_schema.json` / `nlu_entities.json` — they are **hand-authored JSON config
-files** in `STT/STT/Resources/`. They contain two distinct kinds of content:
+The STT files `STT/STT/Resources/nlu_schema.json` and `nlu_entities.json` are **vendored copies of the
+IntentClassifier repo's `data/nlu_schema.json` and `data/nlu_entities.json`** (the Swift headers say so:
+*"Mirrors IntentClassifier/data/nlu_schema.json"*, *"Mirrors IntentClassifier/scripts/nlu/entities.py"*).
+They live on ~20 IntentClassifier branches (e.g. `claude/coreml-export`); only `main` and a couple of
+working branches omit the `scripts/nlu/` directory. The date/number logic is a Swift port of the server's
+`scripts/nlu/entities.py`. These configs originate from a **Dialogflow agent** (exported as `Engage.zip`,
+20 languages) plus manual curation — see §1.4. They contain two distinct kinds of content:
 
 ### 1.1 `nlu_schema.json` — the conversation script
 - **Structure (language-neutral):** intents (`reminders.add`, `Cmd.MemoryChange`, `Cmd.SendMessage`),
@@ -56,6 +61,38 @@ These are English literals embedded directly in Swift and must also be externali
 **Parity contract:** `EntityExtractor.extractDateTime` carries the comment *"Keep the two in sync — the
 on-device result must match the server."* The server's `entities.py` is the source of truth. Any change
 here must change both, and be proven equal by fixtures.
+
+### 1.4 Existing Dialogflow / multilingual assets (what we can reuse)
+
+The IntentClassifier repo (branch `claude/coreml-export`) already contains multilingual source material.
+**It accelerates parts of this work but is NOT a drop-in generator for the localized configs.**
+
+Assets present:
+- `Engage.zip` — Dialogflow agent export, organized **per language for 20 languages** (`da de el en es fr
+  id it ja ko nl no pl pt-BR ru sv th tr zh-CN zh-TW`). Each `Engage/<lang>/<Intent>.txt` is a list of
+  user-says **training phrases**; `Engage/<lang>/_EntityMemory.txt` / `_EntityRecurrence.txt` /
+  `_EntityRemind.txt` are flat lists of entity **surface forms** (UTF-16).
+- `data/dialogflowData/{en,fr,de,nl}.csv` — flattened `text,intent` training data.
+- `data/Generated_Master_training_French_Data.csv` and `scripts/Translate/*.py` — French data generated via
+  `deep_translator.GoogleTranslator` (**machine translation**).
+
+Coverage vs. what we need:
+
+| Target artifact | DF data provides it? | Notes |
+|---|---|---|
+| Classifier training/eval data (per lang) | ✅ strong | 20-language phrase sets + CSVs. Best asset; likely already feeds the multilingual model. |
+| `enums.<lang>.json` synonyms | ⚠️ partial / raw | `_Entity*.txt` exist but are **flat lists with no canonical mapping** (French order ≠ English order), **incomplete** (`_EntityRemind` only for `da/en/id/sv/th/tr`; French's is empty), UTF-16. Usable as a **seed corpus after re-mapping + native cleanup**, not as-is. |
+| `strings.<lang>.json` prompts / fulfillments | ❌ no | Export captured user-says + entity entries only — no parameter prompts, no responses. Must be translated/authored separately. |
+| `lexicon.<lang>.json` date/number grammar | ❌ no | Dialogflow resolved `@sys.date-time` server-side; no portable parser. Still must be built (the hard part). |
+
+**Quality caveat:** any machine-translated material (the French CSV, `Generated_Master_*`) is acceptable
+for classifier robustness but **must not** be trusted for entity synonyms or user-facing prompts without
+native review — exactly the "synonyms are not translations" rule (§4).
+
+**How each phase uses it:** Phase 1 (enums) seeds `enums.<lang>.json` from `_Entity*.txt` **after**
+canonical re-mapping + native review; the model/classifier work reuses the 20-language phrase sets;
+Phase 2 (date grammar) gets **no** help from the export and is authored fresh; prompts (Phase 1 strings)
+are translated/authored, not extracted.
 
 ---
 
@@ -293,8 +330,9 @@ defended in review, not the default.
 ## 11. Open questions (resolve before Phase 2)
 
 1. Which languages ship first, and in what priority? (Affects fixture + native-sourcing effort.)
-2. Is `entities.py` / the server NLU on a reachable branch to refactor jointly? (The local IntentClassifier
-   checkout currently lacks `scripts/nlu/`; the date engine source of truth must be located.)
+2. Joint refactor target: the server NLU source of truth is `scripts/nlu/entities.py` + `data/nlu_*.json`
+   on IntentClassifier `claude/coreml-export` (and ~20 sibling branches). Confirm which branch becomes the
+   integration base so the lexicon-driven date engine lands in server + iOS (+ Android) together.
 3. Source for native synonyms — real usage logs, or native reviewers only?
 4. Does the multilingual model expose a language signal we could reuse for auto-detection later, or do we
    rely solely on the ASR locale?
