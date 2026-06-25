@@ -39,7 +39,7 @@ public struct ClassificationResult: Sendable {
 // the call and back on return. This replaces the previous `@unchecked Sendable`
 // class + per-call `Task.detached` hop — the actor provides both off-main
 // execution and serialisation for free.
-public actor IntentClassifierService {
+public actor IntentClassifierService: IntentClassifying {
 
     // MARK: - Lifecycle (instance-based, no singleton)
     //
