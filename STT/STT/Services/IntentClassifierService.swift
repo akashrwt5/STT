@@ -81,13 +81,19 @@ public actor IntentClassifierService {
     private let weightsURL: URL?
 
     /// Temperature for confidence calibration. The device contract is
-    /// `confidence = softmax(logits / temperature)` (see `softmaxScaled`). `T` is
+    /// `confidence = softmax(logits / temperature)` (see
+    /// `TFIDFLogisticScorer.softmaxScaled`). `T` is
     /// shipped in `intent_classifier_weights.json` (and in the .mlpackage
     /// metadata); a missing key ⇒ T = 1.0 (plain softmax), preserving backward
     /// compatibility with older bundles. This replaced the per-class isotonic
     /// calibration tables — temperature scaling is a single rank-preserving
     /// scalar, so it never re-ranks the predicted intent.
     private let temperature: Double
+
+    /// Shared, stateless vectorisation + confidence math. Holds vocab/idf/labels/
+    /// temperature; both classifiers delegate here so the TF-IDF → softmax(logits/T)
+    /// math lives in exactly one place. Constructed at the end of `init`.
+    private let scorer: TFIDFLogisticScorer
 
     // MARK: - Stage 3
 
@@ -151,6 +157,15 @@ public actor IntentClassifierService {
         // Temperature for the softmax(logits / T) confidence contract. Missing
         // key ⇒ 1.0 (plain softmax) for backward compatibility with older bundles.
         temperature = obj["temperature"] as? Double ?? 1.0
+
+        // Construct the shared scorer once all model parameters are parsed.
+        scorer = TFIDFLogisticScorer(
+            labels: labels,
+            vocab: vocab,
+            idf: idf,
+            temperature: temperature,
+            confThreshold: confThreshold
+        )
 
         // Stage 3 deliberately not loaded at init — call `loadStage3()` to
         // bring it up on demand. `semanticEmbedder` and `semanticClassifier`
@@ -302,7 +317,7 @@ public actor IntentClassifierService {
         let logits = logitsForScoring(text)
         guard !logits.isEmpty else { return ([], 0) }
         let top = logits.indices.max(by: { logits[$0] < logits[$1] }) ?? 0
-        return (softmaxScaled(logits, temperature: temperature), top)
+        return (scorer.softmaxScaled(logits), top)
     }
 
     /// Raw logits for scoring — CoreML's linear layer if the model exposes a
@@ -319,30 +334,13 @@ public actor IntentClassifierService {
 
     // MARK: - CoreML Stage 2
 
-    /// Builds the CoreML input feature provider for `text`, or nil on failure.
-    private func coreMLInput(for text: String) -> MLDictionaryFeatureProvider? {
-        let vec = tfidfVector(for: text)   // [Double], length == idf.count
-        let n   = vec.count
-        // The new mlprogram exporter declares "tfidf_vector" as FLOAT32; CoreML
-        // rejects a mismatched dtype, so build a .float32 array (a .double array
-        // would make prediction throw and silently fall back to JSON weights).
-        guard n > 0,
-              let arr = try? MLMultiArray(shape: [n as NSNumber], dataType: .float32)
-        else { return nil }
-        let arrPtr = arr.dataPointer.assumingMemoryBound(to: Float.self)
-        for i in 0..<n { arrPtr[i] = Float(vec[i]) }
-        return try? MLDictionaryFeatureProvider(dictionary: [
-            "tfidf_vector": MLFeatureValue(multiArray: arr)
-        ])
-    }
-
     /// CoreML raw logits aligned with `labels`, if the model exposes a "logits"
     /// output (the new mlprogram exporter emits logits as the sole output).
     /// Returns nil for older bundles, so the caller falls back to the pure-Swift
     /// logit computation.
     private func coreMLLogits(_ text: String, model: MLModel) -> [Double]? {
         guard
-            let input  = coreMLInput(for: text),
+            let input  = scorer.coreMLInput(for: text),
             let output = try? model.prediction(from: input),
             let logits = output.featureValue(for: "logits")?.multiArrayValue,
             logits.count == labels.count
@@ -377,57 +375,9 @@ public actor IntentClassifierService {
 
     private func tfidfLogits(_ text: String) -> [Double] {
         guard let w = ensureLogRegWeights() else { return [Double](repeating: 0, count: labels.count) }
-        let vec = tfidfVector(for: text)
+        let vec = scorer.tfidfVector(for: text)
         return w.coef.indices.map { c in
             zip(w.coef[c], vec).reduce(w.intercept[c]) { $0 + $1.0 * $1.1 }
         }
-    }
-
-    private func tfidfVector(for text: String) -> [Double] {
-        let tokens = tokenize(text)
-        var termCounts: [Int: Int] = [:]
-        for token in tokens {
-            if let idx = vocab[token] { termCounts[idx, default: 0] += 1 }
-        }
-        var vec = [Double](repeating: 0.0, count: idf.count)
-        for (idx, count) in termCounts {
-            vec[idx] = (1.0 + log(Double(count))) * idf[idx]  // sublinear TF
-        }
-        return l2Normalize(vec)
-    }
-
-    private func tokenize(_ text: String) -> [String] {
-        let lower = text.lowercased()
-        let words = lower.components(separatedBy: CharacterSet.alphanumerics.inverted)
-                         .filter { !$0.isEmpty }
-        var tokens = words
-        for i in words.indices.dropLast() {
-            tokens.append(words[i] + " " + words[i + 1])
-        }
-        return tokens
-    }
-
-    // MARK: - Math helpers
-
-    private func softmax(_ logits: [Double]) -> [Double] {
-        guard !logits.isEmpty else { return [] }
-        let maxVal = logits.max()!
-        let exps   = logits.map { exp($0 - maxVal) }
-        let sum    = exps.reduce(0, +)
-        return sum == 0 ? logits.map { _ in 1.0 / Double(logits.count) } : exps.map { $0 / sum }
-    }
-
-    /// `softmax(logits / T)` — the device confidence contract. `T` is the shipped
-    /// per-model temperature; T = 1.0 (or any non-positive value, defensively)
-    /// degenerates to plain softmax. Rank-preserving, so the argmax is unchanged.
-    private func softmaxScaled(_ logits: [Double], temperature: Double) -> [Double] {
-        let t = temperature > 0 ? temperature : 1.0
-        return softmax(logits.map { $0 / t })
-    }
-
-    private func l2Normalize(_ vec: [Double]) -> [Double] {
-        let norm = sqrt(vec.reduce(0) { $0 + $1 * $1 })
-        guard norm > 0 else { return vec }
-        return vec.map { $0 / norm }
     }
 }
