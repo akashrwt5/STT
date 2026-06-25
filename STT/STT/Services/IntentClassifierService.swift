@@ -80,10 +80,14 @@ public actor IntentClassifierService {
     /// Stored so the lazy loader can open the file without hitting Bundle.main again.
     private let weightsURL: URL?
 
-    /// Per-class isotonic calibration (device logit → server-calibrated prob),
-    /// exported by export_ios_weights.py. `nil` for older bundles, in which case
-    /// Stage 2 falls back to plain softmax. See `calibratedProbs(from:)`.
-    private let calibrationMaps: [(x: [Double], y: [Double])]?
+    /// Temperature for confidence calibration. The device contract is
+    /// `confidence = softmax(logits / temperature)` (see `softmaxScaled`). `T` is
+    /// shipped in `intent_classifier_weights.json` (and in the .mlpackage
+    /// metadata); a missing key ⇒ T = 1.0 (plain softmax), preserving backward
+    /// compatibility with older bundles. This replaced the per-class isotonic
+    /// calibration tables — temperature scaling is a single rank-preserving
+    /// scalar, so it never re-ranks the predicted intent.
+    private let temperature: Double
 
     // MARK: - Stage 3
 
@@ -144,19 +148,9 @@ public actor IntentClassifierService {
         confGapThreshold = obj["conf_gap_threshold"] as? Double ?? 0.20
         genaiBaseURL     = obj["genai_base_url"]     as? String ?? ""
 
-        // Calibration maps are small (~KB) and used on every CoreML classification
-        // to rescale raw logits → calibrated probabilities — load them now.
-        if let cal  = obj["calibration"] as? [String: Any],
-           let rows = cal["maps"] as? [[String: Any]],
-           rows.count == labels.count {
-            let parsed: [(x: [Double], y: [Double])] = rows.map {
-                (($0["x"] as? [Double]) ?? [], ($0["y"] as? [Double]) ?? [])
-            }
-            calibrationMaps = parsed.allSatisfy { !$0.x.isEmpty && $0.x.count == $0.y.count }
-                ? parsed : nil
-        } else {
-            calibrationMaps = nil
-        }
+        // Temperature for the softmax(logits / T) confidence contract. Missing
+        // key ⇒ 1.0 (plain softmax) for backward compatibility with older bundles.
+        temperature = obj["temperature"] as? Double ?? 1.0
 
         // Stage 3 deliberately not loaded at init — call `loadStage3()` to
         // bring it up on demand. `semanticEmbedder` and `semanticClassifier`
@@ -178,7 +172,7 @@ public actor IntentClassifierService {
             _ = await embedder.embed("hello")
         }
         if let model = coreMLModel {
-            _ = coreMLProbabilities("hello", model: model)
+            _ = coreMLLogits("hello", model: model)
         }
     }
 
@@ -298,66 +292,29 @@ public actor IntentClassifierService {
     /// Per-class Stage-2 probabilities (aligned with `labels`) plus the index of
     /// the predicted intent.
     ///
-    /// The predicted intent is always the base model's argmax (the softmax/logit
-    /// winner). When isotonic calibration tables are present we additionally
-    /// recalibrate the probabilities so the device's *confidence* matches the
-    /// server's CalibratedClassifierCV — without this, correct mid-confidence
-    /// intents fall below the 0.70 threshold. Crucially we DON'T let calibration
-    /// re-rank: each class has its own isotonic map, and the catch-all "Default
-    /// Fallback Intent" can otherwise steal probability mass after normalisation
-    /// and flip a confident command to a fallback. Keeping the label on the base
-    /// argmax preserves the model's decision while fixing only the confidence.
+    /// Device confidence contract: read the model's raw `logits` and return
+    /// `softmax(logits / temperature)`. The predicted intent is always the raw
+    /// logit argmax — temperature scaling is a single positive scalar, so it is
+    /// rank-preserving and never re-ranks. We deliberately do NOT consume the
+    /// .mlpackage's baked `classProbability`: that output is softmax at T=1 and
+    /// would over-/under-state confidence relative to the calibrated server gate.
     private func stage2Scores(_ text: String) -> (probs: [Double], top: Int) {
-        if let maps = calibrationMaps {
-            let logits = logitsForScoring(text)
-            // Label comes from the raw logits; calibration only rescales confidence.
-            let top = logits.indices.max(by: { logits[$0] < logits[$1] }) ?? 0
-            return (calibratedProbs(from: logits, maps: maps), top)
-        }
-        if let model = coreMLModel, let probs = coreMLProbabilities(text, model: model) {
-            return (probs, probs.indices.max(by: { probs[$0] < probs[$1] }) ?? 0)
-        }
-        let probs = softmax(tfidfLogits(text))
-        return (probs, probs.indices.max(by: { probs[$0] < probs[$1] }) ?? 0)
+        let logits = logitsForScoring(text)
+        guard !logits.isEmpty else { return ([], 0) }
+        let top = logits.indices.max(by: { logits[$0] < logits[$1] }) ?? 0
+        return (softmaxScaled(logits, temperature: temperature), top)
     }
 
-    /// Logits for calibration — CoreML's linear layer if the model exposes a
+    /// Raw logits for scoring — CoreML's linear layer if the model exposes a
     /// "logits" output, otherwise the pure-Swift TF-IDF + LogReg computation.
     private func logitsForScoring(_ text: String) -> [Double] {
         if let model = coreMLModel, let logits = coreMLLogits(text, model: model) {
             return logits
         }
-        // CM-3: log every time we miss CoreML logits so silent calibration degradation
-        // is visible in Console.app (filter by subsystem com.stt.module, category IntentClassifier).
-        logger.warning("coreMLLogits() returned nil — isotonic calibration falling back to Swift TF-IDF logits. Check that IntentClassifier.mlpackage exposes a 'logits' output.")
+        // CM-3: log every time we miss CoreML logits so silent degradation is
+        // visible in Console.app (filter by subsystem com.stt.module, category IntentClassifier).
+        logger.warning("coreMLLogits() returned nil — temperature scaling falling back to Swift TF-IDF logits. Check that IntentClassifier.mlpackage exposes a 'logits' output.")
         return tfidfLogits(text)
-    }
-
-    /// Apply the per-class isotonic maps to logits and renormalise to a
-    /// probability distribution. Falls back to softmax if the maps degenerate.
-    private func calibratedProbs(from logits: [Double],
-                                 maps: [(x: [Double], y: [Double])]) -> [Double] {
-        guard logits.count == maps.count else { return softmax(logits) }
-        let calibrated = logits.indices.map { interpolate(logits[$0], maps[$0].x, maps[$0].y) }
-        let sum = calibrated.reduce(0, +)
-        return sum > 0 ? calibrated.map { $0 / sum } : softmax(logits)
-    }
-
-    /// Clamped piecewise-linear interpolation over sorted breakpoints `xs`→`ys`.
-    private func interpolate(_ x: Double, _ xs: [Double], _ ys: [Double]) -> Double {
-        guard let first = xs.first, let firstY = ys.first else { return 0 }
-        if x <= first { return firstY }
-        if x >= xs[xs.count - 1] { return ys[ys.count - 1] }
-        // xs is ascending; find the bracketing segment.
-        var lo = 0, hi = xs.count - 1
-        while hi - lo > 1 {
-            let mid = (lo + hi) / 2
-            if xs[mid] <= x { lo = mid } else { hi = mid }
-        }
-        let span = xs[hi] - xs[lo]
-        guard span > 0 else { return ys[lo] }
-        let t = (x - xs[lo]) / span
-        return ys[lo] + t * (ys[hi] - ys[lo])
     }
 
     // MARK: - CoreML Stage 2
@@ -366,35 +323,23 @@ public actor IntentClassifierService {
     private func coreMLInput(for text: String) -> MLDictionaryFeatureProvider? {
         let vec = tfidfVector(for: text)   // [Double], length == idf.count
         let n   = vec.count
-        // The exported model declares its "tfidf_vector" input as FLOAT64 (double).
-        // A neuralNetwork model rejects a mismatched dtype, so build a .double array —
-        // a .float32 array would make prediction throw and silently fall back to JSON.
+        // The new mlprogram exporter declares "tfidf_vector" as FLOAT32; CoreML
+        // rejects a mismatched dtype, so build a .float32 array (a .double array
+        // would make prediction throw and silently fall back to JSON weights).
         guard n > 0,
-              let arr = try? MLMultiArray(shape: [n as NSNumber], dataType: .double)
+              let arr = try? MLMultiArray(shape: [n as NSNumber], dataType: .float32)
         else { return nil }
-        let arrPtr = arr.dataPointer.assumingMemoryBound(to: Double.self)
-        for i in 0..<n { arrPtr[i] = vec[i] }
+        let arrPtr = arr.dataPointer.assumingMemoryBound(to: Float.self)
+        for i in 0..<n { arrPtr[i] = Float(vec[i]) }
         return try? MLDictionaryFeatureProvider(dictionary: [
             "tfidf_vector": MLFeatureValue(multiArray: arr)
         ])
     }
 
-    /// CoreML softmax probabilities aligned with `labels` (uncalibrated).
-    private func coreMLProbabilities(_ text: String, model: MLModel) -> [Double]? {
-        guard
-            let input    = coreMLInput(for: text),
-            let output   = try? model.prediction(from: input),
-            // dictionaryValue returns [AnyHashable: Any] with NSNumber probability values.
-            let probDict = output.featureValue(for: "classProbability")?.dictionaryValue
-                           as? [String: NSNumber]
-        else { return nil }
-        // Re-align the dictionary into `labels` order so argmax stays consistent.
-        return labels.map { probDict[$0]?.doubleValue ?? 0.0 }
-    }
-
     /// CoreML raw logits aligned with `labels`, if the model exposes a "logits"
-    /// output (added by export_coreml.py). Returns nil for older bundles, so the
-    /// caller falls back to the pure-Swift logit computation.
+    /// output (the new mlprogram exporter emits logits as the sole output).
+    /// Returns nil for older bundles, so the caller falls back to the pure-Swift
+    /// logit computation.
     private func coreMLLogits(_ text: String, model: MLModel) -> [Double]? {
         guard
             let input  = coreMLInput(for: text),
@@ -470,6 +415,14 @@ public actor IntentClassifierService {
         let exps   = logits.map { exp($0 - maxVal) }
         let sum    = exps.reduce(0, +)
         return sum == 0 ? logits.map { _ in 1.0 / Double(logits.count) } : exps.map { $0 / sum }
+    }
+
+    /// `softmax(logits / T)` — the device confidence contract. `T` is the shipped
+    /// per-model temperature; T = 1.0 (or any non-positive value, defensively)
+    /// degenerates to plain softmax. Rank-preserving, so the argmax is unchanged.
+    private func softmaxScaled(_ logits: [Double], temperature: Double) -> [Double] {
+        let t = temperature > 0 ? temperature : 1.0
+        return softmax(logits.map { $0 / t })
     }
 
     private func l2Normalize(_ vec: [Double]) -> [Double] {
