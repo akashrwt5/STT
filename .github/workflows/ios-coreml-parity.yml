@@ -1,0 +1,81 @@
+name: iOS CoreML parity (XCTest)
+
+# Runs IntentClassifierCoreMLParityTests on a macOS runner: Swift device path
+# (TF-IDF -> .mlpackage logits -> softmax(logits/T)) vs the Python golden
+# fixtures. The model packages + weights live in the IntentClassifier repo, so
+# this job checks that repo out and rebuilds them.
+#
+# SETUP (one-time): add a repository secret INTENTCLASSIFIER_PAT — a GitHub PAT
+# (fine-grained or classic) with READ access to akashrwt5/IntentClassifier.
+# Both repos share an owner, so one token covers it. Without the secret the
+# cross-repo checkout step fails fast with a clear message.
+
+on:
+  push:
+    branches: [claude/coreml-temperature-ios]
+    paths:
+      - "STT/STT/Services/IntentClassifierService.swift"
+      - "STTTests/**"
+      - ".github/workflows/ios-coreml-parity.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  xctest:
+    runs-on: macos-latest
+    env:
+      LC_ALL: en_US.UTF-8
+      LANG: en_US.UTF-8
+    steps:
+      - name: Check out STT (iOS)
+        uses: actions/checkout@v4
+
+      - name: Check out IntentClassifier (model packages)
+        uses: actions/checkout@v4
+        with:
+          repository: akashrwt5/IntentClassifier
+          ref: claude/coreml-export
+          token: ${{ secrets.INTENTCLASSIFIER_PAT }}
+          path: intentclassifier
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build CoreML packages + fixtures
+        working-directory: intentclassifier
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy scipy scikit-learn joblib onnxruntime coremltools torch
+          python multilingual/export_coreml_multilingual.py --all --fp16
+          python multilingual/test/test_coreml_multilingual.py --emit-fixtures
+
+      - name: Stage model resources into STTTests
+        run: |
+          mkdir -p STTTests/Resources
+          cp intentclassifier/multilingual/test/coreml_golden_fixtures.json STTTests/Resources/
+          for m in en fr de da multilingual multilingual_small; do
+            src="intentclassifier/multilingual/models/$m"
+            cp -R "$src/IntentClassifier_$m.mlpackage" STTTests/Resources/
+            cp "$src/${m}_intent_classifier_weights.json" STTTests/Resources/
+          done
+          ls -la STTTests/Resources
+
+      - name: Pick an available iPhone simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; ids=[x['udid'] for v in d.values() for x in v if 'iPhone' in x['name']]; print(ids[0])")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Using simulator $UDID"
+
+      - name: Run parity XCTest
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project STT.xcodeproj \
+            -scheme STT \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -only-testing:STTTests/IntentClassifierCoreMLParityTests \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
