@@ -1,0 +1,87 @@
+{
+  "_meta": { "language": "de", "status": "draft-for-native-review" },
+  "grammar": {
+    "time_format": "24h",
+    "decimal_hour_idioms": ["Viertel nach","halb","Viertel vor","dreiviertel"],
+    "conjunction": "Uhr",
+    "notes": "PARSER TRAP: German 'halb' counts DOWN to the NAMED hour, not up. 'halb drei' = 2:30 (half of the way TO three), NOT 3:30. 'Viertel nach drei' = 3:15, 'Viertel vor drei' = 2:45. Times spoken in 24h with 'Uhr': '15 Uhr 30' = 15:30."
+  },
+  "weekdays": {
+    "Monday": ["Montag","montags","Mo"],
+    "Tuesday": ["Dienstag","dienstags","Di"],
+    "Wednesday": ["Mittwoch","mittwochs","Mi"],
+    "Thursday": ["Donnerstag","donnerstags","Do"],
+    "Friday": ["Freitag","freitags","Fr"],
+    "Saturday": ["Samstag","Sonnabend","samstags","sonnabends","Sa"],
+    "Sunday": ["Sonntag","sonntags","So"]
+  },
+  "day_anchors": {
+    "today": ["heute"],
+    "tomorrow": ["morgen"],
+    "day_after_tomorrow": ["übermorgen"],
+    "yesterday": ["gestern"],
+    "next_week": ["nächste Woche","kommende Woche"],
+    "next_month": ["nächsten Monat","kommenden Monat"],
+    "next_year": ["nächstes Jahr","kommendes Jahr"],
+    "this_weekend": ["dieses Wochenende","am Wochenende"]
+  },
+  "months": {
+    "January": ["Januar","Jänner","Jan"],
+    "February": ["Februar","Feber","Feb"],
+    "March": ["März","Mär"],
+    "April": ["April","Apr"],
+    "May": ["Mai"],
+    "June": ["Juni","Jun"],
+    "July": ["Juli","Jul"],
+    "August": ["August","Aug"],
+    "September": ["September","Sep","Sept"],
+    "October": ["Oktober","Okt"],
+    "November": ["November","Nov"],
+    "December": ["Dezember","Dez"]
+  },
+  "time_of_day": {
+    "morning": {"names": ["morgens","am Morgen","früh","vormittags","am Vormittag"], "hour": 8},
+    "noon": {"names": ["mittags","zu Mittag","am Mittag"], "hour": 12},
+    "afternoon": {"names": ["nachmittags","am Nachmittag"], "hour": 14},
+    "evening": {"names": ["abends","am Abend"], "hour": 18},
+    "night": {"names": ["nachts","in der Nacht","spät"], "hour": 21},
+    "midnight": {"names": ["Mitternacht","um Mitternacht"], "hour": 0}
+  },
+  "numbers_0_to_31": {
+    "0": ["null"], "1": ["eins","ein","eine"], "2": ["zwei","zwo"], "3": ["drei"],
+    "4": ["vier"], "5": ["fünf"], "6": ["sechs"], "7": ["sieben"], "8": ["acht"],
+    "9": ["neun"], "10": ["zehn"], "11": ["elf"], "12": ["zwölf"],
+    "13": ["dreizehn"], "14": ["vierzehn"], "15": ["fünfzehn"], "16": ["sechzehn"],
+    "17": ["siebzehn"], "18": ["achtzehn"], "19": ["neunzehn"], "20": ["zwanzig"],
+    "21": ["einundzwanzig"], "22": ["zweiundzwanzig"], "23": ["dreiundzwanzig"],
+    "24": ["vierundzwanzig"], "25": ["fünfundzwanzig"], "26": ["sechsundzwanzig"],
+    "27": ["siebenundzwanzig"], "28": ["achtundzwanzig"], "29": ["neunundzwanzig"],
+    "30": ["dreißig"], "31": ["einunddreißig"]
+  },
+  "relative_units": {
+    "minute": ["Minute","Minuten","Min"],
+    "hour": ["Stunde","Stunden","Std"],
+    "day": ["Tag","Tage","Tagen"],
+    "week": ["Woche","Wochen"],
+    "month": ["Monat","Monate","Monaten"],
+    "year": ["Jahr","Jahre","Jahren"]
+  },
+  "relative_markers": {
+    "in": ["in","nach","innerhalb"],
+    "at": ["um","gegen"],
+    "on": ["am","an","jeden"]
+  },
+  "affirmative": ["yes","ok","okay","ja","jawohl","jep","klar","sicher","genau","richtig","stimmt","senden","abschicken","bestätigen","mach das","nur zu","bitte"],
+  "negative": ["no","cancel","nein","nö","ne","nee","abbrechen","stopp","stop","halt","nicht","lass es","vergiss es","nein danke","lieber nicht"],
+  "uncertain": ["ich weiß nicht","weiß nicht","keine Ahnung","vielleicht","kann sein","möglicherweise","ich bin mir nicht sicher","nicht sicher","lass mich überlegen","mal überlegen","mal sehen"],
+  "carrier_phrases": [
+    "^erinnere\\s+mich\\s+(?:daran,?\\s+)?(?:dass\\s+ich\\s+|zu\\s+|an\\s+)?",
+    "^erinner\\s+mich\\s+(?:daran,?\\s+)?(?:dass\\s+ich\\s+|zu\\s+|an\\s+)?",
+    "^vergiss\\s+nicht,?\\s+(?:zu\\s+|dass\\s+ich\\s+)?",
+    "^denk\\s+(?:bitte\\s+)?daran,?\\s+(?:zu\\s+|dass\\s+ich\\s+)?",
+    "^denke\\s+(?:bitte\\s+)?daran,?\\s+(?:zu\\s+|dass\\s+ich\\s+)?",
+    "^ich\\s+muss\\s+(?:noch\\s+)?",
+    "^kannst\\s+du\\s+mich\\s+(?:daran\\s+)?erinnern,?\\s+(?:zu\\s+|dass\\s+ich\\s+)?",
+    "\\s+(?:bitte)\\s*$"
+  ]
+}
