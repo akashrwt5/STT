@@ -126,6 +126,6 @@ private struct StageStatusDot: View {
 }
 
 #Preview {
-    PVASheetView(viewModel: PVAViewModel())
+    PVASheetView(viewModel: PVAViewModel(variant: .english))
         .preferredColorScheme(.dark)
 }

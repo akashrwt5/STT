@@ -48,11 +48,15 @@ public final class LiveTranscriptionViewModel {
     // MARK: - Private
 
     private let coordinator: TranscriptionCoordinator
+    // Builds the variant-appropriate engine on demand. Injected so the ViewModel
+    // never names a concrete classifier/engine type — the variant is decided
+    // upstream (PVAViewModel → factory) and this layer stays variant-agnostic.
+    private let factory: any NLUEngineFactory
     // @ObservationIgnored: keeps it a real stored property (the @Observable macro
     // turns tracked vars into computed ones); nlu never drives UI.
     // Initialized in activate() on the @State-retained instance (not in init, which
     // runs on throwaway view models SwiftUI creates on every parent re-render).
-    @ObservationIgnored private var nlu: NLUEngine?
+    @ObservationIgnored private var nlu: (any ConversationEngine)?
     private let speaker = ConversationSpeaker()
     /// Accumulates the spoken text across a multi-turn exchange so the final card
     /// shows the complete phrase (e.g. "remind me" + "take medication" + "tomorrow").
@@ -67,8 +71,9 @@ public final class LiveTranscriptionViewModel {
 
     // MARK: - Init
 
-    public init(coordinator: TranscriptionCoordinator) {
+    public init(coordinator: TranscriptionCoordinator, factory: any NLUEngineFactory) {
         self.coordinator = coordinator
+        self.factory = factory
         self.currentLocale = coordinator.currentLocale
         // NOTE: delegate is intentionally NOT set here. `LiveTranscriptionView.init`
         // runs on every parent re-render and eagerly constructs a throwaway view model
@@ -92,9 +97,12 @@ public final class LiveTranscriptionViewModel {
         speaker.onCancel = { [weak self] in self?.handleSpeechCancelled() }
 
         if nlu == nil {
-            let ic = IntentClassifierService()   // Stage 2 only; loadStage3() never called
-            nlu = NLUEngine(classifier: ic)
-            Task(priority: .userInitiated) { await ic.warmUp() }
+            let engine = factory.makeEngine()
+            nlu = engine
+            // warmUp is called on the engine (not a separate classifier ref):
+            // ConversationEngine.warmUp() delegates to the classifier, so there is
+            // a single warm-up entry point regardless of variant.
+            Task(priority: .userInitiated) { await engine.warmUp() }
         }
 
         // Pre-load the Apple speech model (locale resolve → asset install/reserve →
