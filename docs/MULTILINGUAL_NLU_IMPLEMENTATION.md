@@ -1,6 +1,6 @@
 # Multilingual NLU Pipeline — Implementation Plan
 
-**Branch:** `claude/coreml-temperature-ios`  
+**Branch:** `claude/beautiful-clarke-p441d4`  
 **Repo:** `akashrwt5/STT`  
 **Audited at:** commit `88b5215` (branch HEAD at time of analysis)
 
@@ -701,13 +701,13 @@ grep -A5 'Multilingual' STT.xcodeproj/project.pbxproj | head -40
 - macOS only (Core ML, Xcode build, `.mlpackage` compilation)
 - Xcode 15+ (mlprogram / FP16 support)
 - Python 3.10+ (one-time artifact regeneration only)
-- Git access to `akashrwt5/STT` branch `claude/coreml-temperature-ios`
-- Git access to `akashrwt5/IntentClassifier` branch `claude/coreml-export` (artifact regeneration only)
+- Git access to `akashrwt5/STT` branch `claude/beautiful-clarke-p441d4`
+- Git access to `akashrwt5/IntentClassifier` branch `claude/sharp-ramanujan-p441d4` (artifact regeneration only)
 
 ### 8.2 One-time artifact refresh (before Commit 1)
 
 ```bash
-# In IntentClassifier repo @ claude/coreml-export:
+# In IntentClassifier repo @ claude/sharp-ramanujan-p441d4:
 python multilingual/export_coreml_multilingual.py --model multilingual --fp16
 python multilingual/test/test_coreml_multilingual.py --model multilingual --full
 
@@ -742,14 +742,14 @@ git config user.name "Claude"
 ### 8.5 Push cadence
 
 ```bash
-git push -u origin claude/coreml-temperature-ios
+git push -u origin claude/beautiful-clarke-p441d4
 ```
 
 Retry up to 4 times with exponential backoff (2 s, 4 s, 8 s, 16 s) on network failure only.
 
 ### 8.6 Hard constraints — never violate
 
-- Push to `claude/coreml-temperature-ios` only. Never `main`, never `feature/*`.
+- Push to `claude/beautiful-clarke-p441d4` only. Never `main`, never `feature/*`.
 - Do not create a PR.
 - Do not modify the IntentClassifier repo.
 - Do not add `if variant` branches inside `IntentClassifierService`, `NLUEngine`, `SemanticEmbedder`, or `SemanticClassifier`.

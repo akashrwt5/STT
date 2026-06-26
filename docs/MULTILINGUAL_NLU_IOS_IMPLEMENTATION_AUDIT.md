@@ -4,7 +4,7 @@
 **Purpose:** Evaluate whether the existing plan (`MULTILINGUAL_NLU_LOCALIZATION_PLAN.md`) and the
 drafted data are *correct and implementable as-is*, then give a sequenced, evidence-backed plan for
 the iOS side. Every claim below is verified against the actual code (file:line cited).
-**Branches:** STT `claude/coreml-temperature-ios` · IntentClassifier `claude/coreml-export`.
+**Branches:** STT `claude/beautiful-clarke-p441d4` · IntentClassifier `claude/sharp-ramanujan-p441d4`.
 
 ---
 

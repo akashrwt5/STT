@@ -128,6 +128,6 @@ date entry stays English-only until Phase 2.
 ---
 
 ## Constraints
-- Branch: `claude/coreml-temperature-ios`. Commit per logical unit (loader, engine, factory, VM, tests).
+- Branch: `claude/beautiful-clarke-p441d4`. Commit per logical unit (loader, engine, factory, VM, tests).
 - Do not edit the canonical `nlu_schema.json` / `nlu_entities.json`. Overlay/merge only.
 - Do not add language cases to `NLUVariant`. Variant ≠ language.

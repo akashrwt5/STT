@@ -2,7 +2,7 @@
 
 **Status:** PLAN / SPEC — code still gated. **Data drafting has begun** (see §0.1). Engine/parser
 implementation remains **DO NOT IMPLEMENT until explicitly approved ("go ahead").**
-**Branch:** `claude/coreml-temperature-ios` (STT) · `claude/coreml-export` (IntentClassifier).
+**Branch:** `claude/beautiful-clarke-p441d4` (STT) · `claude/sharp-ramanujan-p441d4` (IntentClassifier).
 **Owner persona:** Principal ML Engineer (on-device NLU, calibration, server↔device parity) + Swift/iOS.
 **Related:** `docs/MULTILINGUAL_NLU_IMPLEMENTATION.md` (the model-variant work, already shipped),
 `docs/MULTILINGUAL_TEST_RESOURCE_WIRING.md` (test-target wiring).
