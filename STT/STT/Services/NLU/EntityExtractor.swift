@@ -265,6 +265,17 @@ public final class EntityExtractor: @unchecked Sendable {
         if hour == nil, let m = firstMatch(#"\b(\d{1,2}):(\d{2})\b"#, in: t) {
             hour = Int(m.group(1)); minute = Int(m.group(2)); span = m.group(0)
         }
+        // P0-6: Continental European "15h30", "9h" (French "9h30", German written 24h)
+        if hour == nil, let m = firstMatch(#"\b(\d{1,2})h(\d{2})?\b"#, in: t) {
+            hour = Int(m.group(1))
+            minute = m.group(2).isEmpty ? 0 : (Int(m.group(2)) ?? 0)
+            span = m.group(0)
+        }
+        // P0-6: Danish/German decimal notation "15.30" (minute block 00-59 to avoid matching decimals)
+        if hour == nil, let m = firstMatch(#"\b(\d{1,2})\.(\d{2})\b"#, in: t),
+           let mm = Int(m.group(2)), (0...59).contains(mm) {
+            hour = Int(m.group(1)); minute = mm; span = m.group(0)
+        }
         // "at N M" (at 9 30)
         if hour == nil, let m = firstMatch(#"\bat\s+(\d{1,2})\s+(\d{2})\b"#, in: t) {
             hour = Int(m.group(1)); minute = Int(m.group(2)); span = m.group(0)

@@ -67,4 +67,10 @@ public protocol ConversationEngine: Actor {
 /// with zero edits to `NLUEngine`, `LiveTranscriptionViewModel`, or `PVAViewModel`.
 public protocol NLUEngineFactory {
     func makeEngine() -> any ConversationEngine
+    func makeEngine(language: String) -> any ConversationEngine
+}
+
+extension NLUEngineFactory {
+    /// Default: language-unaware factories forward to the English engine.
+    public func makeEngine(language: String) -> any ConversationEngine { makeEngine() }
 }

@@ -37,11 +37,18 @@ public struct MultilingualNLUEngineFactory: NLUEngineFactory {
     public init() {}
 
     public func makeEngine() -> any ConversationEngine {
-        // TODO(multilingual-schema): the engine still loads the English
-        // nlu_schema.json / nlu_entities.json by default, so slot prompts and
-        // entity extraction remain English. A future iteration injects a
-        // locale-appropriate schema URL through this factory (see
-        // MultilingualIntentClassifierService and docs §4).
         NLUEngine(classifier: MultilingualIntentClassifierService())
+    }
+
+    public func makeEngine(language: String) -> any ConversationEngine {
+        let lex = LocalizationLoader.lexicon(language: language)
+        return NLUEngine(
+            schema: LocalizationLoader.schema(language: language),
+            classifier: MultilingualIntentClassifierService(),
+            entities: EntityExtractor(entitiesURL: LocalizationLoader.entitiesURL(language: language)),
+            uncertain: lex?.uncertain.isEmpty == false ? lex!.uncertain : NLUEngine.defaultUncertain,
+            noIdioms:  lex?.noIdioms.isEmpty  == false ? lex!.noIdioms  : NLUEngine.defaultNoIdioms,
+            carriers:  lex?.carrierPhrases.isEmpty == false ? lex!.carrierPhrases : NLUEngine.defaultCarriers
+        )
     }
 }

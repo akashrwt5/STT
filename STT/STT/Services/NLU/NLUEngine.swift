@@ -29,11 +29,42 @@ public actor NLUEngine: ConversationEngine {
     private let session: NLUSession
     private let affirmative: Set<String>
     private let negative: Set<String>
+    private var uncertain: [String]
+    private var noIdioms: [String]
+    private var carrierPatterns: [String]
+
+    // MARK: - English word-list defaults (injectable via factory for other languages)
+
+    public static let defaultUncertain: [String] = [
+        "not sure", "maybe", "dunno", "don't know",
+        "dont know", "i don't know", "no idea", "unsure",
+    ]
+
+    /// Polite-negative idioms containing "no" that are NOT actual negatives.
+    /// Stripped before polarity scanning so "no worries" doesn't fire a
+    /// false-negative on a confirmation prompt.
+    public static let defaultNoIdioms: [String] = [
+        "no worries", "no problem", "no doubt", "no biggie", "no probs",
+        "no sweat", "not a problem",
+    ]
+
+    /// Carrier phrases stripped to derive an open topic (e.g. "remind me to " → "").
+    public static let defaultCarriers: [String] = [
+        #"^\s*please\s+"#,
+        #"^\s*(?:do\s*n[o']?t|don't|dont)\s+let\s+me\s+forget\b\s*(?:to|about)?\s*"#,
+        #"^\s*(?:remind|tell|alert|notify)\s+me\b\s*(?:to|that|about|of)?\s*"#,
+        #"^\s*set(?:\s+up)?\s+(?:a\s+)?reminder\b\s*(?:to|for|about)?\s*"#,
+        #"^\s*make\s+sure\s+(?:i|to)\b\s*"#,
+        #"^\s*i\s+(?:need|have|want)\s+to\b\s*"#,
+    ]
 
     public init(
         schema: NLUSchema = .loadFromBundle(),
         classifier: any IntentClassifying,
         entities: EntityExtractor = EntityExtractor(),
+        uncertain: [String] = NLUEngine.defaultUncertain,
+        noIdioms: [String] = NLUEngine.defaultNoIdioms,
+        carriers: [String] = NLUEngine.defaultCarriers,
         sessionID: String = "default"
     ) {
         self.schema = schema
@@ -42,6 +73,9 @@ public actor NLUEngine: ConversationEngine {
         self.session = NLUSession(sessionID: sessionID)
         self.affirmative = Set(schema.affirmative)
         self.negative = Set(schema.negative)
+        self.uncertain = uncertain
+        self.noIdioms = noIdioms
+        self.carrierPatterns = carriers
     }
 
     // MARK: - Public API
@@ -103,22 +137,11 @@ public actor NLUEngine: ConversationEngine {
         }
     }
 
-    private static let uncertain = ["not sure", "maybe", "dunno", "don't know",
-                                    "dont know", "i don't know", "no idea", "unsure"]
-
     /// Returns true for yes, false for no, nil for ambiguous/uncertain.
-    /// Polite-negative idioms ("no worries", "no problem", etc.) that Python strips before
-    /// polarity scanning (_NO_IDIOMS). Without this pass the word "no" inside the phrase
-    /// would fire a false negative on a confirmation prompt.
-    private static let noIdioms = [
-        "no worries", "no problem", "no doubt", "no biggie", "no probs",
-        "no sweat", "not a problem"
-    ]
-
     private func yesNo(_ text: String) -> Bool? {
         var t = text.lowercased().trimmingCharacters(in: .whitespaces)
-        for idiom in Self.noIdioms { t = t.replacingOccurrences(of: idiom, with: "") }
-        if Self.uncertain.contains(where: { t.contains($0) }) { return nil }
+        for idiom in noIdioms { t = t.replacingOccurrences(of: idiom, with: "") }
+        if uncertain.contains(where: { t.contains($0) }) { return nil }
         let neg = negative.contains { wholeWord($0, in: t) }
         let pos = affirmative.contains { wholeWord($0, in: t) }
         if neg && !pos { return false }
@@ -214,10 +237,10 @@ public actor NLUEngine: ConversationEngine {
 
     private func handleNewIntent(_ text: String) async -> NLUResponse {
         session.decrementContexts()
-        let result   = await classifier.classifyAsync(text)
-        let intent   = result.label
-        let conf     = result.confidence
-        let rescued  = result.semanticRescue
+        let result    = await classifier.classifyAsync(text)
+        let intent    = result.label
+        let conf      = result.confidence
+        let rescued   = result.semanticRescue
         let breakdown = result.breakdown
 
         // Semantic rescue already passed its own 0.55 gate inside classifyAsync.
@@ -320,16 +343,6 @@ public actor NLUEngine: ConversationEngine {
     private static func parseLocalISO(_ s: String) -> Date? { localISOFormatter().date(from: s) }
     private static func formatLocalISO(_ d: Date) -> String { localISOFormatter().string(from: d) }
 
-    /// Carrier phrases stripped to derive an open topic (e.g. "remind me to " → "").
-    private static let carrierPatterns: [String] = [
-        #"^\s*please\s+"#,
-        #"^\s*(?:do\s*n[o']?t|don't|dont)\s+let\s+me\s+forget\b\s*(?:to|about)?\s*"#,
-        #"^\s*(?:remind|tell|alert|notify)\s+me\b\s*(?:to|that|about|of)?\s*"#,
-        #"^\s*set(?:\s+up)?\s+(?:a\s+)?reminder\b\s*(?:to|for|about)?\s*"#,
-        #"^\s*make\s+sure\s+(?:i|to)\b\s*"#,
-        #"^\s*i\s+(?:need|have|want)\s+to\b\s*"#,
-    ]
-
     /// For required "open" slots not yet filled, derive a free-text topic from the utterance.
     private func fillOpenTopics(_ cfg: IntentDef, _ text: String, into slots: inout [String: String]) {
         for slot in cfg.slots {
@@ -342,7 +355,7 @@ public actor NLUEngine: ConversationEngine {
 
     private func deriveTopic(_ text: String) -> String? {
         var t = text.trimmingCharacters(in: .whitespaces)
-        for pattern in Self.carrierPatterns {
+        for pattern in carrierPatterns {
             if let range = t.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
                 t.removeSubrange(range)
                 break
