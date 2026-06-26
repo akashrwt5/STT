@@ -1,7 +1,7 @@
 # Multilingual NLU — Full Implementation Plan (Phases 0–3)
 
 **Covers:** fr · de · da (English is canonical; unchanged throughout)
-**Repos:** STT `claude/beautiful-clarke-p441d4` · IntentClassifier `claude/sharp-ramanujan-p441d4`
+**Repos:** STT `claude/coreml-temperature-ios` · IntentClassifier `claude/coreml-export`
 **Data committed:** `docs/localization-drafts/nlu_{schema,entities,lexicon}.{fr,de,da}.json`
 **Audit:** See `MULTILINGUAL_NLU_IOS_IMPLEMENTATION_AUDIT.md` for evidence (file:line) behind
 every claim below.

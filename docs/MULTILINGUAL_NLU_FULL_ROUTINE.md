@@ -439,7 +439,7 @@ English at its threshold. If a language fails:
 
 ## Constraints
 
-- **Branches:** STT `claude/beautiful-clarke-p441d4` · IntentClassifier `claude/sharp-ramanujan-p441d4`
+- **Branches:** STT `claude/coreml-temperature-ios` · IntentClassifier `claude/coreml-export`
 - Commit per logical unit (loader, engine, factory, ViewModel, datetime refactor, Python parity, tests).
 - Do not edit canonical `nlu_schema.json` / `nlu_entities.json`. Overlay/merge only.
 - Do not add language cases to `NLUVariant`. Variant ≠ language.
