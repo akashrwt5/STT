@@ -1,18 +1,18 @@
 {
   "en": {
-    "conf_threshold": 0.55,
+    "conf_threshold": 0.6,
     "conf_gap_threshold": 0.2
   },
   "fr": {
-    "conf_threshold": 0.4,
+    "conf_threshold": 0.6,
     "conf_gap_threshold": 0.2
   },
   "de": {
-    "conf_threshold": 0.35,
+    "conf_threshold": 0.6,
     "conf_gap_threshold": 0.2
   },
   "da": {
-    "conf_threshold": 0.45,
+    "conf_threshold": 0.6,
     "conf_gap_threshold": 0.2
   }
 }
