@@ -530,6 +530,17 @@ public final class EntityExtractor: @unchecked Sendable {
            let mm = Int(m.groups[2]), (0...59).contains(mm) {
             hour = Int(m.groups[1]); minute = mm; t = lexBlank(t, m.range)
         }
+        // D1. Digit + spaced hour-unit: "18 h" / "18 heures" (space between digit and unit)
+        if hour == nil {
+            let hrSyns = lex.unit.filter { $0.value == "hour" }.keys
+                .sorted(by: { $0.count > $1.count })
+                .map(Self.esc)
+                .joined(separator: "|")
+            if !hrSyns.isEmpty,
+               let m = lexMatch(#"\b(\d{1,2})\s+(?:"# + hrSyns + #")\b"#, in: t) {
+                hour = Int(m.groups[1]); minute = 0; t = lexBlank(t, m.range)
+            }
+        }
         // D2. Absolute idioms (hour set: midi/minuit/Mitternacht/midnat)
         if hour == nil {
             for (phrase, mins, h) in lex.idioms where h != nil {
@@ -765,6 +776,12 @@ public final class EntityExtractor: @unchecked Sendable {
         strip(#"\b\d{1,2}:\d{2}\b"#)
         strip(#"\b\d{1,2}h\d{0,2}\b"#)
         strip(#"\b\d{1,2}\.\d{2}\b"#)
+        // Spaced hour-unit forms: "18 h" / "18 heures" not caught by compact patterns above.
+        let hrSyns = lex.unit.filter { $0.value == "hour" }.keys
+            .sorted(by: { $0.count > $1.count })
+            .map(Self.esc)
+            .joined(separator: "|")
+        if !hrSyns.isEmpty { strip(#"\b\d{1,2}\s+(?:"# + hrSyns + #")\b"#) }
         // Relative durations "<in> N <unit>".
         if !lex.inMarkers.isEmpty && !lex.unit.isEmpty {
             let inAlt = lex.inMarkers.map(Self.esc).joined(separator: "|")
