@@ -45,7 +45,8 @@ public struct MultilingualNLUEngineFactory: NLUEngineFactory {
         return NLUEngine(
             schema: LocalizationLoader.schema(language: language),
             classifier: MultilingualIntentClassifierService(),
-            entities: EntityExtractor(entitiesURL: LocalizationLoader.entitiesURL(language: language)),
+            entities: EntityExtractor(entitiesURL: LocalizationLoader.entitiesURL(language: language),
+                                      lexicon: lex),
             uncertain: lex?.uncertain.isEmpty == false ? lex!.uncertain : NLUEngine.defaultUncertain,
             noIdioms:  lex?.noIdioms.isEmpty  == false ? lex!.noIdioms  : NLUEngine.defaultNoIdioms,
             carriers:  lex?.carrierPhrases.isEmpty == false ? lex!.carrierPhrases : NLUEngine.defaultCarriers
