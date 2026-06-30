@@ -50,6 +50,19 @@ public struct IntentDef: Decodable, Sendable {
     }
 }
 
+/// A declarative regex rule that short-circuits TF-IDF classification.
+/// Mirrors `keyword_triggers` entries in nlu_schema.json / nlu_schema.<lang>.json.
+public struct KeywordTrigger: Decodable, Sendable {
+    public let intent: String
+    public let regex: String?
+    public let notRegex: String?
+
+    enum CodingKeys: String, CodingKey {
+        case intent, regex
+        case notRegex = "not_regex"
+    }
+}
+
 /// The whole conversation schema, loaded once from `nlu_schema.json`.
 public struct NLUSchema: Decodable, Sendable {
     public let version: Int
@@ -57,11 +70,24 @@ public struct NLUSchema: Decodable, Sendable {
     public let intents: [String: IntentDef]
     public let affirmative: [String]
     public let negative: [String]
+    /// Declarative triggers that fire before the TF-IDF classifier.
+    public let keywordTriggers: [KeywordTrigger]
 
     enum CodingKeys: String, CodingKey {
         case version
         case confidenceThreshold = "confidence_threshold"
         case intents, affirmative, negative
+        case keywordTriggers = "keyword_triggers"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version              = try c.decode(Int.self, forKey: .version)
+        confidenceThreshold  = try c.decode(Double.self, forKey: .confidenceThreshold)
+        intents              = try c.decode([String: IntentDef].self, forKey: .intents)
+        affirmative          = try c.decode([String].self, forKey: .affirmative)
+        negative             = try c.decode([String].self, forKey: .negative)
+        keywordTriggers      = (try? c.decodeIfPresent([KeywordTrigger].self, forKey: .keywordTriggers)) ?? []
     }
 
     /// Loads `nlu_schema.json` from the main app bundle.

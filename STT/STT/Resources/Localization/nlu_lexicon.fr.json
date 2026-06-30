@@ -89,6 +89,10 @@
   "negative": ["no","non","nan","annule","annuler","arrête","arrêter","stop","ne fais pas","non merci","laisse tomber","oublie"],
   "uncertain": ["je ne sais pas","je sais pas","j'sais pas","chais pas","peut-être","peut etre","pas sûr","pas certain","je ne suis pas sûr","laisse-moi réfléchir","attends","hmm","euh"],
   "carrier_phrases": [
+    "^veuillez\\s+",
+    "^r[eé]gler?\\s+une\\s+alarme\\s*(?:pour|de|d')?\\s*",
+    "^mettre?\\s+une\\s+alarme\\s*(?:pour|de|d')?\\s*",
+    "^fixer?\\s+(?:un\\s+rappel|une\\s+alarme)\\s*(?:pour|de|d')?\\s*",
     "^rappelle[\\s-]moi\\s+(de\\s+|d')?\\s*",
     "^rappelle\\s+moi\\s+(de\\s+|d')?\\s*",
     "^n'oublie\\s+pas\\s+(de\\s+|d')?\\s*",

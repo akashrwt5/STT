@@ -80,5 +80,11 @@
     "Default Fallback Intent": { "fulfillment": "" }
   },
   "affirmative": ["yes","ok","okay","oui","ouais","ouaip","d'accord","bien sûr","envoie","envoie-le","confirme","c'est correct","c'est bon","exact","vas-y","fais-le","s'il te plaît"],
-  "negative": ["no","non","nan","annule","annuler","arrête","arrêter","stop","ne fais pas","non merci","laisse tomber","oublie"]
+  "negative": ["no","non","nan","annule","annuler","arrête","arrêter","stop","ne fais pas","non merci","laisse tomber","oublie"],
+  "keyword_triggers": [
+    {
+      "intent": "reminders.add",
+      "regex": "\\b(rappelle[\\s-]?moi|r[eé]gler\\s+une\\s+alarme|mettre?\\s+une\\s+alarme|fixer?\\s+une\\s+alarme|cr[eé]er?\\s+un\\s+rappel|d[eé]finir?\\s+un\\s+rappel|mettre?\\s+un\\s+rappel|poser\\s+un\\s+rappel|ajouter\\s+un\\s+rappel|planifier\\s+un\\s+rappel|configurer\\s+un\\s+rappel)\\b"
+    }
+  ]
 }

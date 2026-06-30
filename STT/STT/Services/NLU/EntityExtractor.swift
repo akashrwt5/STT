@@ -285,6 +285,12 @@ public final class EntityExtractor: @unchecked Sendable {
            let d = cal.date(byAdding: .minute, value: 30, to: now) {
             return DateTimeMatch(iso: isoMinutes(d), span: "in half an hour", timeExplicit: true, explicitDay: false)
         }
+        // "for N units" — treated as relative duration ("for 15 mins" = "in 15 mins")
+        if let m = firstMatch(#"\bfor\s+(\d+)\s*(minute|min|hour|hr|day|week)s?\b"#, in: t),
+           let n = Int(m.group(1)),
+           let d = cal.date(byAdding: relComps(m.group(2), n), to: now) {
+            return DateTimeMatch(iso: isoMinutes(d), span: m.group(0), timeExplicit: true, explicitDay: false)
+        }
 
         // --- 2. Explicit past-date rejection ---
         if matchesWholeWord("yesterday", in: t) { return nil }
@@ -746,6 +752,7 @@ public final class EntityExtractor: @unchecked Sendable {
 
     private static let timePatterns: [String] = [
         #"\bin\s+\d+\s*(?:minute|min|hour|hr|day|week)s?\b"#,
+        #"\bfor\s+\d+\s*(?:minute|min|hour|hr|day|week)s?\b"#,
         #"\b\d{1,2}(?::\d{2})?\s*[ap]\.?\s*m\.?\b"#,
         #"\b\d{1,2}:\d{2}\b"#,
         #"\b(?:tomorrow|today|tonight)\b"#,

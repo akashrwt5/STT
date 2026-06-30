@@ -53,7 +53,7 @@ public actor NLUEngine: ConversationEngine {
         #"^\s*please\s+"#,
         #"^\s*(?:do\s*n[o']?t|don't|dont)\s+let\s+me\s+forget\b\s*(?:to|about)?\s*"#,
         #"^\s*(?:remind|tell|alert|notify)\s+me\b\s*(?:to|that|about|of)?\s*"#,
-        #"^\s*set(?:\s+up)?\s+(?:a\s+)?reminder\b\s*(?:to|for|about)?\s*"#,
+        #"^\s*set(?:\s+up)?\s+(?:a\s+)?reminder\b\s*(?:to|about|for\s+(?!\d))?\s*"#,
         #"^\s*make\s+sure\s+(?:i|to)\b\s*"#,
         #"^\s*i\s+(?:need|have|want)\s+to\b\s*"#,
     ]
@@ -233,10 +233,41 @@ public actor NLUEngine: ConversationEngine {
                         breakdown: breakdown)
     }
 
+    // MARK: - Keyword triggers (Stage 0)
+
+    /// Returns the intent name if a declarative keyword trigger fires, nil otherwise.
+    /// Matches are performed on lowercased text (mirrors Python classifier._keyword_match).
+    private func matchKeywordTrigger(_ text: String) -> String? {
+        let t = text.lowercased().trimmingCharacters(in: .whitespaces)
+        for trigger in schema.keywordTriggers {
+            guard let pattern = trigger.regex else { continue }
+            let opts: NSString.CompareOptions = [.regularExpression, .caseInsensitive]
+            if t.range(of: pattern, options: opts) != nil {
+                if let notPattern = trigger.notRegex,
+                   t.range(of: notPattern, options: opts) != nil { continue }
+                return trigger.intent
+            }
+        }
+        return nil
+    }
+
     // MARK: - New intent (priority 3)
 
     private func handleNewIntent(_ text: String) async -> NLUResponse {
         session.decrementContexts()
+
+        // Stage 0: declarative keyword triggers bypass TF-IDF for high-precision patterns.
+        if let kwIntent = matchKeywordTrigger(text), let cfg = schema.intents[kwIntent] {
+            var slots: [String: String] = [:]
+            extractAllSlots(cfg, text, into: &slots)
+            fillOpenTopics(cfg, text, into: &slots)
+            session.pendingIntent = kwIntent
+            session.pendingSlots = slots
+            session.awaitingSlot = nil
+            session.pendingBreakdown = nil
+            return advanceSlots(kwIntent, cfg)
+        }
+
         let result    = await classifier.classifyAsync(text)
         let intent    = result.label
         let conf      = result.confidence
@@ -355,10 +386,11 @@ public actor NLUEngine: ConversationEngine {
 
     private func deriveTopic(_ text: String) -> String? {
         var t = text.trimmingCharacters(in: .whitespaces)
+        // Apply ALL carriers in order (mirrors Python: each '^' pattern strips from the
+        // updated start of string, enabling two-step stripping like "veuillez" then "régler une alarme").
         for pattern in carrierPatterns {
             if let range = t.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
                 t.removeSubrange(range)
-                break
             }
         }
         let stripped = entities.stripDateTime(t)

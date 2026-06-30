@@ -80,6 +80,13 @@ public enum LocalizationLoader {
         if let aff = overlay["affirmative"] as? [String] { canon["affirmative"] = aff }
         if let neg = overlay["negative"]    as? [String] { canon["negative"]    = neg }
 
+        // Language-specific keyword triggers are appended to the canonical list.
+        if let overlayTriggers = overlay["keyword_triggers"] as? [[String: Any]] {
+            var canonTriggers = (canon["keyword_triggers"] as? [[String: Any]]) ?? []
+            canonTriggers.append(contentsOf: overlayTriggers)
+            canon["keyword_triggers"] = canonTriggers
+        }
+
         guard let overlayIntents = overlay["intents"] as? [String: Any],
               var canonIntents   = canon["intents"]   as? [String: Any]
         else { return }
