@@ -97,18 +97,29 @@ public final class LiveTranscriptionViewModel {
         speaker.onCancel = { [weak self] in self?.handleSpeechCancelled() }
 
         if nlu == nil {
-            let engine = factory.makeEngine()
-            nlu = engine
-            // warmUp is called on the engine (not a separate classifier ref):
-            // ConversationEngine.warmUp() delegates to the classifier, so there is
-            // a single warm-up entry point regardless of variant.
-            Task(priority: .userInitiated) { await engine.warmUp() }
+            rebuildEngine()
         }
 
         // Pre-load the Apple speech model (locale resolve → asset install/reserve →
         // SpeechTranscriber + SpeechAnalyzer creation) in the background so the first
         // mic tap is instant instead of waiting several seconds for model setup.
         coordinator.prewarm()
+    }
+
+    /// Builds the NLU engine for the currently-active locale's language and warms it up.
+    /// Called on activation and after a locale switch so the engine's localized prompts,
+    /// word-lists, and entity data always match the language the user is speaking. The
+    /// language tag is the ASR locale's language code (e.g. "fr", "de", "da"); unknown or
+    /// English locales fall back to "en", which the factory maps to identical-to-today
+    /// English behavior.
+    private func rebuildEngine() {
+        let langTag = currentLocale.language.languageCode?.identifier ?? "en"
+        let engine = factory.makeEngine(language: langTag)
+        nlu = engine
+        // warmUp is called on the engine (not a separate classifier ref):
+        // ConversationEngine.warmUp() delegates to the classifier, so there is
+        // a single warm-up entry point regardless of variant.
+        Task(priority: .userInitiated) { await engine.warmUp() }
     }
 
     /// Called when the assistant finishes speaking normally. Decides whether to resume.
@@ -151,6 +162,11 @@ public final class LiveTranscriptionViewModel {
                 if isListening { stopRecording() }
                 try await coordinator.switchLocale(to: identifier)
                 currentLocale = coordinator.currentLocale
+                // Rebuild the NLU engine in the new language: localized prompts,
+                // yes/no, enum synonyms, and entity data are all language-specific.
+                // TTS already follows currentLocale live. If we left the old engine
+                // in place, a fr/de/da user would get English NLU after switching.
+                rebuildEngine()
             } catch {
                 self.error = error as? TranscriptionError
             }
