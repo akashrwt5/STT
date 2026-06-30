@@ -44,7 +44,7 @@ public struct MultilingualNLUEngineFactory: NLUEngineFactory {
         let lex = LocalizationLoader.lexicon(language: language)
         return NLUEngine(
             schema: LocalizationLoader.schema(language: language),
-            classifier: MultilingualIntentClassifierService(),
+            classifier: MultilingualIntentClassifierService(language: language),
             entities: EntityExtractor(entitiesURL: LocalizationLoader.entitiesURL(language: language),
                                       lexicon: lex),
             uncertain: lex?.uncertain.isEmpty == false ? lex!.uncertain : NLUEngine.defaultUncertain,

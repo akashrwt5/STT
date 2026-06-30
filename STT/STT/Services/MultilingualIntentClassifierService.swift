@@ -102,7 +102,17 @@ public actor MultilingualIntentClassifierService: IntentClassifying {
 
     // MARK: - Init
 
-    public init() {
+    /// Create a classifier calibrated for a specific language.
+    ///
+    /// When `language` is provided the service reads per-language confidence
+    /// thresholds from `Multilingual/calibration.json` (bundled alongside the
+    /// weights file). This implements Phase-3 threshold tuning: each language
+    /// has a different optimal conf_threshold discovered by sweeping the
+    /// held-out split (see `scripts/calibrate_languages.py`). Falls back to
+    /// the model-default threshold if the calibration file is absent or the
+    /// language key is missing. Temperature is read from the model weights JSON
+    /// and is unaffected by calibration.json.
+    public init(language: String = "multilingual") {
         // -- Stage 2 primary: CoreML --
         let intentURL =
             Bundle.main.url(forResource: "IntentClassifier_multilingual",
@@ -140,14 +150,29 @@ public actor MultilingualIntentClassifierService: IntentClassifying {
             // runtime one, so a hard failure here is correct.
             fatalError("MultilingualIntentClassifierService: multilingual_intent_classifier_weights.json not found in bundle.")
         }
-        weightsURL       = jsonURL
-        labels           = obj["labels"]            as! [String]
-        vocab            = obj["vocab"]              as! [String: Int]
-        idf              = obj["idf"]                as! [Double]
-        confThreshold    = obj["conf_threshold"]     as? Double ?? 0.70
-        confGapThreshold = obj["conf_gap_threshold"] as? Double ?? 0.20
-        genaiBaseURL     = obj["genai_base_url"]     as? String ?? ""
-        temperature      = obj["temperature"]        as? Double ?? 1.0
+        weightsURL = jsonURL
+        labels     = obj["labels"] as! [String]
+        vocab      = obj["vocab"]  as! [String: Int]
+        idf        = obj["idf"]    as! [Double]
+        temperature = obj["temperature"] as? Double ?? 1.0
+        genaiBaseURL = obj["genai_base_url"] as? String ?? ""
+
+        // Per-language calibration overrides (Phase 3). calibration.json lives
+        // next to the weights file in Multilingual/. Falls back to the model
+        // defaults when the file or the language key is absent.
+        let calURL = Bundle.main.url(forResource: "calibration", withExtension: "json",
+                                     subdirectory: Self.resourceSubdir)
+        let calObj: [String: Any]? = calURL
+            .flatMap { try? Data(contentsOf: $0) }
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+
+        let langEntry = calObj?[language] as? [String: Any]
+        confThreshold    = langEntry?["conf_threshold"]     as? Double
+                        ?? obj["conf_threshold"]            as? Double
+                        ?? 0.70
+        confGapThreshold = langEntry?["conf_gap_threshold"] as? Double
+                        ?? obj["conf_gap_threshold"]        as? Double
+                        ?? 0.20
 
         scorer = TFIDFLogisticScorer(
             labels: labels,
@@ -159,7 +184,7 @@ public actor MultilingualIntentClassifierService: IntentClassifying {
 
         let stage2 = coreMLModel != nil ? "CoreML" : "JSON weights"
         Logger(subsystem: "com.stt.module", category: "MultilingualIntentClassifier")
-            .info("MultilingualIntentClassifier ready — Stage2: \(stage2), Stage3 semantic: on demand")
+            .info("MultilingualIntentClassifier ready — lang=\(language), threshold=\(confThreshold), Stage2: \(stage2)")
     }
 
     // MARK: - Public API
