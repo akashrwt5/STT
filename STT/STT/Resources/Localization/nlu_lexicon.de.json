@@ -2,7 +2,12 @@
   "_meta": { "language": "de", "status": "draft-for-native-review" },
   "grammar": {
     "time_format": "24h",
-    "decimal_hour_idioms": ["Viertel nach","halb","Viertel vor","dreiviertel"],
+    "decimal_hour_idioms": [
+      {"phrase": "Viertel nach", "minutes": 15},
+      {"phrase": "halb", "minutes": -30},
+      {"phrase": "Viertel vor", "minutes": -15},
+      {"phrase": "dreiviertel", "minutes": -15}
+    ],
     "conjunction": "Uhr",
     "notes": "PARSER TRAP: German 'halb' counts DOWN to the NAMED hour, not up. 'halb drei' = 2:30 (half of the way TO three), NOT 3:30. 'Viertel nach drei' = 3:15, 'Viertel vor drei' = 2:45. Times spoken in 24h with 'Uhr': '15 Uhr 30' = 15:30."
   },

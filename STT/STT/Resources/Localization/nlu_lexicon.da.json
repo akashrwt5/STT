@@ -2,7 +2,11 @@
   "_meta": { "language": "da", "status": "draft-for-native-review" },
   "grammar": {
     "time_format": "24h",
-    "decimal_hour_idioms": ["kvart over","halv","kvart i","minutter over","minutter i"],
+    "decimal_hour_idioms": [
+      {"phrase": "kvart over", "minutes": 15},
+      {"phrase": "halv", "minutes": -30},
+      {"phrase": "kvart i", "minutes": -15}
+    ],
     "conjunction": "og",
     "notes": "PARSER TRAP: Danish 'halv' counts DOWN to the named hour. 'halv tre' = 2:30, NOT 3:30. 'kvart over to' = 2:15, 'kvart i tre' = 2:45. 'klokken' (often 'kl.') precedes a bare hour number."
   },
