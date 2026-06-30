@@ -73,6 +73,10 @@ public struct NLULexicon: Decodable, Sendable {
     public let ordinals1to31:   [String: [String]]
     public let relativeUnits:   [String: [String]]
     public let relativeMarkers: [String: [String]]
+    /// Spaced clock-hour suffixes: "18 h", "18 heures". Separate from relativeUnits.hour
+    /// so duration words (Danish "timer", German "Stunden") are never misread as clock markers.
+    /// Only languages that write "N h" / "N heures" as clock time set this key.
+    public let clockHourMarkers: [String]
 
     enum CodingKeys: String, CodingKey {
         case uncertain
@@ -85,6 +89,7 @@ public struct NLULexicon: Decodable, Sendable {
         case ordinals1to31 = "ordinals_1_to_31"
         case relativeUnits = "relative_units"
         case relativeMarkers = "relative_markers"
+        case clockHourMarkers = "clock_hour_markers"
     }
 
     public init(from decoder: Decoder) throws {
@@ -101,5 +106,6 @@ public struct NLULexicon: Decodable, Sendable {
         ordinals1to31   = (try? c.decodeIfPresent([String: [String]].self, forKey: .ordinals1to31)) ?? [:]
         relativeUnits   = (try? c.decodeIfPresent([String: [String]].self, forKey: .relativeUnits)) ?? [:]
         relativeMarkers = (try? c.decodeIfPresent([String: [String]].self, forKey: .relativeMarkers)) ?? [:]
+        clockHourMarkers = (try? c.decodeIfPresent([String].self, forKey: .clockHourMarkers)) ?? []
     }
 }

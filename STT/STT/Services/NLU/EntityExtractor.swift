@@ -44,6 +44,10 @@ public final class EntityExtractor: @unchecked Sendable {
         let unitAlt: [String]                              // synonyms, longest-first
         let inMarkers: [String]                            // longest-first
         let atMarkers: [String]                            // longest-first
+        /// Spaced clock-hour suffixes ("h", "heure", "heures") — longest-first.
+        /// Distinct from unitAlt so duration words ("timer", "Stunden") are never
+        /// misread as clock-time markers. Empty for de/da which use conj/atMarkers.
+        let clockHourMarkers: [String]
     }
 
     private static let weekdayOrder = ["Monday", "Tuesday", "Wednesday", "Thursday",
@@ -138,6 +142,7 @@ public final class EntityExtractor: @unchecked Sendable {
 
         let inMarkers = (lex.relativeMarkers["in"] ?? []).map { $0.lowercased() }.sorted { longestFirst($0, $1) }
         let atMarkers = (lex.relativeMarkers["at"] ?? []).map { $0.lowercased() }.sorted { longestFirst($0, $1) }
+        let clockHourMarkers = lex.clockHourMarkers.map { $0.lowercased() }.sorted { longestFirst($0, $1) }
 
         let conj = g?.conjunction?.lowercased()
         return LexTables(
@@ -146,7 +151,8 @@ public final class EntityExtractor: @unchecked Sendable {
             idioms: idioms, weekday: weekday, month: month, monthAlt: monthAlt,
             number: number, numberPhrases: numberPhrases, period: period,
             dayAnchor: dayAnchor, unit: unit, unitAlt: unitAlt,
-            inMarkers: inMarkers, atMarkers: atMarkers
+            inMarkers: inMarkers, atMarkers: atMarkers,
+            clockHourMarkers: clockHourMarkers
         )
     }
 
@@ -530,14 +536,12 @@ public final class EntityExtractor: @unchecked Sendable {
            let mm = Int(m.groups[2]), (0...59).contains(mm) {
             hour = Int(m.groups[1]); minute = mm; t = lexBlank(t, m.range)
         }
-        // D1. Digit + spaced hour-unit: "18 h" / "18 heures" (space between digit and unit)
-        if hour == nil {
-            let hrSyns = lex.unit.filter { $0.value == "hour" }.keys
-                .sorted(by: { $0.count > $1.count })
-                .map(Self.esc)
-                .joined(separator: "|")
-            if !hrSyns.isEmpty,
-               let m = lexMatch(#"\b(\d{1,2})\s+(?:"# + hrSyns + #")\b"#, in: t) {
+        // D1. Digit + spaced clock-hour marker: "18 h" / "18 heures"
+        // Uses clockHourMarkers (not unit/unitAlt) so duration words like Danish "timer"
+        // or German "Stunden" in relative_units.hour are never misread as clock suffixes.
+        if hour == nil, !lex.clockHourMarkers.isEmpty {
+            let hrAlt = lex.clockHourMarkers.map(Self.esc).joined(separator: "|")
+            if let m = lexMatch(#"\b(\d{1,2})\s+(?:"# + hrAlt + #")\b"#, in: t) {
                 hour = Int(m.groups[1]); minute = 0; t = lexBlank(t, m.range)
             }
         }
@@ -776,12 +780,11 @@ public final class EntityExtractor: @unchecked Sendable {
         strip(#"\b\d{1,2}:\d{2}\b"#)
         strip(#"\b\d{1,2}h\d{0,2}\b"#)
         strip(#"\b\d{1,2}\.\d{2}\b"#)
-        // Spaced hour-unit forms: "18 h" / "18 heures" not caught by compact patterns above.
-        let hrSyns = lex.unit.filter { $0.value == "hour" }.keys
-            .sorted(by: { $0.count > $1.count })
-            .map(Self.esc)
-            .joined(separator: "|")
-        if !hrSyns.isEmpty { strip(#"\b\d{1,2}\s+(?:"# + hrSyns + #")\b"#) }
+        // Spaced clock-hour forms: "18 h" / "18 heures" not caught by compact patterns above.
+        if !lex.clockHourMarkers.isEmpty {
+            let hrAlt = lex.clockHourMarkers.map(Self.esc).joined(separator: "|")
+            strip(#"\b\d{1,2}\s+(?:"# + hrAlt + #")\b"#)
+        }
         // Relative durations "<in> N <unit>".
         if !lex.inMarkers.isEmpty && !lex.unit.isEmpty {
             let inAlt = lex.inMarkers.map(Self.esc).joined(separator: "|")
