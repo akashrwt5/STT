@@ -17,6 +17,9 @@ public enum TranscriptionError: LocalizedError, Sendable {
     case analyzerFailed(Error)
     /// Returned when `SpeechTranscriber.supportsDevice()` returns false.
     case deviceNotSupported
+    /// A transcription session is already running; concurrent live + file sessions
+    /// would corrupt the shared recognition pipeline.
+    case sessionAlreadyActive
 
     public var errorDescription: String? {
         switch self {
@@ -38,6 +41,8 @@ public enum TranscriptionError: LocalizedError, Sendable {
             return "Speech analyzer encountered an error: \(err.localizedDescription)"
         case .deviceNotSupported:
             return "On-device speech recognition is not supported on this device."
+        case .sessionAlreadyActive:
+            return "A transcription session is already in progress. Stop it before starting another."
         }
     }
 }

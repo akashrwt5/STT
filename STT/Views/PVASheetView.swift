@@ -11,6 +11,13 @@ struct PVASheetView: View {
     let viewModel: PVAViewModel
     @Environment(\.dismiss) private var dismiss
 
+    init(viewModel: PVAViewModel) {
+        self.viewModel = viewModel
+        // Bisects the tap → onAppear window: if this logs early but onAppear is
+        // late, the stall is in presentation/first render, not view construction.
+        PVALaunchClock.mark("sheet view constructed")
+    }
+
     var body: some View {
         NavigationStack {
             LiveTranscriptionView(viewModel: viewModel.liveViewModel)
@@ -27,6 +34,8 @@ struct PVASheetView: View {
                 .toolbarColorScheme(.dark, for: .navigationBar)
         }
         .onAppear {
+            // The tap → here gap is the presentation cost the user actually feels.
+            PVALaunchClock.mark("sheet appeared")
             viewModel.startSession()
         }
         .onDisappear {

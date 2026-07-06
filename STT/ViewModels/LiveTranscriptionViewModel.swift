@@ -57,13 +57,16 @@ public final class LiveTranscriptionViewModel {
     // Initialized in activate() on the @State-retained instance (not in init, which
     // runs on throwaway view models SwiftUI creates on every parent re-render).
     @ObservationIgnored private var nlu: (any ConversationEngine)?
+    /// In-flight engine construction. Engine building loads CoreML models and
+    /// parses a multi-MB weights JSON — it runs on a background task so the PVA
+    /// sheet presents instantly instead of freezing mid-animation on first open.
+    /// Consumers that need the engine await this first (`awaitEngineReady`).
+    @ObservationIgnored private var engineBuildTask: Task<Void, Never>?
     private let speaker = ConversationSpeaker()
     /// Accumulates the spoken text across a multi-turn exchange so the final card
     /// shows the complete phrase (e.g. "remind me" + "take medication" + "tomorrow").
     private var conversationTranscripts: [String] = []
     private var recordingTask: Task<Void, Never>?
-    private var levelTimer: Timer?
-    private var animPhase: Double = 0
     private let logger = Logger(subsystem: "com.stt.module", category: "LiveTranscriptionViewModel")
     /// Per-stage TTS latency timings. Filter Console.app / `log stream` by
     /// subsystem com.stt.module, category Latency. Logging only — no behaviour change.
@@ -96,7 +99,19 @@ public final class LiveTranscriptionViewModel {
         speaker.onFinish = { [weak self] in self?.handleSpeechFinished() }
         speaker.onCancel = { [weak self] in self?.handleSpeechCancelled() }
 
-        if nlu == nil {
+        // Content-aware endpointing: let the NLU judge whether the stable transcript
+        // is a finished answer to the awaited slot. Unverifiable free text ("drink…")
+        // and incomplete answers ("tomorrow" with no time) extend the endpoint
+        // window instead of committing the turn mid-thought.
+        coordinator.endpointArbiter = { [weak self] text in
+            guard let self, let nlu = self.nlu else { return .complete }
+            return await nlu.assessSlotAnswer(text)
+        }
+
+        // Guard on the build task too: the engine now constructs asynchronously,
+        // so `nlu` stays nil while a build is in flight — a second onAppear must
+        // not start a competing build.
+        if nlu == nil && engineBuildTask == nil {
             rebuildEngine()
         }
 
@@ -114,12 +129,31 @@ public final class LiveTranscriptionViewModel {
     /// English behavior.
     private func rebuildEngine() {
         let langTag = currentLocale.language.languageCode?.identifier ?? "en"
-        let engine = factory.makeEngine(language: langTag)
-        nlu = engine
-        // warmUp is called on the engine (not a separate classifier ref):
-        // ConversationEngine.warmUp() delegates to the classifier, so there is
-        // a single warm-up entry point regardless of variant.
-        Task(priority: .userInitiated) { await engine.warmUp() }
+        let factory = self.factory
+        engineBuildTask?.cancel()
+        nlu = nil
+        engineBuildTask = Task(priority: .userInitiated) { [weak self] in
+            // Construct OFF the main actor: classifier init synchronously loads the
+            // CoreML model and JSON-parses the full weights file (incl. the 5–25 MB
+            // coef matrix). On the main thread this froze the PVA sheet's
+            // presentation animation on first open.
+            let engine = await Task.detached(priority: .userInitiated) {
+                factory.makeEngine(language: langTag)
+            }.value
+            guard let self, !Task.isCancelled else { return }
+            self.nlu = engine
+            // warmUp is called on the engine (not a separate classifier ref):
+            // ConversationEngine.warmUp() delegates to the classifier, so there is
+            // a single warm-up entry point regardless of variant.
+            Task(priority: .userInitiated) { await engine.warmUp() }
+        }
+    }
+
+    /// Suspends until the NLU engine (re)build in flight has finished. The engine
+    /// is ready long before the user can finish an utterance, but consumers must
+    /// await rather than assume — a fast first utterance must not be dropped.
+    public func awaitEngineReady() async {
+        await engineBuildTask?.value
     }
 
     /// Called when the assistant finishes speaking normally. Decides whether to resume.
@@ -176,6 +210,7 @@ public final class LiveTranscriptionViewModel {
     /// Loads Stage 3 (MiniLM semantic rescue) on the NLU's classifier.
     /// After this call, low-confidence Stage 2 results are rescued by Stage 3.
     public func loadStage3() async {
+        await awaitEngineReady()
         await nlu?.loadStage3()
     }
 
@@ -199,7 +234,15 @@ public final class LiveTranscriptionViewModel {
     /// Stops recording and TTS immediately. Call before releasing this instance
     /// (e.g., from PVASheetView.onDisappear) so in-flight tasks can cancel cleanly.
     public func teardown() {
-        if isListening || isStarting { stopRecording() }
+        engineBuildTask?.cancel()
+        if isListening || isStarting {
+            stopRecording()
+        } else {
+            // The conversation flow keeps the audio session active across
+            // recognizer↔TTS handoffs even after the mic stops — release it now
+            // so it doesn't outlive this screen.
+            coordinator.releaseAudioSession()
+        }
         speaker.stop()
         isSpeaking = false
     }
@@ -207,6 +250,17 @@ public final class LiveTranscriptionViewModel {
     // MARK: - Private
 
     private func startRecording() {
+        // Context-dependent endpointing: answers to a follow-up question use the
+        // unhurried `.slotAnswer` window (1.5s) — people routinely pause mid-answer
+        // ("drink… water"), and clipping the answer costs a whole extra turn.
+        // First commands keep the standard 1.0s window. Applies even in continuous
+        // mode: a slot answer turn should always endpoint.
+        if pendingQuestion != nil {
+            coordinator.silenceConfiguration = .slotAnswer
+        } else {
+            coordinator.silenceConfiguration = autoStopOnSilence ? .singleUtterance : .disabled
+        }
+
         error = nil
         isStarting = true
         recordingTask = Task {
@@ -214,7 +268,6 @@ public final class LiveTranscriptionViewModel {
                 try await coordinator.startLiveTranscription()
                 isStarting  = false
                 isListening = true
-                startAudioLevelAnimation()
             } catch let err as TranscriptionError {
                 isStarting  = false
                 isListening = false
@@ -236,26 +289,6 @@ public final class LiveTranscriptionViewModel {
         isStarting  = false
         isListening = false
         coordinator.stopLiveTranscription(deactivateSession: deactivateSession)
-        stopAudioLevelAnimation()
-    }
-
-    // MARK: - Audio Level Animation
-
-    private func startAudioLevelAnimation() {
-        animPhase = 0
-        levelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.animPhase += 0.12
-                self.audioLevel = Float(abs(sin(self.animPhase)) * 0.65 + 0.2)
-            }
-        }
-    }
-
-    private func stopAudioLevelAnimation() {
-        levelTimer?.invalidate()
-        levelTimer = nil
         audioLevel = 0.0
     }
 
@@ -279,9 +312,12 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
         guard !isSpeaking else { return }
 
         transcript = text
-        guard let nlu else { return }
         let receivedAt = CFAbsoluteTimeGetCurrent()
-        Task(priority: .userInitiated) { [nlu, weak self] in
+        Task(priority: .userInitiated) { [weak self] in
+            // Wait for an in-flight engine build (background construction) so a
+            // fast first utterance is handled instead of silently dropped.
+            await self?.awaitEngineReady()
+            guard let nlu = self?.nlu else { return }
             let response = await nlu.handle(text)
             let nluMs = (CFAbsoluteTimeGetCurrent() - receivedAt) * 1000
             await MainActor.run { [weak self] in
@@ -402,7 +438,16 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
     public func didEncounterError(_ error: TranscriptionError) {
         self.error = error
         isListening = false
-        stopAudioLevelAnimation()
+        audioLevel = 0.0
+    }
+
+    /// Real measured input power from the capture pipeline (replaces the old
+    /// synthetic sine-wave animation). Maps −60…0 dBFS → 0…1 with light smoothing.
+    public func didUpdateAudioLevel(_ powerDBFS: Float) {
+        guard isListening else { return }
+        let clamped = min(max(powerDBFS, -60), 0)
+        let normalized = (clamped + 60) / 60
+        audioLevel = audioLevel * 0.6 + normalized * 0.4
     }
 
     public func didChangeState(_ state: TranscriptionState) {
@@ -415,6 +460,6 @@ extension LiveTranscriptionViewModel: TranscriptionDelegate {
         // Silence detection ended the session automatically — reset the recording UI
         // (the coordinator has already begun tearing down the live session).
         isListening = false
-        stopAudioLevelAnimation()
+        audioLevel = 0.0
     }
 }

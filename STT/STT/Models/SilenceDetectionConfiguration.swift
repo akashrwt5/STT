@@ -32,18 +32,34 @@ public struct SilenceDetectionConfiguration: Sendable, Equatable {
     /// Duration of continuous silence *after detected speech* that ends the session.
     public var speechEndTimeout: TimeInterval
 
+    /// Medium window applied when the endpoint arbiter reports FREEFORM — free
+    /// text whose completeness cannot be verified ("drink" vs "drink water").
+    /// Long enough to survive a mid-topic thinking pause, short enough to stay
+    /// responsive. Only consulted when an arbiter is installed.
+    public var freeformAnswerTimeout: TimeInterval
+
+    /// Extended window applied when the endpoint arbiter judges the stable
+    /// transcript verifiably INCOMPLETE (e.g. bare "tomorrow" for a date-time
+    /// slot, a trailing function word). Gives the user room to finish the
+    /// thought ("…5 AM") before the turn is committed.
+    public var incompleteAnswerTimeout: TimeInterval
+
     /// Duration of silence *with no speech ever detected* that ends the session.
     public var noSpeechTimeout: TimeInterval
 
     public init(
         isEnabled: Bool,
         thresholdDBFS: Float = -45.0,
-        speechEndTimeout: TimeInterval = 1.5,
+        speechEndTimeout: TimeInterval = 1.0,
+        freeformAnswerTimeout: TimeInterval = 1.5,
+        incompleteAnswerTimeout: TimeInterval = 2.5,
         noSpeechTimeout: TimeInterval = 5.0
     ) {
         self.isEnabled = isEnabled
         self.thresholdDBFS = thresholdDBFS
         self.speechEndTimeout = speechEndTimeout
+        self.freeformAnswerTimeout = freeformAnswerTimeout
+        self.incompleteAnswerTimeout = incompleteAnswerTimeout
         self.noSpeechTimeout = noSpeechTimeout
     }
 
@@ -54,4 +70,16 @@ public struct SilenceDetectionConfiguration: Sendable, Equatable {
     /// Silence detection on with sensible defaults — the session ends shortly after
     /// the user stops speaking. Use for command / single-utterance interactions.
     public static let singleUtterance = SilenceDetectionConfiguration(isEnabled: true)
+
+    /// Endpointing for slot answers (replies to a follow-up question). Uses a
+    /// uniform, deliberately unhurried 1.5s confirmation window — the original
+    /// pre-tuning value. Field testing showed people routinely pause ~1s
+    /// mid-answer ("drink… water", "tomorrow… five"), so a fast-commit window
+    /// here clips answers more often than it saves time. Verifiably unfinished
+    /// answers still extend further via `incompleteAnswerTimeout`.
+    public static let slotAnswer = SilenceDetectionConfiguration(
+        isEnabled: true,
+        speechEndTimeout: 1.5,
+        freeformAnswerTimeout: 1.5
+    )
 }

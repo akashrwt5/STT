@@ -184,7 +184,7 @@ public actor MultilingualIntentClassifierService: IntentClassifying {
 
         let stage2 = coreMLModel != nil ? "CoreML" : "JSON weights"
         Logger(subsystem: "com.stt.module", category: "MultilingualIntentClassifier")
-            .info("MultilingualIntentClassifier ready — lang=\(language), threshold=\(confThreshold), Stage2: \(stage2)")
+            .info("MultilingualIntentClassifier ready — lang=\(language), threshold=\(self.confThreshold), Stage2: \(stage2)")
     }
 
     // MARK: - Public API
@@ -330,7 +330,9 @@ public actor MultilingualIntentClassifierService: IntentClassifying {
     /// output. Returns nil otherwise so the caller falls back to Swift logits.
     private func coreMLLogits(_ text: String, model: MLModel) -> [Double]? {
         guard
-            let input  = scorer.coreMLInput(for: text),
+            // Pass the model so the input array is built with the rank the model
+            // declares for tfidf_vector ([N] vs [1, N] varies by exporter).
+            let input  = scorer.coreMLInput(for: text, model: model),
             let output = try? model.prediction(from: input),
             let logits = output.featureValue(for: "logits")?.multiArrayValue,
             logits.count == labels.count

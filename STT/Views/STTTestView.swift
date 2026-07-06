@@ -153,6 +153,7 @@ struct STTTestView: View {
 
             // Primary CTA
             Button {
+                PVALaunchClock.tapped()
                 pvaViewModel = PVAViewModel(variant: variant)
             } label: {
                 Text("Try onDevice PVA")

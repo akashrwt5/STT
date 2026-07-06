@@ -44,6 +44,20 @@ final class SilenceDetector {
     private var consecutiveSilentFrames: Int = 0
     /// Total frames seen, used for the no-speech timeout.
     private var totalFrames: Int = 0
+    /// Slow EMA of the ambient noise floor (dBFS), learned from silent buffers.
+    /// A fixed threshold breaks under `.playAndRecord` (no `.measurement` mode, so
+    /// AGC/processing applies) and across routes — built-in mic vs HFP hearing aids
+    /// report very different levels for the same room. Seeded at a quiet-room value.
+    private var noiseFloorDBFS: Float = -60
+    /// Margin above the learned noise floor required to count as speech.
+    private let noiseMarginDB: Float = 12
+
+    /// The threshold actually applied: never *below* the configured floor (so a very
+    /// quiet room doesn't make breathing count as speech), but rises with ambient
+    /// noise so a loud room doesn't make the silence timer never fire.
+    private var effectiveThresholdDBFS: Float {
+        max(configuration.thresholdDBFS, noiseFloorDBFS + noiseMarginDB)
+    }
 
     /// - Parameters:
     ///   - configuration: Thresholds and timeouts.
@@ -55,19 +69,37 @@ final class SilenceDetector {
     }
 
     /// Feeds one buffer and returns whether the session should now end.
+    /// Convenience overload — computes power itself. Prefer `process(powerDBFS:frames:)`
+    /// when the caller has already measured the buffer (avoids a second RMS pass).
     func process(_ buffer: AVAudioPCMBuffer) -> Outcome {
-        guard configuration.isEnabled else { return .ongoing }
+        process(powerDBFS: buffer.averagePowerDBFS(), frames: Int(buffer.frameLength))
+    }
 
-        let frames = Int(buffer.frameLength)
-        guard frames > 0 else { return .ongoing }
+    /// Feeds one measurement and returns whether the session should now end.
+    func process(powerDBFS power: Float, frames: Int) -> Outcome {
+        guard configuration.isEnabled, frames > 0 else { return .ongoing }
 
         totalFrames += frames
-        let power = buffer.averagePowerDBFS()
 
-        if power >= configuration.thresholdDBFS {
+        // Adapt the noise floor from EVERY buffer, asymmetrically: drop fast toward
+        // quieter audio, rise slowly (≈ +3.5 dB/s at ~12 buffers/s) toward louder
+        // ambient — but never learn from strong speech (> floor + 20 dB). The previous
+        // version only learned from buffers already classified silent, so a floor that
+        // started below the real ambient level could never rise, the effective
+        // threshold stayed too low, ambient noise kept classifying as "speech", and
+        // the silence run reset forever — the VAD never fired.
+        if power.isFinite {
+            if power < noiseFloorDBFS {
+                noiseFloorDBFS += (power - noiseFloorDBFS) * 0.2
+            } else if power < noiseFloorDBFS + 20 {
+                noiseFloorDBFS += min(0.3, (power - noiseFloorDBFS) * 0.05)
+            }
+        }
+
+        if power >= effectiveThresholdDBFS {
             // Speech present — reset the silence run.
             if !hasDetectedSpeech {
-                logger.info("[VAD] First speech detected (power: \(power) dBFS).")
+                logger.info("[VAD] First speech detected (power: \(power) dBFS, threshold: \(self.effectiveThresholdDBFS) dBFS).")
             }
             hasDetectedSpeech = true
             consecutiveSilentFrames = 0

@@ -34,6 +34,12 @@ public final class TranscriptionCoordinator {
     /// the user stops speaking. Has no effect on file transcription.
     public var silenceConfiguration: SilenceDetectionConfiguration = .disabled
 
+    /// Content-aware endpointing hook. Given the current stable transcript, assesses
+    /// whether it's a finished answer to whatever the conversation is awaiting. The
+    /// verdict selects the confirmation window (fast / medium / extended) so a
+    /// thinking pause mid-answer doesn't split the turn. `nil` = fixed-window.
+    public var endpointArbiter: (@MainActor (String) async -> SlotAnswerAssessment)?
+
     public weak var delegate: TranscriptionDelegate?
 
     // MARK: - AsyncSequence API
@@ -60,6 +66,13 @@ public final class TranscriptionCoordinator {
     private let fileServiceFactory: @MainActor (URL) -> any AudioInputProvider
 
     private var activeProvider: (any AudioInputProvider)?
+    /// The reusable live-mic provider. Created once and reused across sessions so each
+    /// conversation turn restarts the same `AVAudioEngine` instead of allocating a new
+    /// one (engine + hardware IO setup costs real time on every turn).
+    private var liveProvider: (any AudioInputProvider)?
+    /// Set once `resolveCurrentLocaleIfNeeded` has run. Without this guard the resolve
+    /// (1–2 async XPC calls into the Speech framework) re-ran on *every* start.
+    private var localeResolved = false
     /// Tracks an in-progress live teardown so a restart can wait for it to finish before
     /// starting a new session. Without this, `startLiveTranscription` can be called while
     /// the previous session is still in `.stopping`, hit the guard, and silently no-op —
@@ -198,35 +211,53 @@ public final class TranscriptionCoordinator {
     /// - Throws: `TranscriptionError.audioSessionSetupFailed` if the audio session cannot start.
     /// - Throws: `TranscriptionError.analyzerFailed` if the speech engine cannot start.
     public func startLiveTranscription() async throws {
+        // Phase timing (logging only): the hang detector caught a one-time ~2.5s
+        // main-thread stall inside the FIRST mic start — these marks attribute it
+        // to a specific phase (permissions / locale / session / engine / analyzer).
+        var phaseStart = CFAbsoluteTimeGetCurrent()
+        func phase(_ name: StaticString) {
+            let now = CFAbsoluteTimeGetCurrent()
+            latencyLog.info("micStart phase \(name, privacy: .public): \((now - phaseStart) * 1000, format: .fixed(precision: 0))ms")
+            phaseStart = now
+        }
+
         // Wait for any in-progress teardown to finish so we always start from a clean
         // `.idle` state (and a released audio session/engine), not on top of a session
         // that is still tearing down. Fixes the freeze where a restart no-ops because
         // the previous session was still `.stopping`.
         await teardownTask?.value
         teardownTask = nil
+        phase("awaitTeardown")
 
         guard !state.isActive, state != .stopping else { return }
 
         transition(to: .requestingPermissions)
         try await requestPermissionsOrThrow()
+        phase("permissions")
 
         // Resolve the locale asynchronously now that we're in an async context.
         await resolveCurrentLocaleIfNeeded()
+        phase("resolveLocale")
         transition(to: .preparingAudio)
 
         try await sessionManager.configure()
+        phase("sessionConfigure")
         currentRoute = sessionManager.currentRoute
         currentTranscript = ""
 
-        let provider = captureServiceFactory()
+        let provider = liveProvider ?? captureServiceFactory()
+        liveProvider = provider
         activeProvider = provider
+        phase("providerCreate")
 
         // .progressiveTranscription yields partial results immediately — ideal for live mic.
         try await recognitionService.startTranscribing(
             from: provider,
             preset: .progressiveTranscription,
-            silenceConfiguration: silenceConfiguration
+            silenceConfiguration: silenceConfiguration,
+            endpointArbiter: endpointArbiter
         )
+        phase("startTranscribing")
         transition(to: .transcribing)
         logger.info("Live transcription started. Silence detection: \(self.silenceConfiguration.isEnabled ? "on" : "off").")
     }
@@ -273,6 +304,15 @@ public final class TranscriptionCoordinator {
         await teardownTask?.value
     }
 
+    /// Deactivates the shared audio session if no session is running. The conversation
+    /// flow deliberately keeps the session active across recognizer↔TTS handoffs (see
+    /// `recognitionServiceDidDetectSilence`); the owning screen calls this on dismiss
+    /// so the session doesn't outlive the conversation.
+    public func releaseAudioSession() {
+        guard state == .idle else { return }
+        sessionManager.tearDown()
+    }
+
     // MARK: - File Transcription
 
     /// Transcribes an audio file and returns the full transcript when complete.
@@ -289,6 +329,15 @@ public final class TranscriptionCoordinator {
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw TranscriptionError.fileNotFound(url)
         }
+
+        // The recognition service holds one analyzer/transcriber and one results
+        // continuation — a file job starting while a live session is active would
+        // corrupt both. Reject instead of silently interleaving.
+        guard !state.isActive, state != .stopping else {
+            throw TranscriptionError.sessionAlreadyActive
+        }
+        await teardownTask?.value
+        teardownTask = nil
 
         transition(to: .requestingPermissions)
         // File transcription does not use the microphone — only speech recognition auth.
@@ -367,12 +416,23 @@ public final class TranscriptionCoordinator {
     /// - Parameter identifier: BCP-47 locale string (e.g. "hi-IN", "en-US").
     /// - Throws: `TranscriptionError.localeNotSupported` if no model exists for this locale.
     public func switchLocale(to identifier: String) async throws {
-        try await recognitionService.switchLocale(to: identifier)
+        // Persist FIRST: the recognition service re-arms its prewarm inside
+        // switchLocale, and that prewarm resolves the locale from this key — writing
+        // it afterwards would make the fresh prewarm warm the *old* locale.
+        let previousOverride = UserDefaults.standard.string(forKey: localeDefaultsKey)
+        UserDefaults.standard.set(identifier, forKey: localeDefaultsKey)
+        do {
+            try await recognitionService.switchLocale(to: identifier)
+        } catch {
+            // Roll back so a failed switch doesn't poison the next launch/resolve.
+            UserDefaults.standard.set(previousOverride, forKey: localeDefaultsKey)
+            throw error
+        }
         // `supportedLocale(equivalentTo:)` is async in iOS 26.
         if let matched = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: identifier)) {
             currentLocale = matched
         }
-        UserDefaults.standard.set(identifier, forKey: localeDefaultsKey)
+        localeResolved = true
         logger.info("Locale changed to: \(identifier)")
     }
 
@@ -384,26 +444,34 @@ public final class TranscriptionCoordinator {
     }
 
     /// Resolves `currentLocale` from the async SpeechTranscriber API if it hasn't been
-    /// set by an explicit `switchLocale` call. Only resolves once per session.
+    /// set by an explicit `switchLocale` call. Only resolves once per coordinator —
+    /// enforced by the `localeResolved` flag (previously this comment claimed "once"
+    /// but the resolve re-ran, with its XPC calls, on every start).
     private func resolveCurrentLocaleIfNeeded() async {
+        guard !localeResolved else { return }
         let savedOverride = UserDefaults.standard.string(forKey: localeDefaultsKey)
         let resolved = await SpeechRecognitionService.resolveLocale(userOverride: savedOverride)
         currentLocale = resolved
+        localeResolved = true
     }
 
     private func requestPermissionsOrThrow(requiresMicrophone: Bool = true) async throws {
-        if requiresMicrophone {
+        // Fast path: skip the async request round-trips when already authorized —
+        // this runs on every conversation turn.
+        if requiresMicrophone, AVAudioApplication.shared.recordPermission != .granted {
             let micGranted = await AVAudioApplication.requestRecordPermission()
             guard micGranted else { throw TranscriptionError.microphonePermissionDenied }
         }
 
-        let speechStatus = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status)
+        if SFSpeechRecognizer.authorizationStatus() != .authorized {
+            let speechStatus = await withCheckedContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { status in
+                    continuation.resume(returning: status)
+                }
             }
-        }
-        guard speechStatus == .authorized else {
-            throw TranscriptionError.speechRecognitionPermissionDenied
+            guard speechStatus == .authorized else {
+                throw TranscriptionError.speechRecognitionPermissionDenied
+            }
         }
     }
 }
@@ -420,7 +488,18 @@ extension TranscriptionCoordinator: AudioSessionManagerDelegate {
     }
 
     public func audioSessionManagerInterruptionEnded(_ manager: AudioSessionManager, shouldResume: Bool) {
-        if shouldResume { Task { try? await startLiveTranscription() } }
+        guard shouldResume else { return }
+        // Surface resume failures instead of swallowing them with `try?` — a failed
+        // resume previously left the mic silently dead with no signal to the UI.
+        Task {
+            do {
+                try await startLiveTranscription()
+            } catch let error as TranscriptionError {
+                delegate?.didEncounterError(error)
+            } catch {
+                delegate?.didEncounterError(.analyzerFailed(error))
+            }
+        }
     }
 }
 
@@ -454,12 +533,20 @@ extension TranscriptionCoordinator: SpeechRecognitionServiceDelegate {
         fileCompletionHandler?()
     }
 
+    public func recognitionService(_ service: SpeechRecognitionService, didUpdateAudioLevel powerDBFS: Float) {
+        delegate?.didUpdateAudioLevel(powerDBFS)
+    }
+
     public func recognitionServiceDidDetectSilence(_ service: SpeechRecognitionService) {
-        // Only relevant for live transcription. Tear down the session the same way a
-        // manual stop would, so the UI returns to idle and resources are released.
+        // Only relevant for live transcription. Stop the recognizer and mic but keep
+        // the audio session ACTIVE: in a conversation the very next step is a TTS
+        // prompt, and speaking onto a just-deactivated session is both slower
+        // (deactivate/re-activate round-trip) and the known trigger for
+        // AVSpeechSynthesizer silently dropping utterances. The session is released
+        // by `releaseAudioSession()` when the owning screen goes away.
         logger.info("[Coordinator] Silence detected — stopping live transcription.")
         guard state == .transcribing else { return }
         delegate?.didReachEndOfSpeech()
-        stopLiveTranscription()
+        stopLiveTranscription(deactivateSession: false)
     }
 }

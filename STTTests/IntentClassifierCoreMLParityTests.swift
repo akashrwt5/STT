@@ -107,7 +107,11 @@ final class IntentClassifierCoreMLParityTests: XCTestCase {
         /// Real Core ML `logits` output for `text`, aligned with `labels`.
         func logits(_ text: String) throws -> [Double] {
             let vec = tfidfVector(text)
-            let arr = try MLMultiArray(shape: [vec.count as NSNumber], dataType: .float32)
+            // Build with the rank the model declares for tfidf_vector — the English
+            // export takes [N], the multilingual mlprogram export takes [1, N].
+            // Mirrors TFIDFLogisticScorer.inputShape(for:vectorLength:).
+            let shape = TFIDFLogisticScorer.inputShape(for: model, vectorLength: vec.count)
+            let arr = try MLMultiArray(shape: shape, dataType: .float32)
             let p = arr.dataPointer.assumingMemoryBound(to: Float.self)
             for i in 0..<vec.count { p[i] = Float(vec[i]) }
             let input = try MLDictionaryFeatureProvider(dictionary: [

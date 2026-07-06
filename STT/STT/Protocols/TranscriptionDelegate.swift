@@ -34,9 +34,17 @@ public protocol TranscriptionDelegate: AnyObject {
     /// stopped speaking (or never spoke). Only fired when silence detection is enabled.
     /// Optional — defaults to a no-op.
     func didReachEndOfSpeech()
+
+    /// Called with the measured input power (dBFS, `(-∞, 0]`) of each captured audio
+    /// buffer during live transcription — drive level meters from this instead of a
+    /// synthetic animation. Optional — defaults to a no-op.
+    func didUpdateAudioLevel(_ powerDBFS: Float)
 }
 
 public extension TranscriptionDelegate {
     /// Default no-op so existing conformers need not implement silence handling.
     func didReachEndOfSpeech() {}
+
+    /// Default no-op so existing conformers need not implement level metering.
+    func didUpdateAudioLevel(_ powerDBFS: Float) {}
 }

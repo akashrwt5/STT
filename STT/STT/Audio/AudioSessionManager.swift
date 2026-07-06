@@ -41,6 +41,12 @@ public final class AudioSessionManager {
     // MARK: - Private
 
     private let session: AVAudioSession
+    /// True once the session is configured and active. `configure()` early-returns
+    /// while this holds: re-running setCategory/setActive on the live session cost
+    /// ~550ms on every conversation turn's mic restart — time during which the
+    /// user's first words after the prompt were not being captured. Cleared by
+    /// `tearDown()` and by an interruption (both invalidate the active state).
+    private var isConfigured = false
     private let logger = Logger(subsystem: "com.stt.module", category: "AudioSessionManager")
 
     // MARK: - Init
@@ -74,6 +80,12 @@ public final class AudioSessionManager {
     /// and can block for hundreds of milliseconds, freezing the UI if done on the main
     /// actor. `AVAudioSession` is a thread-safe singleton, so this is safe.
     public func configure() async throws {
+        // Already configured and never deactivated (the conversation flow keeps the
+        // session up across recognizer↔TTS handoffs) — just refresh route state.
+        if isConfigured {
+            updateCurrentRoute()
+            return
+        }
         do {
             // AVAudioSession is a thread-safe singleton; safe to use off the main actor.
             nonisolated(unsafe) let session = self.session
@@ -94,6 +106,7 @@ public final class AudioSessionManager {
             NotificationCenter.default.removeObserver(self)
             registerForNotifications()
             updateCurrentRoute()
+            isConfigured = true
             logger.info("Audio session configured. Route: \(self.currentRoute.name)")
         } catch {
             logger.error("Audio session setup failed: \(error)")
@@ -105,6 +118,7 @@ public final class AudioSessionManager {
     public func tearDown() {
         NotificationCenter.default.removeObserver(self)
         try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        isConfigured = false
         logger.info("Audio session torn down.")
     }
 
@@ -177,6 +191,8 @@ public final class AudioSessionManager {
         switch type {
         case .began:
             logger.info("Audio interruption began.")
+            // The system deactivated us — the next configure() must run fully.
+            isConfigured = false
             delegate?.audioSessionManagerWasInterrupted(self)
 
         case .ended:
@@ -188,7 +204,14 @@ public final class AudioSessionManager {
                 shouldResume = false
             }
             logger.info("Audio interruption ended. Should resume: \(shouldResume)")
-            try? session.setActive(true)
+            // Only reactivate when we actually intend to resume — blindly calling
+            // setActive(true) grabbed the audio hardware even when idle. Log failures
+            // instead of discarding them; the coordinator surfaces its own errors when
+            // the restart attempt runs.
+            if shouldResume {
+                do { try session.setActive(true) }
+                catch { logger.error("Failed to reactivate session after interruption: \(error)") }
+            }
             delegate?.audioSessionManagerInterruptionEnded(self, shouldResume: shouldResume)
 
         @unknown default:

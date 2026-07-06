@@ -340,7 +340,9 @@ public actor IntentClassifierService: IntentClassifying {
     /// logit computation.
     private func coreMLLogits(_ text: String, model: MLModel) -> [Double]? {
         guard
-            let input  = scorer.coreMLInput(for: text),
+            // Pass the model so the input array is built with the rank the model
+            // declares for tfidf_vector ([N] vs [1, N] varies by exporter).
+            let input  = scorer.coreMLInput(for: text, model: model),
             let output = try? model.prediction(from: input),
             let logits = output.featureValue(for: "logits")?.multiArrayValue,
             logits.count == labels.count

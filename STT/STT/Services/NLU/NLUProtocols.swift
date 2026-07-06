@@ -55,6 +55,34 @@ public protocol ConversationEngine: Actor {
     func releaseStage3() async
     /// Pre-warms the underlying classifier's CoreML graphs.
     func warmUp() async
+
+    /// Content-aware endpointing hook. Given the current stable (not yet final)
+    /// transcript, assesses how confident the engine is that it forms a finished
+    /// answer to whatever it is currently awaiting. The endpointing layer maps the
+    /// verdict to a confirmation window: verified-complete answers endpoint fast,
+    /// unverifiable free text gets a medium window, verifiably unfinished answers
+    /// get an extended one — so a thinking pause ("tomorrow… …5 AM", "drink…
+    /// …water") doesn't split one answer into two turns.
+    /// Returns `.complete` when not mid-conversation (open commands endpoint normally).
+    func assessSlotAnswer(_ text: String) async -> SlotAnswerAssessment
+}
+
+/// Endpointing verdict for an in-progress slot answer.
+public enum SlotAnswerAssessment: Sendable {
+    /// Verified complete (e.g. a date-time with an explicit time, a matched enum
+    /// value). Safe to endpoint at the fast window.
+    case complete
+    /// Free-form text whose completeness cannot be verified ("drink" vs "drink
+    /// water" — no rule can tell). Use the medium window.
+    case freeform
+    /// Verifiably unfinished (bare day for a date-time slot, trailing function
+    /// word, empty). Use the extended window.
+    case incomplete
+}
+
+public extension ConversationEngine {
+    /// Default: treat every answer as complete (fixed-window endpointing).
+    func assessSlotAnswer(_ text: String) async -> SlotAnswerAssessment { .complete }
 }
 
 // MARK: - NLUEngineFactory
@@ -65,7 +93,12 @@ public protocol ConversationEngine: Actor {
 /// the codebase that names concrete classifier types. Adding a third variant is
 /// a new conforming struct plus one new case in `NLUEngineFactoryProvider.make(for:)`,
 /// with zero edits to `NLUEngine`, `LiveTranscriptionViewModel`, or `PVAViewModel`.
-public protocol NLUEngineFactory {
+///
+/// `Sendable` because engine construction is expensive (CoreML model load +
+/// multi-MB weights JSON parse) and runs on a background task — the factory
+/// value crosses that isolation boundary. Conformers must be stateless (both
+/// current ones are empty structs).
+public protocol NLUEngineFactory: Sendable {
     func makeEngine() -> any ConversationEngine
     func makeEngine(language: String) -> any ConversationEngine
 }

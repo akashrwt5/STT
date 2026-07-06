@@ -13,6 +13,15 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
 
     private let synthesizer = AVSpeechSynthesizer()
 
+    /// Serial queue for the synchronous speech-daemon bridges (`AVSpeechSynthesisVoice`
+    /// lookup and `speak(_:)`). Serial (not the global concurrent pool) so the voice
+    /// cache below is accessed race-free without a lock.
+    private static let speechQueue = DispatchQueue(label: "com.stt.module.tts", qos: .userInitiated)
+    /// Caches resolved voices per locale identifier. `AVSpeechSynthesisVoice(language:)`
+    /// dispatches into the speech daemon and its first call is expensive — paying that
+    /// on every prompt added avoidable latency each turn. Only touched on `speechQueue`.
+    nonisolated(unsafe) private static var voiceCache: [String: AVSpeechSynthesisVoice] = [:]
+
     // Latency instrumentation (logging only — no behaviour change). `requestedAt`
     // is the moment the final STT result arrived (passed in by the view model) so
     // `didStart` can report the full "user stopped talking → first TTS audio"
@@ -79,12 +88,21 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         let voiceStart = CFAbsoluteTimeGetCurrent()
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
+            Self.speechQueue.async {
                 let utterance = AVSpeechUtterance(string: text)
-                utterance.voice = AVSpeechSynthesisVoice(language: identifier)
-                    ?? AVSpeechSynthesisVoice(language: "en-US")
+                // Voice lookup dispatches into the speech daemon — cache per locale so
+                // only the first prompt of a conversation pays for it.
+                if let cached = Self.voiceCache[identifier] {
+                    utterance.voice = cached
+                } else if let voice = AVSpeechSynthesisVoice(language: identifier)
+                            ?? AVSpeechSynthesisVoice(language: "en-US") {
+                    Self.voiceCache[identifier] = voice
+                    utterance.voice = voice
+                }
                 utterance.rate = AVSpeechUtteranceDefaultSpeechRate
-                utterance.postUtteranceDelay = 0.1
+                // No post-utterance delay: it added a flat 100ms between the prompt
+                // ending and `didFinish` → mic restart on every conversation turn.
+                utterance.postUtteranceDelay = 0
                 synth.speak(utterance)
                 continuation.resume()
             }

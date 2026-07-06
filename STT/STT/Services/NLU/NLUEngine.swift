@@ -329,6 +329,52 @@ public actor NLUEngine: ConversationEngine {
         }
     }
 
+    /// Content-aware endpointing hook (see `ConversationEngine`). Mirrors the slot
+    /// resolution rules in `handleSlotFilling`/`resolveDateTime` WITHOUT mutating
+    /// session state — this runs speculatively, per stable transcript, while the
+    /// user may still be mid-answer.
+    public func assessSlotAnswer(_ text: String) -> SlotAnswerAssessment {
+        guard let intent = session.pendingIntent,
+              let cfg = schema.intents[intent],
+              let awaiting = session.awaitingSlot,
+              let slot = cfg.slots.first(where: { $0.name == awaiting })
+        else { return .complete }
+
+        if slot.entity == "sys.date-time" {
+            // Complete only with an explicit time: "tomorrow 6 AM", "at 5", "in 20
+            // minutes". A bare day ("tomorrow") parses but would be parked and
+            // re-prompted — give the user time to finish the thought instead.
+            guard let match = entities.extractDateTime(text) else { return .incomplete }
+            return match.timeExplicit ? .complete : .incomplete
+        }
+        if entities.isOpen(slot.entity) {
+            let trimmed = text.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { return .incomplete }
+            // A free-text answer whose last word is a connective/function word is
+            // almost certainly mid-phrase ("going out for a…"). English-only
+            // heuristic; other languages skip it and report .freeform.
+            let lastWord = trimmed.lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { !$0.isEmpty }
+                .last ?? ""
+            if Self.trailingFunctionWords.contains(lastWord) { return .incomplete }
+            // Free text can never be VERIFIED complete ("drink" vs "drink water") —
+            // report .freeform so the endpoint uses the medium window, tolerating a
+            // mid-topic thinking pause without paying the full extended wait.
+            return .freeform
+        }
+        return entities.extract(slot.entity, from: text) != nil ? .complete : .incomplete
+    }
+
+    /// Words that essentially never end a complete English phrase. A stable
+    /// transcript ending in one of these is mid-thought — extend the endpoint
+    /// window rather than committing the turn.
+    private static let trailingFunctionWords: Set<String> = [
+        "a", "an", "the", "to", "for", "at", "in", "on", "of", "and", "or",
+        "my", "me", "our", "your", "with", "about", "that", "this", "by",
+        "from", "so", "but", "is", "are", "be", "it", "when", "if", "then"
+    ]
+
     /// Resolve a date-time slot value from `text`.
     ///
     /// Returns `filled == true` only when an explicit time was given. When the

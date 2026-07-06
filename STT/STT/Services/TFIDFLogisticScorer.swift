@@ -61,17 +61,50 @@ public struct TFIDFLogisticScorer {
     /// The mlprogram exporter declares `tfidf_vector` as FLOAT32; CoreML rejects
     /// a dtype mismatch by refusing the prediction (which would silently fall back
     /// to the JSON-weights path), so the array is always built as `.float32`.
-    public func coreMLInput(for text: String) -> MLDictionaryFeatureProvider? {
+    ///
+    /// The array's SHAPE is taken from the model's own declared input constraint:
+    /// different exporters declare different ranks for the same vector — the
+    /// English pipeline model takes rank 1 `[N]`, while the multilingual mlprogram
+    /// export takes rank 2 `[1, N]` (batch dim). Hard-coding either rank makes the
+    /// other model reject the prediction with
+    /// "feature 'tfidf_vector' must be of rank 2, instead got rank 1".
+    /// The memory layout is identical (contiguous N floats) — only the declared
+    /// shape differs — so we fill the buffer the same way in both cases.
+    ///
+    /// - Parameter model: the model this input is destined for; its
+    ///   `modelDescription` provides the required shape. `nil` falls back to `[N]`.
+    public func coreMLInput(for text: String, model: MLModel? = nil) -> MLDictionaryFeatureProvider? {
         let vec = tfidfVector(for: text)
         let n = vec.count
         guard n > 0,
-              let arr = try? MLMultiArray(shape: [n as NSNumber], dataType: .float32)
+              let arr = try? MLMultiArray(shape: Self.inputShape(for: model, vectorLength: n),
+                                          dataType: .float32)
         else { return nil }
         let ptr = arr.dataPointer.assumingMemoryBound(to: Float.self)
         for i in 0..<n { ptr[i] = Float(vec[i]) }
         return try? MLDictionaryFeatureProvider(dictionary: [
             "tfidf_vector": MLFeatureValue(multiArray: arr)
         ])
+    }
+
+    /// Resolves the shape the model declares for `tfidf_vector`.
+    ///
+    /// Uses the declared rank and substitutes the actual vector length for the
+    /// feature axis (any non-positive/flexible dim, or the last axis). Falls back
+    /// to rank-1 `[N]` when the model or its constraint is unavailable.
+    public static func inputShape(for model: MLModel?, vectorLength n: Int) -> [NSNumber] {
+        guard let constraint = model?.modelDescription
+            .inputDescriptionsByName["tfidf_vector"]?
+            .multiArrayConstraint,
+            !constraint.shape.isEmpty
+        else { return [n as NSNumber] }
+
+        var shape = constraint.shape
+        // Replace flexible (≤ 0) dims: feature axis gets N, batch axes get 1.
+        for i in shape.indices where shape[i].intValue <= 0 {
+            shape[i] = (i == shape.count - 1) ? n as NSNumber : 1
+        }
+        return shape
     }
 
     // MARK: - Vectorisation
