@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		C83FD9BD2FFE22F000EEE84F /* VoiceIntentKit in Frameworks */ = {isa = PBXBuildFile; productRef = C83FD9BC2FFE22F000EEE84F /* VoiceIntentKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		C8CD16142FD17F81003B4792 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C83FD9BD2FFE22F000EEE84F /* VoiceIntentKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = STT;
 			packageProductDependencies = (
+				C83FD9BC2FFE22F000EEE84F /* VoiceIntentKit */,
 			);
 			productName = STT;
 			productReference = C8CD16062FD17F76003B4792 /* STT.app */;
@@ -195,6 +201,9 @@
 			);
 			mainGroup = C8CD15FD2FD17F76003B4792;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C83FD9BB2FFE22F000EEE84F /* XCLocalSwiftPackageReference "VoiceIntentKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C8CD16072FD17F76003B4792 /* Products */;
 			projectDirPath = "";
@@ -398,8 +407,6 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app requires mic permission";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Requires it for transcribe";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -444,8 +451,6 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app requires mic permission";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Requires it for transcribe";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -619,6 +624,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		C83FD9BB2FFE22F000EEE84F /* XCLocalSwiftPackageReference "VoiceIntentKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = VoiceIntentKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C83FD9BC2FFE22F000EEE84F /* VoiceIntentKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoiceIntentKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = C8CD15FE2FD17F76003B4792 /* Project object */;
 }

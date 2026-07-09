@@ -14,10 +14,27 @@ struct STTTestView: View {
     /// Non-nil while a PVA sheet is open. Setting this to nil dismisses the sheet
     /// and triggers full deallocation of the coordinator + NLU pipeline it owns.
     @State private var pvaViewModel: PVAViewModel?
+    /// Set when the user picks "Package" — presents the VoiceIntentKit-backed screen.
+    @State private var showPackageSession = false
     /// Persisted NLU pipeline selection. NLUVariant.RawValue == String satisfies
     /// AppStorage's RawRepresentable requirement directly, so the choice survives
     /// app restarts with no extra storage glue.
     @AppStorage("selectedNLUVariant") private var variant: NLUVariant = .english
+    /// First-screen selection including the package path. English/Multilingual map
+    /// to the existing NLUVariant flow; Package routes to VoiceIntentKit.
+    @State private var pipeline: PipelineChoice = .english
+
+    enum PipelineChoice: String, CaseIterable, Identifiable {
+        case english, multilingual, package
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .english:      return "English"
+            case .multilingual: return "Multilingual"
+            case .package:      return "Package"
+            }
+        }
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -44,6 +61,9 @@ struct STTTestView: View {
             LanguageSelectorView(currentLocale: coordinator.currentLocale) { identifier in
                 Task { try? await coordinator.switchLocale(to: identifier) }
             }
+        }
+        .sheet(isPresented: $showPackageSession) {
+            PackageVoiceView().preferredColorScheme(.dark)
         }
     }
 
@@ -130,11 +150,10 @@ struct STTTestView: View {
                     .lineSpacing(3)
             }
 
-            // NLU variant selector — persisted across launches.
-            Picker("NLU Variant", selection: $variant) {
-                ForEach(NLUVariant.allCases) { v in
-                    Text(v.displayName).tag(v)
-                }
+            // Pipeline selector — persisted across launches for English/Multilingual;
+            // Package is a per-launch choice that routes into VoiceIntentKit.
+            Picker("Pipeline", selection: $pipeline) {
+                ForEach(PipelineChoice.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 32)
@@ -144,17 +163,23 @@ struct STTTestView: View {
             // SemanticEmbedder) before a new session is constructed, avoiding
             // doubled ANE memory and audio-session conflicts. Verified by the
             // [Deinit] log chain in the Xcode console.
-            .onChange(of: variant) { _, _ in
-                if pvaViewModel != nil {
+            .onChange(of: pipeline) { _, new in
+                if new != .package, pvaViewModel != nil {
                     pvaViewModel?.teardown()
                     pvaViewModel = nil
                 }
+                if new == .english      { variant = .english }
+                if new == .multilingual { variant = .multilingual }
             }
 
             // Primary CTA
             Button {
                 PVALaunchClock.tapped()
-                pvaViewModel = PVAViewModel(variant: variant)
+                if pipeline == .package {
+                    showPackageSession = true                      // VoiceIntentKit path
+                } else {
+                    pvaViewModel = PVAViewModel(variant: variant)  // existing in-app path
+                }
             } label: {
                 Text("Try onDevice PVA")
                     .font(.system(size: 17, weight: .semibold))
