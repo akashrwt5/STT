@@ -1,0 +1,16 @@
+{
+  "language": "de",
+  "displayName": "Deutsch",
+  "locale": "de-DE",
+  "classifier": {
+    "kind": "shared",
+    "model": "IntentClassifier_multilingual",
+    "weights": "multilingual_intent_classifier_weights",
+    "confThreshold": 0.60,
+    "confGapThreshold": 0.20,
+    "loggerCategory": "MultilingualIntentClassifier"
+  },
+  "schemaOverlay": "nlu_schema.de",
+  "entities": "nlu_entities.de",
+  "lexicon": "nlu_lexicon.de"
+}

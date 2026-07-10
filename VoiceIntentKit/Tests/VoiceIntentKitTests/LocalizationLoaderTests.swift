@@ -121,7 +121,7 @@ final class LocalizationLoaderTests: XCTestCase {
     // MARK: - Factory builds a language-specific engine
 
     func testMultilingualFactoryBuildsFrenchEngine() async {
-        let engine = NLUEngineFactoryProvider.make(for: .multilingual).makeEngine(language: "fr")
+        let engine = NLUEngineFactoryProvider.makeEngine(language: "fr")
         let collecting = await engine.isCollecting
         XCTAssertFalse(collecting, "a freshly built French engine is not mid-conversation")
         await engine.reset()

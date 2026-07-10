@@ -165,10 +165,17 @@ public final class TranscriptionCoordinator {
     public private(set) var intentClassifier: IntentClassifierService?
 
     /// Diagnostic — create the IntentClassifier instance. Idempotent.
+    ///
+    /// Builds an English classifier via the manifest-driven registry so the
+    /// diagnostic path stays in lock-step with production loading.
     public func initIntentClassifier() {
-        if intentClassifier == nil {
-            intentClassifier = IntentClassifierService()
-        }
+        guard intentClassifier == nil else { return }
+        guard let pack = LanguagePackRegistry.pack(for: "en") else { return }
+        intentClassifier = IntentClassifierService(
+            bundle: LanguagePackRegistry.classifierBundle(for: pack),
+            confThreshold: pack.classifier.confThreshold,
+            confGapThreshold: pack.classifier.confGapThreshold
+        )
     }
 
     /// Diagnostic — drop our reference to the IntentClassifier. If nothing

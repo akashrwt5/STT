@@ -42,15 +42,17 @@ let package = Package(
                 .copy("Resources/intent_classifier_weights.json"),
                 .copy("Resources/multilingual_intent_classifier_weights.json"),
                 .copy("Resources/multilingual_intent_labels.json"),
-                .copy("Resources/calibration.json"),
                 .copy("Resources/semantic_head.json"),
                 .copy("Resources/minilm-vocab.txt"),
                 .copy("Resources/nlu_schema.json"),
                 .copy("Resources/nlu_entities.json"),
 
-                // Per-language overlays — kept as a subdirectory because the code
-                // looks them up with `subdirectory: "Localization"`.
-                .copy("Resources/Localization"),
+                // Language packs — one folder per language, each containing a
+                // `manifest.json` plus the per-language schema / entities /
+                // lexicon overlays. `LanguagePackRegistry` enumerates the
+                // top-level directory; `LocalizationLoader` reads individual
+                // files with `subdirectory: "LanguagePacks/<code>"`.
+                .copy("Resources/LanguagePacks"),
             ]
         ),
         // Test target — runtime smoke tests + Phase-2 parity tests ported from

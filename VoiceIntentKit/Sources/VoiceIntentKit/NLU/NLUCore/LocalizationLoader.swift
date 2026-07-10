@@ -26,7 +26,7 @@ public enum LocalizationLoader {
             return .loadFromBundle()
         }
 
-        guard let overlayURL = bundleURL(name: "nlu_schema.\(language)", ext: "json"),
+        guard let overlayURL = bundleURL(name: "nlu_schema.\(language)", ext: "json", language: language),
               let overlayData = try? Data(contentsOf: overlayURL),
               let overlay = try? JSONSerialization.jsonObject(with: overlayData) as? [String: Any]
         else {
@@ -50,7 +50,7 @@ public enum LocalizationLoader {
         guard language != "en", language != "en-US" else {
             return bundleURL(name: "nlu_entities", ext: "json")
         }
-        if let url = bundleURL(name: "nlu_entities.\(language)", ext: "json") { return url }
+        if let url = bundleURL(name: "nlu_entities.\(language)", ext: "json", language: language) { return url }
         log.error("LocalizationLoader: nlu_entities.\(language).json missing — using English")
         return bundleURL(name: "nlu_entities", ext: "json")
     }
@@ -58,7 +58,7 @@ public enum LocalizationLoader {
     /// Returns an NLULexicon for `language`, or nil if the file is missing or undecodable.
     /// Nil callers fall back to NLUEngine static English defaults.
     public static func lexicon(language: String) -> NLULexicon? {
-        guard let url = bundleURL(name: "nlu_lexicon.\(language)", ext: "json") else { return nil }
+        guard let url = bundleURL(name: "nlu_lexicon.\(language)", ext: "json", language: language) else { return nil }
         guard let data = try? Data(contentsOf: url) else {
             log.error("LocalizationLoader: could not read nlu_lexicon.\(language).json")
             return nil
@@ -131,8 +131,18 @@ public enum LocalizationLoader {
 
     // MARK: - Bundle lookup
 
-    private static func bundleURL(name: String, ext: String) -> URL? {
-        Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Localization")
-            ?? Bundle.module.url(forResource: name, withExtension: ext)
+    /// Resolve `<name>.<ext>` inside the built bundle.
+    ///
+    /// When `language` is supplied, the pack directory `LanguagePacks/<language>/`
+    /// is preferred — that's where every per-language overlay now lives. When it's
+    /// nil (canonical resources like `nlu_schema.json`) the lookup goes straight
+    /// to the bundle root.
+    private static func bundleURL(name: String, ext: String, language: String? = nil) -> URL? {
+        if let language,
+           let url = Bundle.module.url(forResource: name, withExtension: ext,
+                                       subdirectory: "LanguagePacks/\(language)") {
+            return url
+        }
+        return Bundle.module.url(forResource: name, withExtension: ext)
     }
 }

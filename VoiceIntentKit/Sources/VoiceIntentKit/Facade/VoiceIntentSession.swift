@@ -135,14 +135,9 @@ public final class VoiceIntentSession {
     // MARK: - Engine construction
 
     private func buildEngine() async -> any ConversationEngine {
-        let language = config.language
+        let code = config.language.languageCode
         return await Task.detached(priority: .userInitiated) {
-            switch language {
-            case .english:
-                return EnglishNLUEngineFactory().makeEngine()
-            case .language(let code, _):
-                return MultilingualNLUEngineFactory().makeEngine(language: code)
-            }
+            NLUEngineFactoryProvider.makeEngine(language: code)
         }.value
     }
 

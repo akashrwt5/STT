@@ -85,25 +85,3 @@ public extension ConversationEngine {
     func assessSlotAnswer(_ text: String) async -> SlotAnswerAssessment { .complete }
 }
 
-// MARK: - NLUEngineFactory
-
-/// Creates a fully configured `ConversationEngine`.
-///
-/// Concrete factories live in `NLUEngineFactoryProvider` — the single place in
-/// the codebase that names concrete classifier types. Adding a third variant is
-/// a new conforming struct plus one new case in `NLUEngineFactoryProvider.make(for:)`,
-/// with zero edits to `NLUEngine`, `LiveTranscriptionViewModel`, or `PVAViewModel`.
-///
-/// `Sendable` because engine construction is expensive (CoreML model load +
-/// multi-MB weights JSON parse) and runs on a background task — the factory
-/// value crosses that isolation boundary. Conformers must be stateless (both
-/// current ones are empty structs).
-public protocol NLUEngineFactory: Sendable {
-    func makeEngine() -> any ConversationEngine
-    func makeEngine(language: String) -> any ConversationEngine
-}
-
-extension NLUEngineFactory {
-    /// Default: language-unaware factories forward to the English engine.
-    public func makeEngine(language: String) -> any ConversationEngine { makeEngine() }
-}
