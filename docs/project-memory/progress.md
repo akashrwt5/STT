@@ -109,3 +109,13 @@ All 5 specialist agents have reported. Shared memory artifacts written.
 | `docs/project-memory/performance_report.md` | ✅ Written |
 | `docs/project-memory/risks.md` | ✅ Written |
 | `docs/project-memory/progress.md` | ✅ Written |
+
+---
+
+## 2026-07-12 — Claude Code repo setup (branch: claude/repo-setup-token-efficiency-1245h1)
+
+Branched from `claude/multilingual-nlu-status-check-s7ggcw` @ `5d48994` (its tip; no other
+divergence). Added: root + IntentKit + VoiceIntentKit `CLAUDE.md`, `.claude/settings.json`
+(permissions + hook), web SessionStart hook, `scripts/validate_resources.py`,
+`.claude/agents/` (swift-reviewer, nlu-resource-auditor), `.gitignore` (untracked xcuserdata).
+No app/package source or resource files were modified.

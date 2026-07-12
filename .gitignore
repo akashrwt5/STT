@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Xcode user state (per-developer noise; never review-relevant)
+xcuserdata/
+*.xcuserstate
+
+# Build products
+build/
+DerivedData/
+.build/
+.swiftpm/
+
+# Claude Code personal (non-shared) settings
+.claude/settings.local.json
+
+# Python bytecode (from scripts/)
+__pycache__/
+*.pyc

@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git show:*)",
+      "Bash(ls:*)",
+      "Bash(jq:*)",
+      "Bash(wc:*)",
+      "Bash(python3 scripts/validate_resources.py)",
+      "Bash(xcodebuild test:*)",
+      "Bash(xcodebuild -list:*)",
+      "Bash(swift test:*)",
+      "Bash(swift build:*)"
+    ],
+    "deny": [
+      "Read(**/*.mlpackage/**)",
+      "Read(**/*.mlmodel)",
+      "Read(**/weight.bin)",
+      "Read(**/minilm-vocab.txt)",
+      "Read(**/*intent_classifier_weights.json)",
+      "Read(**/semantic_head.json)",
+      "Read(**/coreml_golden_fixtures.json)",
+      "Read(**/*.xcuserstate)"
+    ]
+  }
+}
