@@ -47,9 +47,18 @@ enum FMPromptBuilder {
         "everything is too loud" means volumeDown.
         4. outOfScope is for anything the app cannot do: weather, news, \
         general knowledge, jokes, controlling other apps, open conversation.
-        5. Choose exactly one intent. When torn between a specific intent and \
+        5. A bare word or short fragment that is not itself a command — a \
+        name, a place, an object, a program name like "Crowd" or "Car" — is \
+        outOfScope. These are often answers to a question the app just asked, \
+        and another component handles them; do not force them into an intent.
+        6. First-person statements about what the user did, is doing, or \
+        where they are ("I'm going out for a walk", "I sat at a busy cafe") \
+        are descriptions, not requests — outOfScope. Activity intents are for \
+        asking about stats ("how many steps today"), never for narrating \
+        activity.
+        7. Choose exactly one intent. When torn between a specific intent and \
         outOfScope, prefer the specific intent only if the utterance clearly \
-        concerns hearing aids, the app, reminders, messages, or health stats.
+        REQUESTS something from the app.
         """)
         lines.append("")
         lines.append("""
@@ -64,6 +73,10 @@ enum FMPromptBuilder {
         "how do reminders work" → helpReminder
         "what's the weather like" → outOfScope
         "who is the president of India" → outOfScope
+        "Crowd" → outOfScope
+        "tomorrow at 9" → outOfScope
+        "I'm going out for a walk" → outOfScope
+        "I sat at a busy cafe" → outOfScope
         """)
         return lines.joined(separator: "\n")
     }

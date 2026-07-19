@@ -9,6 +9,11 @@
 > - "Guided output is accepted" is implemented via the existing `semanticRescue` flag on `ClassificationResult`, which `NLUEngine` already defines as "producer decided acceptance — skip the calibrated threshold." No engine change needed.
 > - `NLUEngine`'s Stage-0 schema keyword triggers still run ahead of the FM classifier in live mode (exact parity with the cascade paths); the benchmark calls the classifier directly, so benchmark numbers measure pure FM.
 
+> **Field findings — first on-device run (2026-07-19):**
+> - **Shared-session transcript accumulation is harmful for classification.** Per-turn latency grew 791ms → 2847ms over eight turns, the context window overflowed, and history contaminated results — the identical utterance "Change memory" classified correctly on its first turn and as out-of-scope on a later turn. Fix: sessions are now stateless per turn (fresh session each classification, next session prewarmed immediately after each response so instruction processing overlaps user speech).
+> - **The 3B model needs explicit rules for non-command utterances.** Bare fragments that are really slot answers ("Crowd" — a memory name) and first-person narration ("I sat at a busy cafe", "I'm going out for a walk") were forced into activity intents at 0.8–0.9 self-rating. Fix: prompt rules 5–6 + negative few-shots. Residual risk: any confident misclassification during slot filling can trip `NLUEngine`'s interruption probe (≥ 0.75); currently bounded because only 3 intents carry schema slot-configs.
+> - **Self-rating is uniformly ≈1.0** — textbook LLM overconfidence, confirming the plan's decision to treat it as display-only and never gate on it.
+
 ---
 
 ## 1. Goal and non-goals

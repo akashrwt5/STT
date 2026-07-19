@@ -14,10 +14,16 @@
 // "Default Fallback Intent" with `semanticRescue: false`, which routes to the
 // engine's existing fallback path — identical UX to a cascade miss.
 //
-// SESSION LIFECYCLE (plan §7): one LanguageModelSession per service instance,
-// greedy sampling, prewarmed via warmUp(). On context-window overflow the
-// session is rebuilt (conversation state lives in NLUContext, not here, so
-// nothing user-visible is lost) and the turn is retried once.
+// SESSION LIFECYCLE — stateless per turn. Field finding from the first device
+// run: a shared session accumulates its transcript, which (a) grew per-turn
+// latency 791ms → 2847ms across eight turns, (b) overflowed the context
+// window, and (c) contaminated classification — the identical utterance
+// "Change memory" classified correctly on turn 1 and as out-of-scope on
+// turn 3 because the model read the repetition against its history.
+// Classification needs zero history (conversation state lives in NLUContext),
+// so every turn gets a fresh session. The next turn's session is created and
+// prewarmed immediately after each response — instruction processing overlaps
+// the seconds the user spends speaking, keeping per-turn latency flat.
 
 import Foundation
 import os.log
@@ -117,24 +123,34 @@ public actor FMIntentClassifierService: IntentClassifying {
     // MARK: - Session plumbing
 
     private func respond(to text: String, allowRetry: Bool) async throws -> FMClassificationOutput {
+        // Take the prewarmed session for this turn and immediately stage a
+        // fresh one for the next turn (see header: stateless per turn).
+        let turnSession = session
+        rotateSession()
         do {
-            let response = try await session.respond(
+            let response = try await turnSession.respond(
                 to: text,
                 generating: FMClassificationOutput.self,
                 options: GenerationOptions(sampling: .greedy)
             )
             return response.content
         } catch let error as LanguageModelSession.GenerationError {
-            // Context window exhausted by a long conversation: rebuild the
-            // session (instructions only — conversation state lives in
-            // NLUContext) and retry this turn once.
+            // Single-turn prompts shouldn't overflow, but keep the recovery as
+            // a belt-and-braces path (e.g. a pathologically long transcript).
             if case .exceededContextWindowSize = error, allowRetry {
-                logger.info("FM context window exceeded — rebuilding session")
-                session = Self.makeSession()
+                logger.info("FM context window exceeded on a single turn — retrying with a fresh session")
                 return try await respond(to: text, allowRetry: false)
             }
             throw error
         }
+    }
+
+    /// Replaces the staged session with a fresh, prewarmed one. Called after
+    /// handing the previous session to a turn, so instruction processing runs
+    /// while the user is still speaking their next utterance.
+    private func rotateSession() {
+        session = Self.makeSession()
+        session.prewarm()
     }
 }
 #endif
