@@ -44,7 +44,7 @@ switch can silently turn off.
 | Behavior stability | Deterministic; same input → same output | Greedy sampling is deterministic *per prompt*, but the model itself changes under us with OS updates |
 | Fixing a vocabulary gap | New training rows → retrain → re-export → redeploy (days) | One prompt line, effective next launch (minutes) — demonstrated with the "environment" synonym |
 | Memory (resident) | ~13 MB (S1+S2) / ~100 MB with S3 loaded | ≈0 in-process (OS hosts the model) |
-| Multilingual | en/fr/de/da trained and calibrated | English-focused; **Danish unsupported by Apple Intelligence** |
+| Multilingual | en/fr/de/da trained and calibrated | Sample is English-prompted only. Apple Intelligence covers all four app languages as of iOS 26.1 (Danish added in the eight-language expansion), so FM multilingual is *possible* — but would need localized prompts/catalogs and per-language benchmarks |
 | Safety layer | None needed — closed-label output | Framework guardrails can *refuse* prompts; a refusal is an error path we must absorb (relevant: hearing/health-adjacent phrasing) |
 | Slot/entity extraction | Deterministic grammar incl. reviewed multilingual clock idioms | Not used — sample delegates to the same existing extractor (correct design; keeps this a classifier-only swap) |
 
@@ -141,9 +141,12 @@ Eligible hardware does not mean available capability:
   rollout timelines and constraints); a supported device in an unsupported
   region reports unavailable.
 - **Device language** must be an Apple Intelligence-supported language.
-  Danish — on our multilingual roadmap and shipped in the cascade — is not
-  supported as of this writing. French and German are supported, but the
-  FM sample is English-prompted only.
+  As of iOS 26.1, all four of our shipped cascade languages are covered —
+  English, French, German, and Danish (Danish arrived in the 26.1
+  eight-language expansion; 16 languages total). A user whose device is set
+  to a language outside Apple's list still reports unavailable. Note the FM
+  sample itself is English-prompted only — multilingual FM would require
+  localized prompts/catalogs and per-language benchmark runs.
 
 **Critical runtime consequence:** the user can toggle Apple Intelligence off
 *while our app is running*. Production design must therefore treat

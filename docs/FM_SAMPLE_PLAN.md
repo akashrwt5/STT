@@ -71,7 +71,7 @@ This single decision is what guarantees "cover all cases of the current system":
 | Confidence gating (0.70 / 0.55 thresholds) | **Cannot be replicated — no logprobs exposed.** Decision: guided output is treated as accepted; the optional self-rated confidence is *display-only, explicitly labeled uncalibrated*, never used for gating. This is a documented, deliberate gap — it's the headline finding the benchmark exists to characterize, not a bug in the plan. |
 | Cloud fallback for out-of-scope | In FM mode, `outOfScope` is terminal (spoken "I can't help with that") — no network call. Optional phase 2: route it to the existing genai fallback for parity with the cascade. |
 | Unknown/low-confidence logging (`unknown_data.csv` equivalent) | `FMMetrics` logs every `outOfScope` and every turn, locally |
-| Multilingual (fr/de/da) | **Explicitly out of scope for the sample** — Apple Intelligence doesn't cover Danish at all. FM option is English-only, stated on-screen. This is a finding, not an omission. |
+| Multilingual (fr/de/da) | **Explicitly out of scope for the sample** — the FM option is English-prompted only. (Correction 2026-07-19: Apple Intelligence covers Danish since iOS 26.1, so multilingual FM is possible in principle; it would need localized prompts/catalogs and per-language benchmarks.) |
 
 ## 6. The only two touches to existing files (both additive)
 
