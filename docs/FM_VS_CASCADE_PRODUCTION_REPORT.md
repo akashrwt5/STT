@@ -148,6 +148,46 @@ Eligible hardware does not mean available capability:
   sample itself is English-prompted only — multilingual FM would require
   localized prompts/catalogs and per-language benchmark runs.
 
+#### Language coverage vs. our app's localization footprint
+
+Our app ships **23 localizations**. Mapped against Apple Intelligence's
+16-language list (verified against Apple's announcements — see references
+below):
+
+| Apple Intelligence status | App languages | Count |
+|---|---|---|
+| **Covered** | English, Chinese (Simplified), Chinese (Traditional)¹, Danish¹, Dutch¹, French, German, Italian, Japanese, Korean, Norwegian Bokmål¹, Portuguese (Brazil), Spanish, Swedish¹, Turkish¹ | **15 / 23** |
+| **Not covered** (no announced timeline) | Arabic, Finnish, Greek, Hungarian, Indonesian, Polish, Russian, Thai | **8 / 23** |
+
+¹ Added in the iOS 26.1 eight-language expansion.
+
+Three implications:
+
+1. **A user running the app in any of the 8 uncovered languages gets no FM
+   capability regardless of hardware** — device language is a hard gate.
+   The degradation ladder (§4.5) absorbs this case: behavior is simply
+   today's fallback.
+2. **The binding constraint on the voice feature is our NLU, not Apple's
+   list.** The cascade NLU currently supports 4 languages (en/fr/de/da) —
+   all 4 are Apple-covered, so FM-as-fallback is viable across the entire
+   current NLU footprint. But the *roadmap* asymmetry matters: the cascade
+   can be trained for any language we can collect data for (Arabic, Thai,
+   and Polish included); the FM path stops at whatever Apple supports.
+   Our approach speaks whatever we train it to; the OS model speaks what
+   Apple decides.
+3. **Gate on the runtime check, not a language list.** Apple's support is
+   locale-sensitive (Portuguese Brazil vs. Portugal arrived in different
+   releases; English and Spanish have regional variants). Production code
+   must rely on `SystemLanguageModel` availability per device — which
+   `FMAvailability` already does — never on a hardcoded table like the one
+   above, which exists for planning, not for gating.
+
+*References:* Apple Newsroom, ["Apple Intelligence brings powerful AI
+capabilities into everyday experiences"](https://www.apple.com/in/newsroom/2026/06/apple-intelligence-brings-powerful-ai-capabilities-into-everyday-experiences/)
+(June 2026 — confirms the expanded language set including Danish);
+[9to5Mac — iOS 26.1 Apple Intelligence language expansion](https://9to5mac.com/2025/11/11/ios-26-1-brings-apple-intelligence-to-these-eight-new-languages/)
+(the eight-language 26.1 addition and 16-language total).
+
 **Critical runtime consequence:** the user can toggle Apple Intelligence off
 *while our app is running*. Production design must therefore treat
 availability as a **per-turn condition, not a launch-time fact**. The sample
