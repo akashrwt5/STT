@@ -134,7 +134,7 @@ enum FMIntent: String, CaseIterable, Sendable {
         case .sendMessage:           return "compose and send a message"
         case .sendMessageConfirmNo:  return "user declining to send the drafted message"
         case .sendMessageConfirmYes: return "user confirming to send the drafted message"
-        case .changeHearingMemory:   return "switch hearing-aid memory/program/preset"
+        case .changeHearingMemory:   return "switch hearing-aid memory/program/preset — users also say environment, sound setting, scene, or mode"
         case .startStreaming:        return "start audio streaming to hearing aids"
         case .stopStreaming:         return "stop audio streaming"
         case .startTranscription:    return "open live transcription"

@@ -71,6 +71,8 @@ enum FMPromptBuilder {
         "how many steps today" → activitySteps
         "remind me to call the doctor tomorrow" → addReminder
         "how do reminders work" → helpReminder
+        "change the environment" → changeHearingMemory
+        "switch to the noisy environment setting" → changeHearingMemory
         "what's the weather like" → outOfScope
         "who is the president of India" → outOfScope
         "Crowd" → outOfScope
