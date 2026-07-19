@@ -1,7 +1,13 @@
 # Foundation Models Intent Classification — Implementation Plan (iOS Sample)
 
-**Status:** Plan only — no implementation yet
+**Status:** Implemented through Phase 2 + benchmark harness (Phase 3 runs require an Apple Intelligence-eligible device) — see `STT/STT/Services/FoundationModelNLU/`
 **Related:** [ON_DEVICE_NLU_OVERVIEW.md](./ON_DEVICE_NLU_OVERVIEW.md) · [ON_DEVICE_NLU_TECHNICAL_DETAILS.md](./ON_DEVICE_NLU_TECHNICAL_DETAILS.md)
+
+> **Implementation deltas from this plan** (recorded rather than silently diverged):
+> - The production label inventory is **60** labels (per `Resources/intent_classifier_weights.json`), not 59 — the extra is `Cmd.Health`. The FM enum carries all 60; the parity test asserts against the bundled JSON.
+> - FM UI files live inside `Services/FoundationModelNLU/` with the rest of the FM code (one folder, one delete) rather than split across `Views/`/`ViewModels/`.
+> - "Guided output is accepted" is implemented via the existing `semanticRescue` flag on `ClassificationResult`, which `NLUEngine` already defines as "producer decided acceptance — skip the calibrated threshold." No engine change needed.
+> - `NLUEngine`'s Stage-0 schema keyword triggers still run ahead of the FM classifier in live mode (exact parity with the cascade paths); the benchmark calls the classifier directly, so benchmark numbers measure pure FM.
 
 ---
 

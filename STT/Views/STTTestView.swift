@@ -16,6 +16,9 @@ struct STTTestView: View {
     @State private var pvaViewModel: PVAViewModel?
     /// Set when the user picks "Package" — presents the VoiceIntentKit-backed screen.
     @State private var showPackageSession = false
+    /// Set when the user picks "FM" — presents the Foundation Models sample screen
+    /// (evaluation sample; see docs/FM_SAMPLE_PLAN.md).
+    @State private var showFMSession = false
     /// Persisted NLU pipeline selection. NLUVariant.RawValue == String satisfies
     /// AppStorage's RawRepresentable requirement directly, so the choice survives
     /// app restarts with no extra storage glue.
@@ -25,13 +28,14 @@ struct STTTestView: View {
     @State private var pipeline: PipelineChoice = .english
 
     enum PipelineChoice: String, CaseIterable, Identifiable {
-        case english, multilingual, package
+        case english, multilingual, package, foundationModel
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .english:      return "English"
-            case .multilingual: return "Multilingual"
-            case .package:      return "Package"
+            case .english:         return "English"
+            case .multilingual:    return "Multilingual"
+            case .package:         return "Package"
+            case .foundationModel: return "FM"
             }
         }
     }
@@ -64,6 +68,9 @@ struct STTTestView: View {
         }
         .sheet(isPresented: $showPackageSession) {
             PackageVoiceView().preferredColorScheme(.dark)
+        }
+        .sheet(isPresented: $showFMSession) {
+            FMVoiceView().preferredColorScheme(.dark)
         }
     }
 
@@ -172,11 +179,23 @@ struct STTTestView: View {
                 if new == .multilingual { variant = .multilingual }
             }
 
+            // FM mode is disabled-with-reason on ineligible hardware rather than
+            // hidden — the evaluator should see *why* (docs/FM_SAMPLE_PLAN.md §6).
+            if pipeline == .foundationModel && !fmStatus.isAvailable {
+                Text(fmStatus.userMessage)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.orange.opacity(0.9))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+            }
+
             // Primary CTA
             Button {
                 PVALaunchClock.tapped()
                 if pipeline == .package {
                     showPackageSession = true                      // VoiceIntentKit path
+                } else if pipeline == .foundationModel {
+                    showFMSession = true                           // FM sample path
                 } else {
                     pvaViewModel = PVAViewModel(variant: variant)  // existing in-app path
                 }
@@ -200,8 +219,13 @@ struct STTTestView: View {
                             radius: 16, x: 0, y: 6)
             }
             .accessibilityLabel("Start onDevice PVA session")
+            .disabled(pipeline == .foundationModel && !fmStatus.isAvailable)
+            .opacity(pipeline == .foundationModel && !fmStatus.isAvailable ? 0.4 : 1)
         }
     }
+
+    /// Foundation Model availability, re-checked per render (cheap property read).
+    private var fmStatus: FMAvailabilityStatus { FMAvailability.status() }
 
     // MARK: - File transcription link
 
