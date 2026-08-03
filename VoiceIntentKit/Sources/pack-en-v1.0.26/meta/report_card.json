@@ -1,0 +1,1 @@
+{"gates_passed":true,"oos_recall":0.7077,"per_language":{"en":{"ece":0.0183,"holdout_accuracy":0.9041,"macro_f1":0.8958}},"wrong_action_count":39,"wrong_action_per_domain":{"activity":2,"device":22,"find":6,"messaging":3,"reminders":1,"streaming":5}}

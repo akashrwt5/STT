@@ -1,0 +1,1 @@
+{"intents":{"find.phone.locate":{"completion":{"action":"phone.find","response":"find.phone.locate.done"},"confirmation":{"prompt":"find.phone.locate.confirm","required":false}}}}

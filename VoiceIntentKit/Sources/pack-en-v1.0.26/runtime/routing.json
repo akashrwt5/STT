@@ -1,0 +1,1 @@
+{"assist_cloud":{"enabled":false},"ladder":[{"step":"reprompt","when":{"below_confidence":0.7}},{"step":"give_up","when":{"after_attempts":3}}]}

@@ -1,0 +1,1 @@
+{"intents":{"device.status.battery":{"completion":{"action":"battery.level","response":"device.status.battery.done"}}}}

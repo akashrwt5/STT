@@ -1,0 +1,1 @@
+{"stages":[{"enabled":true,"id":"keyword"},{"enabled":true,"id":"tfidf","input":{"dtype":"string","shape":[1]},"output":{"dim":57,"dtype":"float32"}},{"enabled":false,"id":"semantic"}]}

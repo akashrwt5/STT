@@ -1,0 +1,1 @@
+{"intents":{"device.memory.change":{"completion":{"action":"memory.change","response":"device.memory.change.done"},"confirmation":{"prompt":"device.memory.change.confirm","required":false},"slots":[{"entity":"memory","name":"memory_name","prompt":"device.memory.change.ask_memory_name","required":true}]}}}
