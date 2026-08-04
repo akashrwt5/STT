@@ -18,43 +18,47 @@ let package = Package(
     platforms: [ .iOS("26.0") ],
     products: [
         .library(name: "VoiceIntentKit", targets: ["VoiceIntentKit"]),
+        // The English seed pack, as its OWN library.
+        //
+        // Separate so that (a) `VoiceIntentKit` keeps shipping zero data and
+        // cannot read a pack from its own bundle, and (b) an app that downloads
+        // every language links only `VoiceIntentKit` and carries 0 MB instead of
+        // 8.8 MB. With one library every app pays for English, including the
+        // ones that will never speak it.
+        .library(name: "VoiceIntentSeedPackEN", targets: ["VoiceIntentSeedPackEN"]),
     ],
     targets: [
+        // The library ships ZERO data.
+        //
+        // No `resources:` block, and that absence is the acceptance test for the
+        // whole work package — `Bundle.module` appears nowhere in this target,
+        // so there is no bundled schema, lexicon, entity table or model for a
+        // failure to quietly fall back on. Everything comes from a verified pack
+        // the host supplies at runtime (`PackProvider`).
+        //
+        // What used to be here: 4 `.mlpackage` models, 5 JSON/vocab files and
+        // `Resources/LanguagePacks/` — about 29 MB, and the reason a language
+        // released after the app shipped could never be used.
         .target(
             name: "VoiceIntentKit",
-            path: "Sources/VoiceIntentKit",
-            // The now-empty Multilingual/ folder (its files were flattened to the
-            // Resources root to match the code's flat Bundle lookups) — exclude so
-            // SwiftPM doesn't flag it as an undeclared resource.
-            exclude: ["Resources/Multilingual"],
-            resources: [
-                // CoreML models — `.process` so Xcode/SwiftPM compiles each
-                // .mlpackage → .mlmodelc (the code's first-choice lookup). If a
-                // model fails to compile, the pure-Swift TF-IDF/JSON fallback paths
-                // keep Stage 2 working.
-                .process("Resources/IntentClassifier.mlpackage"),
-                .process("Resources/IntentClassifier_multilingual.mlpackage"),
-                .process("Resources/MiniLMEmbedder.mlpackage"),
-                .process("Resources/SemanticHead.mlpackage"),
-
-                // Weights / vocab / schema — `.copy` for byte-exact determinism
-                // (parity fixtures depend on exact JSON).
-                .copy("Resources/intent_classifier_weights.json"),
-                .copy("Resources/multilingual_intent_classifier_weights.json"),
-                .copy("Resources/multilingual_intent_labels.json"),
-                .copy("Resources/semantic_head.json"),
-                .copy("Resources/minilm-vocab.txt"),
-                .copy("Resources/nlu_schema.json"),
-                .copy("Resources/nlu_entities.json"),
-
-                // Language packs — one folder per language, each containing a
-                // `manifest.json` plus the per-language schema / entities /
-                // lexicon overlays. `LanguagePackRegistry` enumerates the
-                // top-level directory; `LocalizationLoader` reads individual
-                // files with `subdirectory: "LanguagePacks/<code>"`.
-                .copy("Resources/LanguagePacks"),
-            ]
+            path: "Sources/VoiceIntentKit"
         ),
+        // The English seed pack. No dependency on `VoiceIntentKit` — it vends a
+        // URL and nothing more, so the arrow points app → kit and app → seed,
+        // and the kit never learns that a seed exists.
+        //
+        // `.copy`, never `.process`: copy preserves the directory tree verbatim.
+        // The pack's structure IS its data — `capabilities/<id>/responses/<lang>.json`
+        // encodes both in the path, `integrity/manifest.sha256` lists every file
+        // by path, and `models/intent/en/` holds two different files both named
+        // `IntentClassifier.mlpackage`. Flattening breaks all three, and a
+        // flattened pack fails its own signature check.
+        .target(
+            name: "VoiceIntentSeedPackEN",
+            path: "Sources/VoiceIntentSeedPackEN",
+            resources: [.copy("pack-en-v1.0.30")]
+        ),
+
         // Test target — runtime smoke tests + Phase-2 parity tests ported from
         // STTTests. The golden fixture is copied here (test-only, doesn't belong
         // in the library). The tests reach the classifier through the library's
@@ -65,7 +69,16 @@ let package = Package(
             dependencies: ["VoiceIntentKit"],
             path: "Tests/VoiceIntentKitTests",
             resources: [
-                .copy("Resources/coreml_golden_fixtures.json"),
+                // Expected values captured from the Python engine at a FIXED
+                // clock. The pack itself is located by walking up from #filePath
+                // rather than being declared here — it is deliberately not an
+                // SPM resource, since the point of the refactor is that the
+                // package ships no data.
+                .copy("Fixtures/reference_expectations.json"),
+                // Topic derivation captured from `entities.py::strip_datetime`
+                // and `engine.py::_derive_topic`. Same rule: regenerate, never
+                // hand-edit.
+                .copy("Fixtures/topic_expectations.json"),
             ]
         ),
     ],

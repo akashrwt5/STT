@@ -1,0 +1,187 @@
+{
+  "_note": "Generated from packages/runtime/nlu_engine/entities.py + engine.py::_derive_topic. Regenerate, never hand-edit.",
+  "strip_datetime": [
+    {
+      "text": "go to the airport",
+      "expected": "go to the airport"
+    },
+    {
+      "text": "drink water at 6pm",
+      "expected": "drink water"
+    },
+    {
+      "text": "clean hearing aids tomorrow at 9:30",
+      "expected": "clean hearing aids"
+    },
+    {
+      "text": "take medication every morning",
+      "expected": "take medication"
+    },
+    {
+      "text": "buy milk in 20 minutes",
+      "expected": "buy milk"
+    },
+    {
+      "text": "call mom on friday evening",
+      "expected": "call mom"
+    },
+    {
+      "text": "drink the green tea",
+      "expected": "drink the green tea"
+    },
+    {
+      "text": "call to confirm",
+      "expected": "call to confirm"
+    },
+    {
+      "text": "walk past the shop",
+      "expected": "walk past the shop"
+    },
+    {
+      "text": "pick up prescription on june 5",
+      "expected": "pick up prescription june 5"
+    },
+    {
+      "text": "water plants each saturday",
+      "expected": "water plants each"
+    },
+    {
+      "text": "dinner at 7",
+      "expected": "dinner"
+    },
+    {
+      "text": "call john at 9:30",
+      "expected": "call john"
+    },
+    {
+      "text": "stretch for 10 mins",
+      "expected": "stretch"
+    },
+    {
+      "text": "meeting the day after tomorrow",
+      "expected": "meeting the day after"
+    },
+    {
+      "text": "pay rent next week",
+      "expected": "pay rent week"
+    },
+    {
+      "text": "take pills at midnight",
+      "expected": "take pills midnight"
+    },
+    {
+      "text": "call mom on mondays",
+      "expected": "call mom"
+    },
+    {
+      "text": "buy milk in the morning",
+      "expected": "buy milk"
+    },
+    {
+      "text": "go to the gym tonight",
+      "expected": "go to the gym"
+    },
+    {
+      "text": "buy sun cream",
+      "expected": "buy sun cream"
+    },
+    {
+      "text": "sat with mom",
+      "expected": "sat with mom"
+    },
+    {
+      "text": "call the vet at 11:15",
+      "expected": "call the vet"
+    },
+    {
+      "text": "water plants every sunday",
+      "expected": "water plants every"
+    },
+    {
+      "text": "book table for 4 people",
+      "expected": "book table for 4 people"
+    },
+    {
+      "text": "take medicine in the evening",
+      "expected": "take medicine"
+    },
+    {
+      "text": "gym at 6 am",
+      "expected": "gym"
+    },
+    {
+      "text": "pay bills by 5pm",
+      "expected": "pay bills"
+    },
+    {
+      "text": "call mum this afternoon",
+      "expected": "call mum"
+    },
+    {
+      "text": "renew passport next monday",
+      "expected": "renew passport"
+    }
+  ],
+  "derive_topic": [
+    {
+      "text": "set a reminder to go to the airport",
+      "expected": "go to the airport"
+    },
+    {
+      "text": "set an alarm to take pills at 9",
+      "expected": "take pills"
+    },
+    {
+      "text": "set a reminder for the meeting",
+      "expected": "the meeting"
+    },
+    {
+      "text": "set a reminder for 5pm",
+      "expected": null
+    },
+    {
+      "text": "set an alarm for 7am",
+      "expected": null
+    },
+    {
+      "text": "remind me to go to the airport",
+      "expected": "go to the airport"
+    },
+    {
+      "text": "set a reminder for my flight at 6pm",
+      "expected": "my flight"
+    },
+    {
+      "text": "set up a reminder to call mom",
+      "expected": "call mom"
+    },
+    {
+      "text": "please set a reminder to water the plants",
+      "expected": "water the plants"
+    },
+    {
+      "text": "remind me at 9pm for dinner",
+      "expected": "dinner"
+    },
+    {
+      "text": "don't let me forget to call the dentist tomorrow",
+      "expected": "call the dentist"
+    },
+    {
+      "text": "i need to buy milk in 20 minutes",
+      "expected": "buy milk"
+    },
+    {
+      "text": "make sure i take medication every morning",
+      "expected": "take medication"
+    },
+    {
+      "text": "notify me about the appointment on friday",
+      "expected": "the appointment"
+    },
+    {
+      "text": "set a reminder to drink water",
+      "expected": "drink water"
+    }
+  ]
+}

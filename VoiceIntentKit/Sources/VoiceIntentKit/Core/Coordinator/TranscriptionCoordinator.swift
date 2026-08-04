@@ -157,43 +157,28 @@ public final class TranscriptionCoordinator {
         await recognitionService.unload()
     }
 
-    // MARK: - IntentClassifier Lifecycle (Diagnostic)
-
-    /// The IntentClassifier instance — when nil, no NLU is available. Owned
-    /// here so dropping our reference is the *only* thing keeping it alive,
-    /// which lets `freeIntentClassifier()` truly deinit the service.
-    public private(set) var intentClassifier: IntentClassifierService?
-
-    /// Diagnostic — create the IntentClassifier instance. Idempotent.
-    ///
-    /// Builds an English classifier via the manifest-driven registry so the
-    /// diagnostic path stays in lock-step with production loading.
-    public func initIntentClassifier() {
-        guard intentClassifier == nil else { return }
-        guard let pack = LanguagePackRegistry.pack(for: "en") else { return }
-        intentClassifier = IntentClassifierService(
-            bundle: LanguagePackRegistry.classifierBundle(for: pack),
-            confThreshold: pack.classifier.confThreshold,
-            confGapThreshold: pack.classifier.confGapThreshold
-        )
-    }
-
-    /// Diagnostic — drop our reference to the IntentClassifier. If nothing
-    /// else holds it, the actor deinits (watch console for `[Deinit]`).
-    public func freeIntentClassifier() {
-        intentClassifier = nil
-    }
-
-    /// Diagnostic — manually load Stage 3 (MiniLM + SemanticHead) on the
-    /// current IntentClassifier instance. No-op if IC not initialized.
-    public func loadStage3() async {
-        await intentClassifier?.loadStage3()
-    }
-
-    /// Diagnostic — release Stage 3 refs on the current IntentClassifier.
-    public func releaseStage3() async {
-        await intentClassifier?.releaseStage3()
-    }
+    // MARK: - IntentClassifier Lifecycle (Diagnostic) — REMOVED
+    //
+    // `initIntentClassifier()` / `freeIntentClassifier()` built an English
+    // classifier through the deleted `LanguagePackRegistry`, for a memory-
+    // diagnostic view.
+    // Nothing in the package called them, and the pair carried two properties
+    // this refactor is removing: a hardcoded `"en"`, and a second construction
+    // path for the classifier that could drift from the real one while claiming
+    // in its own doc comment to stay "in lock-step with production loading".
+    //
+    // A diagnostic that builds the object differently from production measures
+    // the diagnostic. If the memory question comes back, hold a
+    // `PackIntentClassifier` built by the same `PackEngineFactory` path the
+    // session uses.
+    //
+    // `loadStage3()` / `releaseStage3()` went with them. They acted on that
+    // second classifier instance, so they could only ever have moved memory the
+    // production path did not hold. Stage 3 is owned by the engine — the session
+    // reaches it through `ConversationEngine.loadStage3()`, which is pack-gated:
+    // a pack that disables the semantic stage refuses the request instead of
+    // honouring it, because the pack's accuracy numbers were measured with it
+    // off. A transcription coordinator has no business in that decision.
 
     // MARK: - Permission Check
 

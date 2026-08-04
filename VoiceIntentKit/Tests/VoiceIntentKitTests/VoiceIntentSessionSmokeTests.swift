@@ -1,94 +1,100 @@
 // VoiceIntentSessionSmokeTests.swift
 // VoiceIntentKitTests
 //
-// Task 2 gate: proves the packaged pipeline stands up at runtime.
-//   • VoiceIntentSession constructs for English + one non-English language.
-//   • The classifier resolves nlu_schema.json / nlu_entities.json / weights JSON
-//     from Bundle.module (or falls back to pure-Swift TF-IDF — either is a pass).
-//   • classify(text:) returns a plausible intent for a canonical utterance.
+// The public facade, end to end: a host supplies a pack URL, the session
+// verifies and binds it, and `classify(text:)` returns something sane.
 //
-// The library's own logger reports which Stage-2 path is active on init (see
-// IntentClassifierService: "IntentClassifier ready — Stage2: CoreML|JSON weights").
-// Watch the test log to see which classifier answered.
+// REWRITTEN for the pack path. The previous version asserted that French
+// overlays resolved from `Bundle.module`, and constructed a session with only a
+// language code — both of which encoded the behaviour this refactor removes. In
+// particular its French case could not fail for the right reason: if the overlay
+// had NOT loaded, the session fell back to the English schema and still returned
+// a "plausible" turn, which the test accepted.
 //
-// No microphone — text-only. Runs in an XCTest host on iOS Simulator 26.
+// No microphone — text-only.
 
 import XCTest
 @testable import VoiceIntentKit
 
 final class VoiceIntentSessionSmokeTests: XCTestCase {
 
-    // MARK: - English
-
-    @MainActor
-    func testEnglishClassifyReturnsPlausibleIntent() async throws {
-        let session = VoiceIntentSession(
-            configuration: .init(
-                language: .english,
-                speaksPrompts: false,        // no TTS in tests
-                autoStopOnSilence: true,
-                loadsSemanticRescue: false   // skip Stage-3 to keep the test fast
-            )
-        )
-
-        let turn = await session.classify(text: "turn up the volume")
-        XCTAssertTrue(Self.isPlausible(turn),
-                      "English 'turn up the volume' should classify to a non-empty turn, got \(turn)")
-        Self.dump("EN", "turn up the volume", turn)
+    /// Stands in for a host's download layer: the pack is already on disk.
+    private func provider() throws -> StaticPackProvider {
+        StaticPackProvider(language: "en", url: try PackTestSupport.packRoot())
     }
 
-    // MARK: - Non-English (French)
+    private func configuration() throws -> VoiceIntentConfiguration {
+        .init(language: .english,
+              packProvider: try provider(),
+              trust: PackTestSupport.trust,
+              speaksPrompts: false,          // no TTS in tests
+              autoStopOnSilence: true,
+              loadsSemanticRescue: false)    // the pack disables Stage 3 anyway
+    }
 
     @MainActor
-    func testFrenchClassifyResolvesOverlays() async throws {
-        let session = VoiceIntentSession(
-            configuration: .init(
-                language: .language(code: "fr", locale: "fr-FR"),
-                speaksPrompts: false,
-                autoStopOnSilence: true,
-                loadsSemanticRescue: false
-            )
-        )
+    func testClassifyReturnsAPlausibleTurn() async throws {
+        let session = VoiceIntentSession(configuration: try configuration())
+        let turn = try await session.classify(text: "turn up the volume")
 
-        // Confirm the French overlays resolve from Bundle.module — a missing
-        // overlay would degrade silently to the English schema, so we assert an
-        // FR-only string.
-        let frSchema = LocalizationLoader.schema(language: "fr")
-        XCTAssertTrue(frSchema.affirmative.contains("oui"),
-                      "French overlay didn't load from Bundle.module — got affirmative=\(frSchema.affirmative)")
-
-        let turn = await session.classify(text: "monte le volume")
         XCTAssertTrue(Self.isPlausible(turn),
-                      "French 'monte le volume' should classify to a non-empty turn, got \(turn)")
-        Self.dump("FR", "monte le volume", turn)
+                      "'turn up the volume' should produce a usable turn, got \(turn)")
+    }
+
+    /// The behaviour that replaces the old French test.
+    ///
+    /// Asking for a language the provider does not have must THROW. The point is
+    /// not that the error is pretty — it is that the session refuses rather than
+    /// starting in a language the caller did not ask for. Under the old code this
+    /// path logged and returned an English engine, so a French session that never
+    /// loaded French was indistinguishable from one that did.
+    @MainActor
+    func testUnavailableLanguageThrowsRatherThanFallingBackToEnglish() async throws {
+        var config = try configuration()
+        config.language = .language(code: "fr", locale: "fr-FR")
+        let session = VoiceIntentSession(configuration: config)
+
+        do {
+            _ = try await session.classify(text: "monte le volume")
+            XCTFail("a session with no French pack must not answer in English")
+        } catch let error as VoiceIntentError {
+            guard case .languageUnavailable(let requested, _) = error else {
+                return XCTFail("expected .languageUnavailable, got \(error)")
+            }
+            XCTAssertEqual(requested, "fr")
+        }
+    }
+
+    /// A pack directory that is not there is an error, not a fallback.
+    @MainActor
+    func testMissingPackThrows() async throws {
+        var config = try configuration()
+        config.packProvider = StaticPackProvider(
+            language: "en",
+            url: URL(fileURLWithPath: "/nonexistent/pack-en"))
+        let session = VoiceIntentSession(configuration: config)
+
+        do {
+            _ = try await session.classify(text: "turn up the volume")
+            XCTFail("a missing pack must not produce a working session")
+        } catch let error as VoiceIntentError {
+            guard case .packNotFound = error else {
+                return XCTFail("expected .packNotFound, got \(error)")
+            }
+        }
     }
 
     // MARK: - Helpers
 
-    /// A turn is "plausible" if it names a non-empty intent, asks a follow-up, or
-    /// delivers the GenAI fallback URL. All three are healthy outcomes — this test
-    /// only proves the pipeline resolved resources and produced *something*.
+    /// A turn is "plausible" if it names an intent, asks a follow-up, or hands
+    /// back the fallback URL. All three mean the pipeline resolved its pack and
+    /// produced something; which one is a question for the parity suites.
     private static func isPlausible(_ turn: VoiceIntentTurn) -> Bool {
         switch turn {
-        case .fulfilled(let intent, _, _, _, _, _):     return !intent.isEmpty
-        case .followUp(let q, _), .confirmation(let q): return !q.isEmpty
-        case .notUnderstood:                            return true
-        case .interrupted:                              return true
-        }
-    }
-
-    private static func dump(_ lang: String, _ utterance: String, _ turn: VoiceIntentTurn) {
-        switch turn {
-        case .fulfilled(let i, let s, _, let c, let r, let stages):
-            print("🎯 [\(lang)] '\(utterance)' → intent=\(i) slots=\(s) conf=\(String(format: "%.2f", c)) rescue=\(r) stages=\(String(describing: stages))")
-        case .followUp(let q, let filled):
-            print("❓ [\(lang)] '\(utterance)' → follow-up: '\(q)' (filled=\(filled))")
-        case .confirmation(let q):
-            print("✅? [\(lang)] '\(utterance)' → confirm: '\(q)'")
-        case .notUnderstood(let url, let c, _):
-            print("🤷 [\(lang)] '\(utterance)' → fallback URL=\(url) conf=\(String(format: "%.2f", c))")
-        case .interrupted(let cancelled):
-            print("↩︎ [\(lang)] '\(utterance)' → interrupted (cancelled=\(cancelled))")
+        case .fulfilled(let intent, _, _, _, _, _):
+            return !intent.isEmpty
+        case .followUp, .confirmation, .notUnderstood, .interrupted:
+            return true
         }
     }
 }

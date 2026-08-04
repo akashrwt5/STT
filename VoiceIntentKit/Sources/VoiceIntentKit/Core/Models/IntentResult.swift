@@ -11,6 +11,17 @@ public struct ClassificationBreakdown: Sendable {
         public let stage: Int
         public let intent: String
         public let confidence: Double
+
+        // Written in the type body, NOT an extension. A memberwise initialiser
+        // added in an extension does not suppress the synthesised one — it
+        // collides with it. In the body it replaces it, which is also what makes
+        // it `public`: the synthesised memberwise init of a public struct is
+        // internal, so a consumer outside the module could never build one.
+        public init(stage: Int, intent: String, confidence: Double) {
+            self.stage = stage
+            self.intent = intent
+            self.confidence = confidence
+        }
     }
 
     /// Stage that produced the winning answer (1–3).
@@ -20,6 +31,41 @@ public struct ClassificationBreakdown: Sendable {
     public let stage2: StageResult?
     /// Stage 3 (MiniLM) result. `nil` if Stage 3 not loaded or not triggered.
     public let stage3: StageResult?
+
+    public init(winningStage: Int?, stage2: StageResult?, stage3: StageResult?) {
+        self.winningStage = winningStage
+        self.stage2 = stage2
+        self.stage3 = stage3
+    }
+}
+
+/// What a classifier returns for one utterance.
+///
+/// Moved here from `IntentClassifierService`, which was deleted with the rest of
+/// the bundle-loading stack. It belongs next to `ClassificationBreakdown`: both
+/// are the shape of a classification, not the implementation of one, and
+/// `IntentClassifying` — the protocol every classifier satisfies — is written in
+/// terms of them.
+public struct ClassificationResult: Sendable {
+    public let label: String
+    public let confidence: Double
+    /// True when the semantic stage produced this result.
+    ///
+    /// Always false under a pack that disables the semantic stage, which
+    /// `pack-en` does — its report card was measured that way.
+    public let semanticRescue: Bool
+    /// Per-stage detail, for the debug panel.
+    public let breakdown: ClassificationBreakdown
+
+    public init(label: String,
+                confidence: Double,
+                semanticRescue: Bool,
+                breakdown: ClassificationBreakdown) {
+        self.label = label
+        self.confidence = confidence
+        self.semanticRescue = semanticRescue
+        self.breakdown = breakdown
+    }
 }
 
 /// The outcome of running intent classification on a transcription result.

@@ -42,11 +42,33 @@ public enum VoiceLanguage: Sendable, Equatable {
 
 // MARK: - Configuration
 
-/// Everything needed to stand up a session. Sensible defaults mean the common case
-/// is `VoiceIntentConfiguration()` (English, speaks prompts, single-utterance).
+/// Everything needed to stand up a session.
+///
+/// `packProvider` and `trust` have no defaults, and that is the point. Both used
+/// to be implicit — the pack came from `Bundle.module` and nothing was verified
+/// — and an implicit default for either is a session that runs on data nobody
+/// chose. Everything else defaults sensibly.
 public struct VoiceIntentConfiguration: Sendable {
     /// The language the session operates in.
     public var language: VoiceLanguage
+    /// Where this session's pack comes from. Required — there is no default,
+    /// because every default here is a language, and a wrong default is a
+    /// session that quietly speaks the wrong one.
+    public var packProvider: any PackProvider
+    /// Who is allowed to have signed this session's pack.
+    ///
+    /// Required, and deliberately not defaulted. The signing keys are the host's
+    /// — pinning them in the SDK would mean an SDK release to rotate one — and a
+    /// default that skips verification is a default that ships.
+    public var trust: PackTrustPolicy
+    /// Words never treated as typos when fuzzy-matching an enum entity.
+    ///
+    /// English by default and WRONG for any other language: the list is what
+    /// stops "the" matching the memory "three", and a French pack needs
+    /// le/la/de. The pack format has nowhere to carry it (VIK-007), so it is a
+    /// parameter rather than a guess, and the resolver logs an error when a
+    /// non-English pack is loaded without one.
+    public var fuzzyStopwords: Set<String>?
     /// When true, follow-up questions and fulfillment messages are spoken aloud and
     /// the microphone auto-restarts to capture the user's answer (hands-free).
     public var speaksPrompts: Bool
@@ -59,14 +81,20 @@ public struct VoiceIntentConfiguration: Sendable {
 
     public init(
         language: VoiceLanguage = .english,
+        packProvider: any PackProvider,
+        trust: PackTrustPolicy,
         speaksPrompts: Bool = true,
         autoStopOnSilence: Bool = true,
-        loadsSemanticRescue: Bool = true
+        loadsSemanticRescue: Bool = false,
+        fuzzyStopwords: Set<String>? = nil
     ) {
         self.language = language
+        self.packProvider = packProvider
+        self.trust = trust
         self.speaksPrompts = speaksPrompts
         self.autoStopOnSilence = autoStopOnSilence
         self.loadsSemanticRescue = loadsSemanticRescue
+        self.fuzzyStopwords = fuzzyStopwords
     }
 }
 

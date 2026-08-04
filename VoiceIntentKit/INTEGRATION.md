@@ -25,7 +25,10 @@ import VoiceIntentKit
 
 struct PackageVoiceView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var session = VoiceIntentSession(configuration: .init(language: .english))
+    @State private var session = VoiceIntentSession(configuration: .init(
+        language: .english,
+        packProvider: PackProviderForApp(),       // see STT/Views/PackageVoiceView.swift
+        trust: .unverifiedForTesting))            // production builds pin their own key
     @State private var transcript = ""
     @State private var status = "Idle"
     @State private var lastTurn = ""

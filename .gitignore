@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Xcode — per-developer state, never shared
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Xcode build products
+build/
+DerivedData/
+
+# Swift Package Manager
+.build/
+.swiftpm/xcode/package.xcworkspace/
+Package.resolved
+
+# Packs unpacked at runtime (the app writes these to Application Support;
+# nothing here should ever be committed). The SEED pack under
+# Sources/VoiceIntentSeedPackEN/ IS committed — it ships in the app.
+/UnpackedPacks/

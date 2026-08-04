@@ -15,15 +15,146 @@ import SwiftUI
 
 #if canImport(VoiceIntentKit)
 import VoiceIntentKit
+import VoiceIntentSeedPackEN
 
+/// Finds the pack for a language: seeded, already downloaded, or download it.
+///
+/// This is the host half of the contract. VoiceIntentKit ships no data and does
+/// no networking; it asks for a local URL and verifies whatever it is handed.
+/// Three places to look, in order:
+///
+///   1. a linked seed library — SwiftPM copies it into the app at build time,
+///      so a fresh install works offline with no Xcode file wrangling
+///   2. Application Support — a pack downloaded on an earlier run
+///   3. the network — download it now
+///
+/// The caller cannot tell these apart, which is the point. `packURL` is `async`,
+/// so step 3 simply takes longer: the session sits in `.preparing` and the UI
+/// says so. No fallback to another language, ever — a wrong-language model
+/// produces confident wrong actions, and this is a hearing aid.
+struct PackProviderForApp: PackProvider {
+
+    /// Seed packs linked into this app, by language.
+    ///
+    /// One entry per `VoiceIntentSeedPack*` library the target links. Nothing is
+    /// dragged into Xcode: SwiftPM copies the pack into a resource bundle and
+    /// Xcode embeds it in the `.app`. Ticking the library IS the integration.
+    private static let seeds: [String: () -> URL?] = [
+        VoiceIntentSeedPackEN.language: { VoiceIntentSeedPackEN.url },
+    ]
+
+    private static func shipsBundledPack(for language: String) -> Bool {
+        seeds[language] != nil
+    }
+
+    func packURL(for language: String) async throws -> URL {
+        // Two SEPARATE questions, deliberately not one `if let` chain:
+        //   · do we claim to ship this language?
+        //   · is it actually in the bundle?
+        //
+        // Collapsing them means a pack that is declared but missing falls
+        // through to the download branch, which then reports "no pack for 'en'"
+        // while listing 'en' as available. That is a real error message this
+        // file produced, and it sent the reader looking for a language problem
+        // when the cause was a missing folder reference in Xcode.
+        if let seed = Self.seeds[language] {
+            guard let url = seed() else {
+                throw VoiceIntentError.unreadableFile(
+                    path: "VoiceIntentSeedPack\(language.uppercased())",
+                    reason: """
+                        the seed library is linked but its resource bundle has no pack. \
+                        Check that the STT target links the VoiceIntentSeedPack\
+                        \(language.uppercased()) library (Target → General → Frameworks, \
+                        Libraries, and Embedded Content)
+                        """)
+            }
+            return url
+        }
+        if let cached = Self.downloadedURL(for: language) {
+            return cached
+        }
+        return try await download(language)
+    }
+
+    // MARK: - Downloaded packs
+
+    private static var packsDirectory: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory,
+                                            in: .userDomainMask)[0]
+        return base.appendingPathComponent("VoicePacks", isDirectory: true)
+    }
+
+    private static func downloadedURL(for language: String) -> URL? {
+        let dir = packsDirectory
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        // `pack-<lang>-v<version>` — newest wins if several are present.
+        guard let newest = names.filter({ $0.hasPrefix("pack-\(language)-") }).sorted().last else {
+            return nil
+        }
+        return dir.appendingPathComponent(newest, isDirectory: true)
+    }
+
+    /// Fetch, unpack and return a local URL.
+    ///
+    /// Not built yet — the catalog endpoint and signing-key distribution are
+    /// still open (compiler asks A2/B6c). Throwing a specific error is the
+    /// honest placeholder: the session refuses, the UI says the language is not
+    /// ready, and nothing runs in a language the user did not ask for.
+    private func download(_ language: String) async throws -> URL {
+        throw VoiceIntentError.languageUnavailable(
+            requested: language,
+            available: Self.seeds.keys.sorted())
+    }
+}
+
+/// The user's language comes from the device. No mapping table, no fallback.
+///
+/// `Locale.current` already carries both halves the session needs: the language
+/// code for the pack ("fr") and the full identifier for the speech recogniser
+/// ("fr-FR"). Deriving one from the other with a hand-maintained table would be
+/// 23 entries of application code at full language coverage, and wrong for the
+/// cases that matter — "en" is en-US or en-GB depending on the user, not on a
+/// lookup. The device already knows.
 struct PackageVoiceView: View {
+
+    /// Override for testing another language. Nil = use the device's.
+    private static let languageOverride: String? = nil
+
+    private static var deviceLanguage: VoiceLanguage {
+        let locale = Locale.current
+        let code = languageOverride
+            ?? locale.language.languageCode?.identifier
+            ?? "en"
+        return code == "en"
+            ? .english
+            : .language(code: code, locale: locale.identifier)
+    }
+
+    var body: some View {
+        PackageVoiceSessionView(language: Self.deviceLanguage,
+                                provider: PackProviderForApp())
+    }
+}
+
+/// The session UI.
+private struct PackageVoiceSessionView: View {
     @Environment(\.dismiss) private var dismiss
+
     // Single-utterance mode (default): after each turn the session returns to
     // `.idle`. Flip `autoStopOnSilence: false` for continuous listening across
     // multiple turns without re-tapping Start.
-    @State private var session = VoiceIntentSession(
-        configuration: .init(language: .english, autoStopOnSilence: true)
-    )
+    @State private var session: VoiceIntentSession
+
+    init(language: VoiceLanguage, provider: PackProviderForApp) {
+        _session = State(wrappedValue: VoiceIntentSession(configuration: .init(
+            language: language,
+            packProvider: provider,
+            // Dev-signed pack, dev build. A release build must supply the
+            // production public key and refuse dev-signed packs (ADR-005 Part 11).
+            trust: .unverifiedForTesting,
+            autoStopOnSilence: true)))
+    }
+
     @State private var transcript = ""
     @State private var status = "Idle"
     @State private var lastTurn = ""
@@ -59,7 +190,18 @@ struct PackageVoiceView: View {
                         else {
                             transcript = ""            // clear the previous turn's text
                             listening = true
-                            try? await session.start()
+                            // NOT `try?`. The session now refuses to start on a
+                            // missing, unsigned or wrong-language pack, and
+                            // discarding that error reproduces exactly the failure
+                            // this refactor exists to remove: everything looks fine
+                            // and nothing works. Show it.
+                            do {
+                                try await session.start()
+                            } catch {
+                                listening = false
+                                status = "Failed to start"
+                                lastTurn = "⚠️ \(error)"
+                            }
                         }
                     }
                 }

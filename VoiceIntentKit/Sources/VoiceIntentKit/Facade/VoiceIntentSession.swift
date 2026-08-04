@@ -3,9 +3,16 @@
 //
 // THE public API. One object that turns microphone input into classified intents:
 //
-//     let session = VoiceIntentSession(configuration: .init(language: .english))
+//     let seed = Bundle.main.url(forResource: "pack-en-v1.0.30", withExtension: nil)!
+//     let session = VoiceIntentSession(configuration: .init(
+//         language: .english,
+//         packProvider: StaticPackProvider(language: "en", url: seed),
+//         trust: myTrustPolicy))
 //     Task { for await event in session.events { … } }
 //     try await session.start()
+//
+// The pack is supplied, never discovered. See `PackProvider` for why the SDK
+// does no networking and no bundle scanning.
 //
 // It is a headless, packaged version of the app's PVAViewModel + LiveTranscription-
 // ViewModel loop — mic → transcript → 3-stage classifier → multi-turn dialog, with
@@ -47,7 +54,14 @@ public final class VoiceIntentSession {
 
     // MARK: - Init
 
-    public init(configuration: VoiceIntentConfiguration = .init()) {
+    /// No default configuration.
+    ///
+    /// `VoiceIntentSession()` used to compile, and produced an English session
+    /// reading `Bundle.module` with nothing verified. There is no longer a
+    /// defensible default: a session needs a pack and a trust policy, and both
+    /// are the host's to choose. Requiring them is the point — the compiler now
+    /// asks the question the old default answered silently.
+    public init(configuration: VoiceIntentConfiguration) {
         self.config = configuration
         (self.events, self.continuation) = AsyncStream<VoiceIntentEvent>.makeStream()
 
@@ -75,28 +89,54 @@ public final class VoiceIntentSession {
         // (post-turn `.idle`, post-`stop()`) reuse the already-built engine.
         if engine == nil {
             state = .preparing
-
-            try? await coordinator.switchLocale(to: config.language.localeIdentifier)
-
-            coordinator.delegate = self
-            coordinator.silenceConfiguration = config.autoStopOnSilence ? .singleUtterance : .disabled
-            coordinator.endpointArbiter = { [weak self] text in
-                guard let self, let engine = self.engine else { return .complete }
-                return await engine.assessSlotAnswer(text)
+            // Leaving `.preparing` behind on a throw strands the session in a
+            // state it can never leave — `start()` refuses to re-enter from
+            // anything but `.idle`/`.stopped`, so the next tap would be a silent
+            // no-op and the failure would look like the button not working.
+            // Also surface it on `events`, because a caller watching the stream
+            // should not have to also catch to learn the session is dead.
+            do {
+                try await prepare()
+            } catch {
+                state = .stopped
+                continuation.yield(.error(message: "\(error)"))
+                throw error
             }
-
-            // Build the engine OFF the main actor (CoreML load + multi-MB JSON parse).
-            let engine = await buildEngine()
-            self.engine = engine
-            await engine.warmUp()
-            if config.loadsSemanticRescue { await engine.loadStage3() }
-
-            coordinator.prewarm()
         }
 
         started = true
         awaitingAnswer = false          // fresh start: not mid-conversation
         try await beginListening()
+    }
+
+    /// The one-time half of `start()`: locale, delegates, engine, prewarm.
+    private func prepare() async throws {
+        // Build the engine FIRST, before any audio setup.
+        //
+        // It used to come after `switchLocale`, which re-arms the recogniser's
+        // prewarm internally — so a pack failure left the microphone stack warmed
+        // for a session that could never run, and the only visible symptom was
+        // speech-model logs followed by silence. Fail before touching hardware.
+        //
+        // Throws a `VoiceIntentError` if the pack is missing, unsigned, tampered
+        // with, or for the wrong language — none of which may be answered by
+        // quietly starting a session in a different language.
+        let engine = try await buildEngine()
+        self.engine = engine
+
+        try? await coordinator.switchLocale(to: config.language.localeIdentifier)
+
+        coordinator.delegate = self
+        coordinator.silenceConfiguration = config.autoStopOnSilence ? .singleUtterance : .disabled
+        coordinator.endpointArbiter = { [weak self] text in
+            guard let self, let engine = self.engine else { return .complete }
+            return await engine.assessSlotAnswer(text)
+        }
+
+        await engine.warmUp()
+        if config.loadsSemanticRescue { await engine.loadStage3() }
+
+        coordinator.prewarm()
     }
 
     /// Stops listening and speaking and releases audio resources. Safe to call anytime.
@@ -120,12 +160,15 @@ public final class VoiceIntentSession {
     /// Classify a single piece of text through the same pipeline, bypassing the
     /// microphone. Useful for keyboard input or testing. Returns one turn outcome.
     /// Builds the engine on first use if `start()` was never called.
-    public func classify(text: String) async -> VoiceIntentTurn {
+    ///
+    /// - Throws: a `VoiceIntentError` when the pack cannot be resolved, verified
+    ///   or bound. Previously this could not fail, because failure meant English.
+    public func classify(text: String) async throws -> VoiceIntentTurn {
         let active: any ConversationEngine
         if let existing = engine {
             active = existing
         } else {
-            active = await buildEngine()
+            active = try await buildEngine()
             engine = active
         }
         let response = await active.handle(text)
@@ -134,10 +177,24 @@ public final class VoiceIntentSession {
 
     // MARK: - Engine construction
 
-    private func buildEngine() async -> any ConversationEngine {
+    /// Resolve, verify and bind this session's pack, then build the engine.
+    ///
+    /// Throws rather than falling back. The predecessor answered a missing or
+    /// broken pack by substituting English — which is indistinguishable from
+    /// success for an English user, and wrong in the user's hands for everyone
+    /// else. A caller that cannot get a pack needs to know, not to be handed a
+    /// session that will confidently misunderstand.
+    private func buildEngine() async throws -> any ConversationEngine {
         let code = config.language.languageCode
-        return await Task.detached(priority: .userInitiated) {
-            NLUEngineFactoryProvider.makeEngine(language: code)
+        let url = try await config.packProvider.packURL(for: code)
+        let stopwords = config.fuzzyStopwords
+        let trust = config.trust
+
+        // Off the main actor: signature verification, sha256 over every file,
+        // JSON decode and a CoreML load.
+        return try await Task.detached(priority: .userInitiated) {
+            let pack = try BundleDataLoader.load(packAt: url, language: code, trust: trust)
+            return try PackEngineFactory.makeEngine(pack: pack, stopwords: stopwords)
         }.value
     }
 

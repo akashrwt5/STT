@@ -1,0 +1,268 @@
+{
+  "now": "2026-08-03T10:00:00Z",
+  "datetime": [
+    {
+      "text": "tomorrow",
+      "iso": "2026-08-04T09:00:00Z",
+      "timeExplicit": false,
+      "dayExplicit": true
+    },
+    {
+      "text": "friday",
+      "iso": "2026-08-07T09:00:00Z",
+      "timeExplicit": false,
+      "dayExplicit": true
+    },
+    {
+      "text": "saturday at 6",
+      "iso": "2026-08-08T18:00:00Z",
+      "timeExplicit": true,
+      "dayExplicit": true
+    },
+    {
+      "text": "in 10 minutes",
+      "iso": "2026-08-03T10:10:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "in five minutes",
+      "iso": "2026-08-03T10:05:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "9am",
+      "iso": "2026-08-04T09:00:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "at 5",
+      "iso": "2026-08-03T17:00:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "june 5",
+      "iso": "2027-06-05T09:00:00Z",
+      "timeExplicit": false,
+      "dayExplicit": true
+    },
+    {
+      "text": "5 june",
+      "iso": "2027-06-05T09:00:00Z",
+      "timeExplicit": false,
+      "dayExplicit": true
+    },
+    {
+      "text": "june 5th",
+      "iso": "2027-06-05T09:00:00Z",
+      "timeExplicit": false,
+      "dayExplicit": true
+    },
+    {
+      "text": "the 25th",
+      "iso": "2026-08-25T09:00:00Z",
+      "timeExplicit": false,
+      "dayExplicit": true
+    },
+    {
+      "text": "the twenty fifth",
+      "iso": "2026-08-25T09:00:00Z",
+      "timeExplicit": false,
+      "dayExplicit": true
+    },
+    {
+      "text": "the first",
+      "iso": "2026-09-01T09:00:00Z",
+      "timeExplicit": false,
+      "dayExplicit": true
+    },
+    {
+      "text": "half past 9",
+      "iso": "2026-08-03T21:30:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "quarter past 9",
+      "iso": "2026-08-03T21:15:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "quarter to 3",
+      "iso": "2026-08-03T14:45:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "10 to 3",
+      "iso": "2026-08-03T14:50:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "20 past 9",
+      "iso": "2026-08-03T21:20:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "9:30",
+      "iso": "2026-08-03T21:30:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "nine thirty",
+      "iso": "2026-08-03T21:30:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "four fifty",
+      "iso": "2026-08-03T16:50:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "in half an hour",
+      "iso": "2026-08-03T10:30:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "in a minute",
+      "iso": "2026-08-03T10:01:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "tonight",
+      "iso": "2026-08-03T18:00:00Z",
+      "timeExplicit": true,
+      "dayExplicit": true
+    },
+    {
+      "text": "today",
+      "iso": "2026-08-03T09:00:00Z",
+      "timeExplicit": false,
+      "dayExplicit": true
+    },
+    {
+      "text": "in the morning",
+      "iso": "2026-08-04T08:00:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "remind me at 5 pm",
+      "iso": "2026-08-03T17:00:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    },
+    {
+      "text": "day after tomorrow",
+      "iso": "2026-08-05T09:00:00Z",
+      "timeExplicit": false,
+      "dayExplicit": true
+    },
+    {
+      "text": "yesterday",
+      "iso": null,
+      "timeExplicit": false,
+      "dayExplicit": false
+    },
+    {
+      "text": "wait a second",
+      "iso": null,
+      "timeExplicit": false,
+      "dayExplicit": false
+    },
+    {
+      "text": "hello there",
+      "iso": null,
+      "timeExplicit": false,
+      "dayExplicit": false
+    },
+    {
+      "text": "mon",
+      "iso": "2026-08-10T09:00:00Z",
+      "timeExplicit": false,
+      "dayExplicit": true
+    },
+    {
+      "text": "9 30",
+      "iso": "2026-08-03T21:30:00Z",
+      "timeExplicit": true,
+      "dayExplicit": false
+    }
+  ],
+  "entities": [
+    {
+      "entity": "memory",
+      "text": "switch to restaurant",
+      "value": "Restaurant",
+      "span": "restaurant",
+      "confidence": 1.0
+    },
+    {
+      "entity": "memory",
+      "text": "switch to restraunt",
+      "value": "Restaurant",
+      "span": "restraunt",
+      "confidence": 0.7
+    },
+    {
+      "entity": "memory",
+      "text": "change to the three memory",
+      "value": "three",
+      "span": "three",
+      "confidence": 1.0
+    },
+    {
+      "entity": "memory",
+      "text": "who is the prime minister of india",
+      "value": null,
+      "span": null,
+      "confidence": 0.0
+    },
+    {
+      "entity": "memory",
+      "text": "set it to automatic",
+      "value": "Automatic",
+      "span": "automatic",
+      "confidence": 1.0
+    },
+    {
+      "entity": "recurrence",
+      "text": "remind me every day",
+      "value": "Daily",
+      "span": "every day",
+      "confidence": 0.95
+    },
+    {
+      "entity": "recurrence",
+      "text": "every 3 months",
+      "value": "3 Months",
+      "span": "every 3 months",
+      "confidence": 0.95
+    },
+    {
+      "entity": "recurrence",
+      "text": "biweekly",
+      "value": "Biweekly",
+      "span": "biweekly",
+      "confidence": 1.0
+    },
+    {
+      "entity": "memory",
+      "text": "asdfghjkl",
+      "value": null,
+      "span": null,
+      "confidence": 0.0
+    }
+  ]
+}

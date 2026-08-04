@@ -2,8 +2,8 @@
 // STT
 //
 // The abstraction layer that decouples the orchestration engine and the View
-// layer from concrete classifier/engine types. Only NLUEngineFactoryProvider
-// names concrete classifiers; everything above it depends on these protocols.
+// layer from concrete classifier/engine types. Only `PackEngineFactory` names
+// concrete types; everything above it depends on these protocols.
 
 import Foundation
 
@@ -18,9 +18,10 @@ import Foundation
 /// Swift-concurrency composition model here; it also lets the test suite inject
 /// a mock conformer with zero production impact.
 ///
-/// Both `IntentClassifierService` (English) and `MultilingualIntentClassifierService`
-/// conform. `NLUEngine` depends only on this protocol — it never names a
-/// concrete classifier type.
+/// `PackClassifierAdapter` is the only conformer now; `IntentClassifierService`
+/// and `MultilingualIntentClassifierService` were the bundle-loading pair it
+/// replaced. `NLUEngine` depends only on this protocol and never names a
+/// concrete classifier.
 public protocol IntentClassifying: Actor {
     /// Full 3-stage async classification — stage, confidence, and breakdown.
     func classifyAsync(_ text: String) async -> ClassificationResult

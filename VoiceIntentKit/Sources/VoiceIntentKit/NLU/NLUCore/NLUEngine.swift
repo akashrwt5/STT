@@ -21,50 +21,61 @@ import Foundation
 public actor NLUEngine: ConversationEngine {
 
     private let schema: NLUSchema
-    // Depends on the abstraction, never a concrete classifier. The factory injects
-    // either IntentClassifierService or MultilingualIntentClassifierService; the
-    // orchestration body below is language-agnostic and identical for both.
+    // Depends on the abstraction, never a concrete classifier. `PackEngineFactory`
+    // injects a `PackClassifierAdapter` over the pack's own head; the orchestration
+    // body below is language-agnostic and never learns which language it is in.
     private let classifier: any IntentClassifying
-    private let entities: EntityExtractor
+    // Likewise an abstraction. `PackSlotResolver` is the only implementation now
+    // that `EntityExtractor` — which read `nlu_entities.json` out of a bundle —
+    // is gone. The protocol stays because it is what let the source of truth
+    // change without rewriting the dialog logic below, and it is what a second
+    // resolver (a host-supplied contact list, say) would plug into.
+    private let entities: any SlotResolving
     private let session: NLUSession
     private let affirmative: Set<String>
     private let negative: Set<String>
     private var uncertain: [String]
     private var noIdioms: [String]
     private var carrierPatterns: [String]
+    /// Anchored alternation of `lexicon.leading_connectors`, or nil when none
+    /// were supplied. The third and final step of deriving a topic — see
+    /// `deriveTopic`.
+    private let leadingConnectorPattern: String?
+    /// intent → when it confirms. An intent absent from the map defaults to
+    /// `.always`, which is what the pre-pack schema expressed by simply carrying
+    /// a `followup`. `PackEngineFactory` supplies a gate for every intent, so
+    /// that default is a safety net rather than a path anything takes.
+    /// See `ConfirmationGate`.
+    private let confirmationGates: [String: ConfirmationGate]
 
-    // MARK: - English word-list defaults (injectable via factory for other languages)
-
-    public static let defaultUncertain: [String] = [
-        "not sure", "maybe", "dunno", "don't know",
-        "dont know", "i don't know", "no idea", "unsure",
-    ]
-
-    /// Polite-negative idioms containing "no" that are NOT actual negatives.
-    /// Stripped before polarity scanning so "no worries" doesn't fire a
-    /// false-negative on a confirmation prompt.
-    public static let defaultNoIdioms: [String] = [
-        "no worries", "no problem", "no doubt", "no biggie", "no probs",
-        "no sweat", "not a problem",
-    ]
-
-    /// Carrier phrases stripped to derive an open topic (e.g. "remind me to " → "").
-    public static let defaultCarriers: [String] = [
-        #"^\s*please\s+"#,
-        #"^\s*(?:do\s*n[o']?t|don't|dont)\s+let\s+me\s+forget\b\s*(?:to|about)?\s*"#,
-        #"^\s*(?:remind|tell|alert|notify)\s+me\b\s*(?:to|that|about|of)?\s*"#,
-        #"^\s*set(?:\s+up)?\s+(?:an?\s+)?(?:reminder|alarm)\b\s*(?:to|about|for\s+(?!\d))?\s*"#,
-        #"^\s*make\s+sure\s+(?:i|to)\b\s*"#,
-        #"^\s*i\s+(?:need|have|want)\s+to\b\s*"#,
-    ]
+    // MARK: - Init
+    //
+    // NOTHING HERE DEFAULTS TO ENGLISH ANY MORE.
+    //
+    // This type used to carry `defaultUncertain`, `defaultNoIdioms` and
+    // `defaultCarriers` — three hardcoded English word lists — plus
+    // `schema: NLUSchema = .loadFromBundle()` and
+    // `entities: EntityExtractor = EntityExtractor()`, both of which read
+    // `Bundle.module`. Every one of those was a fallback that a failure could
+    // land on, and VIK-001 is what that cost: a lexicon that decoded to an empty
+    // struct made the factory substitute all three lists, so a French pack ran
+    // English rules with no throw, no log, and a green test suite.
+    //
+    // Now every input is required and comes from a verified pack. A caller that
+    // cannot supply one cannot build an engine, which is the intended
+    // difficulty.
 
     public init(
-        schema: NLUSchema = .loadFromBundle(),
+        schema: NLUSchema,
         classifier: any IntentClassifying,
-        entities: EntityExtractor = EntityExtractor(),
-        uncertain: [String] = NLUEngine.defaultUncertain,
-        noIdioms: [String] = NLUEngine.defaultNoIdioms,
-        carriers: [String] = NLUEngine.defaultCarriers,
+        entities: any SlotResolving,
+        uncertain: [String],
+        noIdioms: [String],
+        carriers: [String],
+        // Empty by default, which is a no-op — the pre-pack path never had this
+        // step, so leaving it out keeps that path byte-identical.
+        leadingConnectors: [String] = [],
+        confirmationGates: [String: ConfirmationGate] = [:],
         sessionID: String = "default"
     ) {
         self.schema = schema
@@ -76,6 +87,42 @@ public actor NLUEngine: ConversationEngine {
         self.uncertain = uncertain
         self.noIdioms = noIdioms
         self.carrierPatterns = carriers
+        self.confirmationGates = confirmationGates
+
+        // Longest first so "regarding" is not pre-empted by a shorter word that
+        // prefixes it, and `(?:\s+|$)` so a connector that is the ENTIRE
+        // remainder still goes: "set a reminder for 5pm" reduces to "for", and
+        // requiring a trailing space there left the reminder named "for".
+        //
+        // Written as loops with declared types, NOT `map`/`filter`/`sorted`
+        // chained together — that shape is VIK-005, and it made this exact line
+        // fail to compile with "unable to type-check this expression in
+        // reasonable time". Swift has to solve the element type across every
+        // link at once, and the `sorted` closure's ternary is enough to tip it.
+        var connectors: [String] = []
+        for raw in leadingConnectors {
+            let word: String = raw.lowercased()
+            if !word.isEmpty { connectors.append(word) }
+        }
+        connectors.sort { (lhs: String, rhs: String) -> Bool in
+            if lhs.count != rhs.count { return lhs.count > rhs.count }
+            return lhs < rhs
+        }
+        if connectors.isEmpty {
+            self.leadingConnectorPattern = nil
+        } else {
+            var escaped: [String] = []
+            for word in connectors {
+                escaped.append(NSRegularExpression.escapedPattern(for: word))
+            }
+            let alternation: String = escaped.joined(separator: "|")
+            self.leadingConnectorPattern = "^(?:" + alternation + ")(?:\\s+|$)"
+        }
+    }
+
+    /// Unconfigured intents confirm, which is how the pre-pack schema behaved.
+    private func gate(for intent: String) -> ConfirmationGate {
+        confirmationGates[intent] ?? .always
     }
 
     // MARK: - Public API
@@ -126,14 +173,40 @@ public actor NLUEngine: ConversationEngine {
     private func handleConfirmation(_ intent: String, _ fu: FollowupDef, _ text: String) -> NLUResponse {
         switch yesNo(text) {
         case .none:
-            // Re-arm the context and ask again.
+            // Re-arm the context and ask again. Any slots staged when the
+            // confirmation was armed survive, because nothing is reset here.
             session.setContext(fu.context, lifespan: fu.lifespan)
             return .confirm(intent: intent, action: nil, question: fu.prompt)
-        case .some(let yes):
+
+        case .some(true):
             session.clearContext(fu.context)
-            let branch = yes ? fu.yes : fu.no
-            return .fulfill(intent: intent, action: branch.action,
-                            parameters: [:], message: branch.fulfillment, confidence: 1.0)
+            // VIK-021. For an intent that collects slots, "yes" is permission to
+            // PROCEED — not the end of the turn. Fulfilling here returns
+            // `parameters: [:]`, so "set a reminder to go to the airport" →
+            // "shall I?" → "yes" created a reminder with no name and no time,
+            // and reported success.
+            //
+            // `advanceSlots` prompts for the first missing required slot, or
+            // fulfils if the opening utterance already supplied them all. Its
+            // action and message come from `cfg`, which `PackEngineFactory`
+            // builds from the same `workflow.completion` as `fu.yes` — so a
+            // no-slot intent and a slot intent finish identically.
+            if let cfg = schema.intents[intent],
+               !cfg.slots.isEmpty,
+               session.pendingIntent == intent {
+                return advanceSlots(intent, cfg, breakdown: session.pendingBreakdown)
+            }
+            session.resetSlotFilling()
+            return .fulfill(intent: intent, action: fu.yes.action,
+                            parameters: [:], message: fu.yes.fulfillment, confidence: 1.0)
+
+        case .some(false):
+            // Declined — drop anything staged, or the next unrelated utterance
+            // resumes a flow the user just cancelled.
+            session.clearContext(fu.context)
+            session.resetSlotFilling()
+            return .fulfill(intent: intent, action: fu.no.action,
+                            parameters: [:], message: fu.no.fulfillment, confidence: 1.0)
         }
     }
 
@@ -183,11 +256,14 @@ public actor NLUEngine: ConversationEngine {
         let awaiting = session.awaitingSlot
         if let awaiting,
            let slot = cfg.slots.first(where: { $0.name == awaiting }) {
-            if slot.entity == "sys.date-time" {
+            if entities.isDateTime(slot.entity) {
                 let (iso, filled) = resolveDateTime(text)
                 if filled, let iso { session.pendingSlots[slot.name] = iso }
             } else {
-                var value = entities.extract(slot.entity, from: text)
+                // The user was asked for THIS slot and is answering it, so
+                // approximate matching is appropriate — a misheard memory name
+                // should still fill.
+                var value = entities.extract(slot.entity, from: text, isDirectAnswer: true)
                 // Open free-text entities (e.g. @remind) accept the raw answer as a
                 // fallback — a nil structured extraction is expected, not a failure.
                 if value == nil && entities.isOpen(slot.entity) {
@@ -287,8 +363,26 @@ public actor NLUEngine: ConversationEngine {
             return .fulfill(intent: intent, action: nil, parameters: [:], message: "", confidence: conf, semanticRescue: rescued, breakdown: breakdown)
         }
 
-        // Intent that opens with a yes/no confirmation (e.g. Cmd.SendMessage).
-        if let fu = cfg.followup {
+        // Intent that opens with a yes/no confirmation.
+        //
+        // Gated on confidence, not merely on the followup existing (VIK-021).
+        // The pack marks 14 intents `when_ambiguous` and 43 `never`; confirming
+        // whenever a `confirmation` block was present asked on all 14 every
+        // time, including when the classifier was certain.
+        if let fu = cfg.followup, gate(for: intent).fires(confidence: conf) {
+            // Stage the slots this utterance already answers BEFORE asking, so
+            // "yes" resumes a half-filled flow instead of starting an empty one.
+            // The user said "set a reminder to go to the airport" — the name is
+            // in that sentence and must not be asked for again.
+            var staged: [String: String] = [:]
+            if !cfg.slots.isEmpty {
+                extractAllSlots(cfg, text, into: &staged)
+                fillOpenTopics(cfg, text, into: &staged)
+            }
+            session.pendingIntent = cfg.slots.isEmpty ? nil : intent
+            session.pendingSlots = staged
+            session.awaitingSlot = nil
+            session.pendingBreakdown = breakdown
             session.setContext(fu.context, lifespan: fu.lifespan)
             return .confirm(intent: intent, action: cfg.action, question: fu.prompt)
         }
@@ -315,7 +409,7 @@ public actor NLUEngine: ConversationEngine {
     private func extractAllSlots(_ cfg: IntentDef, _ text: String,
                                  into slots: inout [String: String], skip: String? = nil) {
         for slot in cfg.slots where slots[slot.name] == nil && slot.name != skip {
-            if slot.entity == "sys.date-time" {
+            if entities.isDateTime(slot.entity) {
                 // Only fill when a time was actually given; a day-only mention
                 // parks the day in session.partialDateTime and leaves the slot
                 // open so the engine prompts for the time.
@@ -323,7 +417,10 @@ public actor NLUEngine: ConversationEngine {
                 if filled, let iso { slots[slot.name] = iso }
                 continue
             }
-            if let value = entities.extract(slot.entity, from: text) {
+            // Speculative: this is a sweep of the whole utterance for any slot
+            // that happens to be mentioned, not an answer to a prompt. Exact
+            // matches only — a fuzzy hit here fills a slot the user never spoke.
+            if let value = entities.extract(slot.entity, from: text, isDirectAnswer: false) {
                 slots[slot.name] = value
             }
         }
@@ -340,11 +437,11 @@ public actor NLUEngine: ConversationEngine {
               let slot = cfg.slots.first(where: { $0.name == awaiting })
         else { return .complete }
 
-        if slot.entity == "sys.date-time" {
+        if entities.isDateTime(slot.entity) {
             // Complete only with an explicit time: "tomorrow 6 AM", "at 5", "in 20
             // minutes". A bare day ("tomorrow") parses but would be parked and
             // re-prompted — give the user time to finish the thought instead.
-            guard let match = entities.extractDateTime(text) else { return .incomplete }
+            guard let match = entities.dateTime(in: text, now: Date()) else { return .incomplete }
             return match.timeExplicit ? .complete : .incomplete
         }
         if entities.isOpen(slot.entity) {
@@ -363,7 +460,8 @@ public actor NLUEngine: ConversationEngine {
             // mid-topic thinking pause without paying the full extended wait.
             return .freeform
         }
-        return entities.extract(slot.entity, from: text) != nil ? .complete : .incomplete
+        return entities.extract(slot.entity, from: text, isDirectAnswer: true) != nil
+            ? .complete : .incomplete
     }
 
     /// Words that essentially never end a complete English phrase. A stable
@@ -386,14 +484,14 @@ public actor NLUEngine: ConversationEngine {
         // Probe with the real clock first. This reveals whether the answer
         // carries its OWN day ("tomorrow at 9am") — in which case it wins and we
         // must NOT anchor, or the parked day would advance.
-        guard var match = entities.extractDateTime(text, now: Date()) else {
+        guard var match = entities.dateTime(in: text, now: Date()) else {
             return (nil, false)
         }
         // Bare time with no day of its own — anchor it to the parked day so
         // "tomorrow" is preserved (resolve against that day's midnight).
         if !match.explicitDay,
            let parked = session.partialDateTime.flatMap({ Self.parseLocalISO($0) }),
-           let anchored = entities.extractDateTime(text, now: parked) {
+           let anchored = entities.dateTime(in: text, now: parked) {
             match = anchored
         }
         if match.timeExplicit {
@@ -410,7 +508,7 @@ public actor NLUEngine: ConversationEngine {
         return (nil, false)
     }
 
-    // Local wall-clock ISO (no zone), matching EntityExtractor.isoMinutes.
+    // Local wall-clock ISO (no zone), matching the format of `SlotDateTime.iso`.
     private static func localISOFormatter() -> DateFormatter {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -420,6 +518,9 @@ public actor NLUEngine: ConversationEngine {
     private static func parseLocalISO(_ s: String) -> Date? { localISOFormatter().date(from: s) }
     private static func formatLocalISO(_ d: Date) -> String { localISOFormatter().string(from: d) }
 
+    /// Three steps, in this order, mirroring `engine.py::_derive_topic`:
+    /// carriers → date/time → leading connector.
+    ///
     /// For required "open" slots not yet filled, derive a free-text topic from the utterance.
     private func fillOpenTopics(_ cfg: IntentDef, _ text: String, into slots: inout [String: String]) {
         for slot in cfg.slots {
@@ -439,7 +540,17 @@ public actor NLUEngine: ConversationEngine {
                 t.removeSubrange(range)
             }
         }
-        let stripped = entities.stripDateTime(t)
+        var stripped = entities.strippingDateTime(t)
+        // Step 3, which was missing entirely: the connective that introduced the
+        // now-removed time is still at the front. "Remind me at 9pm for dinner"
+        // derived "for dinner"; "set a reminder for 5pm" derived "for" and
+        // stored that as the reminder's name.
+        if let pattern = leadingConnectorPattern,
+           let range = stripped.range(of: pattern,
+                                      options: [.regularExpression, .caseInsensitive]) {
+            stripped.removeSubrange(range)
+        }
+        stripped = stripped.trimmingCharacters(in: CharacterSet(charactersIn: " .,"))
         return stripped.isEmpty ? nil : stripped
     }
 
