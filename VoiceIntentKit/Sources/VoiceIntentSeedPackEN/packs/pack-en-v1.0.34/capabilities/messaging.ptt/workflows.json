@@ -1,0 +1,1 @@
+{"intents":{"Cmd.ListenMessage":{"completion":{"action":"message.listen","response":"Cmd.ListenMessage.done"},"confirmation":{"prompt":"Cmd.ListenMessage.confirm","required":false}},"Cmd.SendMessage":{"completion":{"action":"message.compose","response":"Cmd.SendMessage.done"},"confirmation":{"prompt":"Cmd.SendMessage.confirm","required":true}}}}

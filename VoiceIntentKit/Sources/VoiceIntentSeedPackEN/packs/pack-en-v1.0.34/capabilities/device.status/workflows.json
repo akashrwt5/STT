@@ -1,0 +1,1 @@
+{"intents":{"Cmd.BatteryLevel":{"completion":{"action":"battery.level","response":"Cmd.BatteryLevel.done"}}}}

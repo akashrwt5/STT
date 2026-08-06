@@ -49,11 +49,11 @@ public enum VoiceIntentSeedPackEN {
     /// Scanning also keeps the version out of the source: shipping
     /// `pack-en-v1.0.31` is a file swap, not a code edit.
     public static var url: URL? {
-        guard let root = Bundle.module.resourceURL,
-              let names = try? FileManager.default.contentsOfDirectory(atPath: root.path),
+        guard let packsRoot = Bundle.module.url(forResource: "packs", withExtension: nil),
+              let names = try? FileManager.default.contentsOfDirectory(atPath: packsRoot.path),
               let newest = names.filter({ $0.hasPrefix("pack-en-v") }).sorted().last
         else { return nil }
-        return root.appendingPathComponent(newest, isDirectory: true)
+        return packsRoot.appendingPathComponent(newest, isDirectory: true)
     }
 
     /// The language this seed serves.

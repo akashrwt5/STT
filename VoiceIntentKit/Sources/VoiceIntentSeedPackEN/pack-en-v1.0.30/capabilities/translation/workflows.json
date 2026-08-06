@@ -1,1 +1,0 @@
-{"intents":{"translation.session.start":{"completion":{"action":"translate.open","response":"translation.session.start.done"},"confirmation":{"prompt":"translation.session.start.confirm","required":false}}}}

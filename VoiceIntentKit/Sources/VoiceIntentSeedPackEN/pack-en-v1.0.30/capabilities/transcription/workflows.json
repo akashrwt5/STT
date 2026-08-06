@@ -1,1 +1,0 @@
-{"intents":{"transcription.session.start":{"completion":{"action":"transcribe.open","response":"transcription.session.start.done"},"confirmation":{"prompt":"transcription.session.start.confirm","required":false}}}}

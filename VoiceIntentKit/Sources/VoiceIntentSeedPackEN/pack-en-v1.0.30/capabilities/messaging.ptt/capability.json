@@ -1,1 +1,0 @@
-{"actions":[{"descriptor":"messaging.message.send — Ready to record your message.","key":"message.compose","params":[]},{"descriptor":"messaging.message.listen — Playing your message.","key":"message.listen","params":[]}],"id":"messaging.ptt","languages":["en"],"owner":"platform-team","platforms":["ios","android","server"],"status":"active","version":"1.0"}

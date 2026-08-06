@@ -1,0 +1,1 @@
+{"actions":[{"descriptor":"Cmd.FindMyPhone — Finding your phone.","key":"phone.find","params":[]}],"id":"find","languages":["en"],"owner":"platform-team","platforms":["ios","android","server"],"status":"active","version":"1.0"}

@@ -56,7 +56,7 @@ let package = Package(
         .target(
             name: "VoiceIntentSeedPackEN",
             path: "Sources/VoiceIntentSeedPackEN",
-            resources: [.copy("pack-en-v1.0.30")]
+            resources: [.copy("packs")]
         ),
 
         // Test target — runtime smoke tests + Phase-2 parity tests ported from
