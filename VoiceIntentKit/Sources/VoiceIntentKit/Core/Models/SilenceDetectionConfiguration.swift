@@ -27,7 +27,21 @@ public struct SilenceDetectionConfiguration: Sendable, Equatable {
     ///
     /// Typical speech sits well above −40 dBFS; ambient room noise usually falls
     /// below −50 dBFS. The default of −45 dBFS is a conservative middle ground.
+    /// Acts as the *floor* of the effective threshold — the adaptive noise-floor
+    /// estimate can raise the effective threshold above this in a loud room, but
+    /// never below it.
     public var thresholdDBFS: Float
+
+    /// Margin in dB above the learned ambient noise floor that a buffer must exceed
+    /// to count as speech (effective threshold = max(thresholdDBFS, noiseFloor +
+    /// this)). Higher = stricter (louder speech needed to reset the silence timer);
+    /// lower = more sensitive but more prone to counting ambient noise as speech.
+    public var noiseFloorMarginDB: Float
+
+    /// Seed for the adaptive noise-floor estimate (dBFS) at session start, before
+    /// any ambient audio has been observed. A quiet-room default; it adapts upward
+    /// on its own in a louder environment.
+    public var initialNoiseFloorDBFS: Float
 
     /// Duration of continuous silence *after detected speech* that ends the session.
     public var speechEndTimeout: TimeInterval
@@ -47,29 +61,65 @@ public struct SilenceDetectionConfiguration: Sendable, Equatable {
     /// Duration of silence *with no speech ever detected* that ends the session.
     public var noSpeechTimeout: TimeInterval
 
+    /// Runaway guard — the absolute ceiling on a single turn, measured from the FIRST
+    /// detected speech. This is NOT the lever for "how long the mic can hang": that is
+    /// already bounded by the trailing-silence windows above (≤ `incompleteAnswerTimeout`
+    /// after the user goes quiet). This cap only ever bites when speech never stops
+    /// (background TV, dictating an essay into a command mic), so it is set high on
+    /// purpose. The endpoint applies it word-boundary-aware — it commits at the next
+    /// micro-gap rather than mid-word, with a small hard ceiling beyond this value as a
+    /// final backstop. Set to `0` to disable.
+    public var maxUtteranceDuration: TimeInterval
+
+    /// Inter-word micro-gap (seconds) that counts as a safe word boundary for the
+    /// `maxUtteranceDuration` cap to commit at, so the cap never cuts mid-word.
+    public var maxUtteranceWordBoundaryGrace: TimeInterval
+
+    /// Extra time (seconds) beyond `maxUtteranceDuration` after which the cap commits
+    /// unconditionally — even mid-word. Absolute backstop for input that never pauses
+    /// between words (a continuous stream that offers no word boundary to cut at).
+    public var maxUtteranceHardCeiling: TimeInterval
+
     public init(
         isEnabled: Bool,
         thresholdDBFS: Float = -45.0,
+        noiseFloorMarginDB: Float = 12.0,
+        initialNoiseFloorDBFS: Float = -60.0,
         speechEndTimeout: TimeInterval = 1.0,
         freeformAnswerTimeout: TimeInterval = 1.5,
         incompleteAnswerTimeout: TimeInterval = 2.5,
-        noSpeechTimeout: TimeInterval = 5.0
+        noSpeechTimeout: TimeInterval = 5.0,
+        maxUtteranceDuration: TimeInterval = 60.0,
+        maxUtteranceWordBoundaryGrace: TimeInterval = 0.35,
+        maxUtteranceHardCeiling: TimeInterval = 3.0
     ) {
         self.isEnabled = isEnabled
         self.thresholdDBFS = thresholdDBFS
+        self.noiseFloorMarginDB = noiseFloorMarginDB
+        self.initialNoiseFloorDBFS = initialNoiseFloorDBFS
         self.speechEndTimeout = speechEndTimeout
         self.freeformAnswerTimeout = freeformAnswerTimeout
         self.incompleteAnswerTimeout = incompleteAnswerTimeout
         self.noSpeechTimeout = noSpeechTimeout
+        self.maxUtteranceDuration = maxUtteranceDuration
+        self.maxUtteranceWordBoundaryGrace = maxUtteranceWordBoundaryGrace
+        self.maxUtteranceHardCeiling = maxUtteranceHardCeiling
     }
 
     /// Silence detection off — the session runs until stopped manually.
     /// Use for continuous captioning of an ongoing conversation.
     public static let disabled = SilenceDetectionConfiguration(isEnabled: false)
 
-    /// Silence detection on with sensible defaults — the session ends shortly after
-    /// the user stops speaking. Use for command / single-utterance interactions.
-    public static let singleUtterance = SilenceDetectionConfiguration(isEnabled: true)
+    /// Silence detection on, tuned for full-sentence natural-language capture. The
+    /// 1.5s complete-window survives clause/comma pauses and short hesitations that
+    /// occur *within* a sentence (~up to ~1s) without clipping, while still committing
+    /// promptly once the sentence actually ends. Terse commands endpoint on the same
+    /// window; clearly-unfinished input still extends via `incompleteAnswerTimeout`.
+    /// For slower speakers (e.g. hearing-aid users) consider raising to 1.8–2.0s.
+    public static let singleUtterance = SilenceDetectionConfiguration(
+        isEnabled: true,
+        speechEndTimeout: 1.5
+    )
 
     /// Endpointing for slot answers (replies to a follow-up question). Uses a
     /// uniform, deliberately unhurried 1.5s confirmation window — the original

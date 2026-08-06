@@ -47,10 +47,12 @@ final class SilenceDetector {
     /// Slow EMA of the ambient noise floor (dBFS), learned from silent buffers.
     /// A fixed threshold breaks under `.playAndRecord` (no `.measurement` mode, so
     /// AGC/processing applies) and across routes — built-in mic vs HFP hearing aids
-    /// report very different levels for the same room. Seeded at a quiet-room value.
-    private var noiseFloorDBFS: Float = -60
-    /// Margin above the learned noise floor required to count as speech.
-    private let noiseMarginDB: Float = 12
+    /// report very different levels for the same room. Seeded from configuration
+    /// (`initialNoiseFloorDBFS`) at a quiet-room value.
+    private var noiseFloorDBFS: Float
+    /// Margin above the learned noise floor required to count as speech. Sourced from
+    /// `configuration.noiseFloorMarginDB`.
+    private let noiseMarginDB: Float
 
     /// The threshold actually applied: never *below* the configured floor (so a very
     /// quiet room doesn't make breathing count as speech), but rises with ambient
@@ -66,6 +68,8 @@ final class SilenceDetector {
     init(configuration: SilenceDetectionConfiguration, sampleRate: Double) {
         self.configuration = configuration
         self.sampleRate = sampleRate > 0 ? sampleRate : 16_000
+        self.noiseFloorDBFS = configuration.initialNoiseFloorDBFS
+        self.noiseMarginDB = configuration.noiseFloorMarginDB
     }
 
     /// Feeds one buffer and returns whether the session should now end.

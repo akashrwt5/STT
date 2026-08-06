@@ -435,7 +435,16 @@ public actor NLUEngine: ConversationEngine {
               let cfg = schema.intents[intent],
               let awaiting = session.awaitingSlot,
               let slot = cfg.slots.first(where: { $0.name == awaiting })
-        else { return .complete }
+        else {
+            // No pending slot — this is an INITIAL command, not a slot answer. We
+            // can't verify command completeness against a schema, but we CAN catch the
+            // obvious mid-thought case: a command ending on a connective/function word
+            // ("set the volume to…", "remind me to…") is almost certainly unfinished,
+            // so extend the window instead of committing at the fast timeout. Anything
+            // else endpoints normally. This gives first commands the same short-pause
+            // tolerance that slot answers already had.
+            return Self.endsWithTrailingFunctionWord(text) ? .incomplete : .complete
+        }
 
         if entities.isDateTime(slot.entity) {
             // Complete only with an explicit time: "tomorrow 6 AM", "at 5", "in 20
@@ -450,11 +459,7 @@ public actor NLUEngine: ConversationEngine {
             // A free-text answer whose last word is a connective/function word is
             // almost certainly mid-phrase ("going out for a…"). English-only
             // heuristic; other languages skip it and report .freeform.
-            let lastWord = trimmed.lowercased()
-                .components(separatedBy: CharacterSet.alphanumerics.inverted)
-                .filter { !$0.isEmpty }
-                .last ?? ""
-            if Self.trailingFunctionWords.contains(lastWord) { return .incomplete }
+            if Self.endsWithTrailingFunctionWord(trimmed) { return .incomplete }
             // Free text can never be VERIFIED complete ("drink" vs "drink water") —
             // report .freeform so the endpoint uses the medium window, tolerating a
             // mid-topic thinking pause without paying the full extended wait.
@@ -472,6 +477,18 @@ public actor NLUEngine: ConversationEngine {
         "my", "me", "our", "your", "with", "about", "that", "this", "by",
         "from", "so", "but", "is", "are", "be", "it", "when", "if", "then"
     ]
+
+    /// True when the last word of `text` is a connective/function word — a strong
+    /// signal the speaker is mid-thought ("set the volume to…", "remind me to…").
+    /// English-only heuristic; callers for other languages should treat a `false`
+    /// here as "no signal", not "verified complete".
+    private static func endsWithTrailingFunctionWord(_ text: String) -> Bool {
+        let lastWord = text.trimmingCharacters(in: .whitespaces).lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .last ?? ""
+        return trailingFunctionWords.contains(lastWord)
+    }
 
     /// Resolve a date-time slot value from `text`.
     ///

@@ -98,6 +98,10 @@ public final class SpeechRecognitionService {
     /// (finalized + current volatile) is always the WHOLE utterance — never just the last
     /// chunk. Reset per session. Unused on the file/captioning path.
     private var finalizedTranscript = ""
+    /// Wall-clock time the user's first speech was detected this session (first
+    /// non-empty transcript). `0` until then. Drives the `maxUtteranceDuration`
+    /// safety cap — the hard upper bound on a single turn.
+    private var firstSpeechAt: CFAbsoluteTime = 0
     /// Set when the endpoint delivered the stable partial as the final result
     /// speculatively (before the recognizer's own final committed). The recognizer's
     /// real final, arriving ~50–100ms later during the drain, is then used only as a
@@ -236,6 +240,7 @@ public final class SpeechRecognitionService {
         lastPartialText = ""
         lastPartialChangeAt = 0
         finalizedTranscript = ""
+        firstSpeechAt = 0
         didSynthesizeFinal = false
         self.endpointArbiter = endpointArbiter
         arbitratedText = ""
@@ -382,11 +387,30 @@ public final class SpeechRecognitionService {
                                 // says. This is the endpoint that actually fires under AGC,
                                 // where ambient noise and speech overlap in level and the
                                 // acoustic VAD below can starve (silence run keeps resetting).
+                                // SAFETY CAP — max utterance duration. Once the user has
+                                // been speaking for `maxUtteranceDuration`, force-commit even
+                                // if the transcript is still changing or judged "incomplete",
+                                // so a runaway session or a very long thinking pause always
+                                // resolves instead of holding the mic open.
+                                if silenceConfiguration.isEnabled,
+                                   await self?.shouldEndpointForMaxDuration(
+                                       config: silenceConfiguration
+                                   ) == true {
+                                    logger.info("AK: [Endpoint] Max utterance duration (\(silenceConfiguration.maxUtteranceDuration)s) reached — force-committing.")
+                                    await self?.commitStableTranscriptAsFinal()
+                                    feedBuilder.finish()
+                                    await self?.notifySilenceDetected()
+                                    return
+                                }
+
+                                // PRIMARY endpoint — transcript stability (content-aware).
+                                // The stable-transcript window is chosen by the arbiter:
+                                // complete → fast, freeform → medium, incomplete → extended.
                                 if silenceConfiguration.isEnabled,
                                    await self?.shouldEndpointForStableTranscript(
                                        config: silenceConfiguration
                                    ) == true {
-                                    logger.info("AK: [Endpoint] Transcript stable ≥ \(silenceConfiguration.speechEndTimeout)s — finishing input and notifying delegate.")
+                                    logger.info("AK: [Endpoint] Transcript stable — finishing input and notifying delegate.")
                                     // Deliver the stable transcript as the final NOW —
                                     // NLU + TTS handoff overlap the analyzer drain.
                                     await self?.commitStableTranscriptAsFinal()
@@ -395,27 +419,22 @@ public final class SpeechRecognitionService {
                                     return
                                 }
 
-                                // BACKSTOP endpoint — acoustic VAD. Catches the no-speech case
-                                // (nobody ever spoke, so there are no partials to stabilize)
-                                // and clean-silence environments. We finish the input stream so
-                                // the analyzer drains cleanly, then notify the delegate.
+                                // BACKSTOP endpoint — acoustic VAD, NO-SPEECH ONLY. The
+                                // "spoke then trailed off" (endOfSpeech) case is owned solely
+                                // by the content-aware stability endpoint above; letting the
+                                // raw acoustic-silence timer also commit it would bypass the
+                                // extended (freeform / incomplete) windows and cut the user off
+                                // during a mid-thought pause in a quiet room. Here the VAD only
+                                // handles "nobody ever spoke". `process()` still runs every
+                                // buffer (adapting the noise floor) as a side effect of the
+                                // pattern match, regardless of the reason.
                                 if let feedVAD,
                                    case .silenceDetected(let reason) = feedVAD.process(
                                        powerDBFS: power, frames: Int(outputBuffer.frameLength)
-                                   ) {
-                                    // Guardrail: end-of-speech silence only ends the session once
-                                    // the transcriber has produced *some* text (volatile or final)
-                                    // — a pause before the user ever spoke shouldn't cut them off.
-                                    // We deliberately do NOT wait for a final result: finals arrive
-                                    // on the transcriber's own lazy cadence, so gating on them made
-                                    // the VAD and the transcriber wait on each other.
-                                    // The no-speech timeout always ends the session.
-                                    let shouldStop = await self?.shouldStopForSilence(reason) ?? true
-                                    guard shouldStop else { continue }
-
-                                    logger.info("AK: [Feed] Silence confirmed (\(String(describing: reason))). Finishing input and notifying delegate.")
-                                    // If the decoder produced text, deliver it as the final
-                                    // now (no-op in the no-speech case, where there is none).
+                                   ),
+                                   reason == .noSpeech,
+                                   await self?.shouldStopForSilence(.noSpeech) == true {
+                                    logger.info("AK: [Feed] No-speech timeout confirmed. Finishing input and notifying delegate.")
                                     await self?.commitStableTranscriptAsFinal()
                                     feedBuilder.finish()
                                     await self?.notifySilenceDetected()
@@ -510,7 +529,10 @@ public final class SpeechRecognitionService {
                             )
 
                             if !running.isEmpty {
-                                self.hasVolatileText = true
+                                if !self.hasVolatileText {
+                                    self.hasVolatileText = true
+                                    self.firstSpeechAt = CFAbsoluteTimeGetCurrent()
+                                }
                                 if running != self.lastPartialText {
                                     self.lastPartialText = running
                                     self.lastPartialChangeAt = CFAbsoluteTimeGetCurrent()
@@ -628,6 +650,32 @@ public final class SpeechRecognitionService {
     /// a COMPLETE answer commits at `speechEndTimeout`; an INCOMPLETE one (bare
     /// "tomorrow" for a date-time slot) waits `incompleteAnswerTimeout`, so a
     /// thinking pause mid-answer doesn't split one answer into two turns.
+    /// Runaway guard, evaluated per buffer. Fires only when speech has run past
+    /// `maxUtteranceDuration` from first detection — which normal turns never reach,
+    /// because the trailing-silence endpoint commits ≤ `incompleteAnswerTimeout` after
+    /// the user goes quiet. So this bites only on continuous, never-pausing input.
+    ///
+    /// Word-boundary aware: at the soft cap it commits only if the transcript has been
+    /// briefly still (a micro-gap between words), so it never chops mid-word. If the
+    /// stream never even pauses between words, a small hard ceiling beyond the cap
+    /// forces the commit regardless, guaranteeing the turn always terminates.
+    private func shouldEndpointForMaxDuration(config: SilenceDetectionConfiguration) -> Bool {
+        guard config.maxUtteranceDuration > 0,
+              hasVolatileText, !hasReceivedFinalResult, firstSpeechAt > 0
+        else { return false }
+
+        let spokenFor = CFAbsoluteTimeGetCurrent() - firstSpeechAt
+        guard spokenFor >= config.maxUtteranceDuration else { return false }
+
+        /// Inter-word micro-gap that counts as a safe place to cut.
+        let wordBoundaryGrace = config.maxUtteranceWordBoundaryGrace
+        /// Absolute backstop past the soft cap for input that never gaps at all.
+        let hardCeiling = config.maxUtteranceDuration + config.maxUtteranceHardCeiling
+
+        if spokenFor >= hardCeiling { return true }
+        return CFAbsoluteTimeGetCurrent() - lastPartialChangeAt >= wordBoundaryGrace
+    }
+
     private func shouldEndpointForStableTranscript(
         config: SilenceDetectionConfiguration
     ) async -> Bool {
