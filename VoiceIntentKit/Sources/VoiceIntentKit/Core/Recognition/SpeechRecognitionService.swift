@@ -89,6 +89,15 @@ public final class SpeechRecognitionService {
     /// When the partial hasn't changed for `speechEndTimeout`, the utterance is over.
     private var lastPartialText = ""
     private var lastPartialChangeAt: CFAbsoluteTime = 0
+    /// Committed-segment accumulator for the live single-utterance path. Apple's
+    /// `SpeechTranscriber` (`.progressiveTranscription`) finalizes a SEGMENT at each
+    /// grammatical/pause boundary and immediately starts a fresh chunk, so a multi-clause
+    /// sentence ("It's a bit louder here, can you reduce the volume") arrives as several
+    /// finals whose subsequent volatile partials contain only the *new* chunk (" can you").
+    /// We concatenate the finalized segments here so the running transcript
+    /// (finalized + current volatile) is always the WHOLE utterance — never just the last
+    /// chunk. Reset per session. Unused on the file/captioning path.
+    private var finalizedTranscript = ""
     /// Set when the endpoint delivered the stable partial as the final result
     /// speculatively (before the recognizer's own final committed). The recognizer's
     /// real final, arriving ~50–100ms later during the drain, is then used only as a
@@ -226,6 +235,7 @@ public final class SpeechRecognitionService {
         hasVolatileText = false
         lastPartialText = ""
         lastPartialChangeAt = 0
+        finalizedTranscript = ""
         didSynthesizeFinal = false
         self.endpointArbiter = endpointArbiter
         arbitratedText = ""
@@ -376,7 +386,7 @@ public final class SpeechRecognitionService {
                                    await self?.shouldEndpointForStableTranscript(
                                        config: silenceConfiguration
                                    ) == true {
-                                    logger.info("[Endpoint] Transcript stable ≥ \(silenceConfiguration.speechEndTimeout)s — finishing input and notifying delegate.")
+                                    logger.info("AK: [Endpoint] Transcript stable ≥ \(silenceConfiguration.speechEndTimeout)s — finishing input and notifying delegate.")
                                     // Deliver the stable transcript as the final NOW —
                                     // NLU + TTS handoff overlap the analyzer drain.
                                     await self?.commitStableTranscriptAsFinal()
@@ -403,7 +413,7 @@ public final class SpeechRecognitionService {
                                     let shouldStop = await self?.shouldStopForSilence(reason) ?? true
                                     guard shouldStop else { continue }
 
-                                    logger.info("[Feed] Silence confirmed (\(String(describing: reason))). Finishing input and notifying delegate.")
+                                    logger.info("AK: [Feed] Silence confirmed (\(String(describing: reason))). Finishing input and notifying delegate.")
                                     // If the decoder produced text, deliver it as the final
                                     // now (no-op in the no-speech case, where there is none).
                                     await self?.commitStableTranscriptAsFinal()
@@ -461,8 +471,68 @@ public final class SpeechRecognitionService {
                         resultCount += 1
                         let plainText = String(result.text.characters)
                         let isFinal = result.isFinal
-                        logger.debug("[Results] Result #\(resultCount): isFinal=\(isFinal), text='\(plainText)'")
+                        logger.debug("AK: [Results] Result #\(resultCount): isFinal=\(isFinal), text='\(plainText)'")
 
+                        // ── Endpointing authority ─────────────────────────────────
+                        // Apple's SpeechTranscriber (.progressiveTranscription) emits
+                        // isFinal at each grammatical/pause boundary and then immediately
+                        // starts a NEW chunk. isFinal therefore marks a stable SEGMENT, NOT
+                        // the end of the user's turn: "It's a bit louder here." finalizes
+                        // mid-sentence when the speaker pauses at the comma.
+                        //
+                        // On the live single-utterance path we treat every result (volatile
+                        // OR final) purely as transcript to accumulate, and let the feed-loop
+                        // endpointer (transcript-stability + acoustic VAD) be the SOLE
+                        // authority on turn-end. Apple's isFinal never triggers the NLU here.
+                        // This is the fix for the premature-endpointing bug: the mic is no
+                        // longer cut off — and the NLU no longer fired — at Result #9.
+                        if silenceConfiguration.isEnabled {
+                            // Turn already committed by the endpointer (speculative final or
+                            // VAD). Everything still arriving is analyzer-drain — never
+                            // re-deliver it, or we'd double-trigger the NLU.
+                            if self.hasReceivedFinalResult {
+                                if isFinal {
+                                    self.appendFinalizedSegment(plainText)
+                                    if let lastPartialAt {
+                                        let lagMs = (CFAbsoluteTimeGetCurrent() - lastPartialAt) * 1000
+                                        latencyLog.info("ENDPOINT LAG: recognizer final committed \(lagMs, format: .fixed(precision: 0))ms after last partial (endpoint already fired).")
+                                    }
+                                }
+                                continue
+                            }
+
+                            // Commit finalized SEGMENTS into the accumulator; the running
+                            // transcript is (finalized segments + current volatile chunk),
+                            // so it is always the full utterance — not just the last chunk.
+                            if isFinal { self.appendFinalizedSegment(plainText) }
+                            let running = self.runningTranscript(
+                                withVolatile: isFinal ? "" : plainText
+                            )
+
+                            if !running.isEmpty {
+                                self.hasVolatileText = true
+                                if running != self.lastPartialText {
+                                    self.lastPartialText = running
+                                    self.lastPartialChangeAt = CFAbsoluteTimeGetCurrent()
+                                }
+                            }
+                            if !isFinal { lastPartialAt = CFAbsoluteTimeGetCurrent() }
+
+                            // Always surfaced as a PARTIAL — the turn's real final is
+                            // synthesized by commitStableTranscriptAsFinal() at endpoint.
+                            self.delegate?.recognitionService(
+                                self,
+                                didReceivePartialResult: TranscriptionResult(
+                                    text: running, isFinal: false, locale: locale, confidence: nil
+                                )
+                            )
+                            continue
+                        }
+
+                        // ── File / continuous-captioning path (silence detection off) ──
+                        // No notion of a "turn" here: Apple's isFinal is authoritative and
+                        // is accumulated downstream (TranscriptionCoordinator / file loop).
+                        // Unchanged from the original behaviour.
                         if !plainText.isEmpty {
                             self.hasVolatileText = true
                             if plainText != self.lastPartialText {
@@ -470,37 +540,12 @@ public final class SpeechRecognitionService {
                                 self.lastPartialChangeAt = CFAbsoluteTimeGetCurrent()
                             }
                         }
-
                         let transcriptionResult = TranscriptionResult(
-                            text: plainText,
-                            isFinal: isFinal,
-                            locale: locale,
-                            confidence: nil
+                            text: plainText, isFinal: isFinal, locale: locale, confidence: nil
                         )
-
-                        // Already on the main actor — deliver directly.
                         if isFinal {
-                            if let lastPartialAt {
-                                let lagMs = (CFAbsoluteTimeGetCurrent() - lastPartialAt) * 1000
-                                latencyLog.info("ENDPOINT LAG: final committed \(lagMs, format: .fixed(precision: 0))ms after last partial")
-                            }
-                            if self.didSynthesizeFinal {
-                                // The endpoint already delivered the stable partial as the
-                                // final — the recognizer's own final is verification only.
-                                // A delivery here would double-trigger the NLU.
-                                let spoken = Self.transcriptKey(self.lastPartialText)
-                                let real   = Self.transcriptKey(plainText)
-                                if spoken == real {
-                                    latencyLog.info("SPECULATIVE FINAL confirmed by recognizer.")
-                                } else {
-                                    // Track this rate: frequent mismatches mean the stability
-                                    // window is too aggressive for this locale/audio path.
-                                    logger.warning("SPECULATIVE FINAL mismatch — acted on '\(self.lastPartialText)', recognizer committed '\(plainText)'.")
-                                }
-                            } else {
-                                self.hasReceivedFinalResult = true
-                                self.delegate?.recognitionService(self, didReceiveFinalResult: transcriptionResult)
-                            }
+                            self.hasReceivedFinalResult = true
+                            self.delegate?.recognitionService(self, didReceiveFinalResult: transcriptionResult)
                         } else {
                             lastPartialAt = CFAbsoluteTimeGetCurrent()
                             self.delegate?.recognitionService(self, didReceivePartialResult: transcriptionResult)
@@ -643,6 +688,26 @@ public final class SpeechRecognitionService {
             .filter { CharacterSet.alphanumerics.contains($0) }
             .map(String.init)
             .joined()
+    }
+
+    /// Commits a finalized SEGMENT into the running-utterance accumulator (live path).
+    /// Apple hands back each segment once, then stops repeating it in later volatile
+    /// results — so if we don't stash it here, the first clause is lost the moment the
+    /// second one starts streaming.
+    private func appendFinalizedSegment(_ segment: String) {
+        let s = segment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return }
+        finalizedTranscript = finalizedTranscript.isEmpty ? s : finalizedTranscript + " " + s
+    }
+
+    /// The full running transcript for the live path: all finalized segments joined with
+    /// the current volatile chunk. Always the complete utterance, never just the latest
+    /// chunk — this is what the endpointer commits and what the NLU ultimately sees.
+    private func runningTranscript(withVolatile volatile: String) -> String {
+        let v = volatile.trimmingCharacters(in: .whitespacesAndNewlines)
+        if finalizedTranscript.isEmpty { return v }
+        if v.isEmpty { return finalizedTranscript }
+        return finalizedTranscript + " " + v
     }
 
     private func notifySilenceDetected() {
