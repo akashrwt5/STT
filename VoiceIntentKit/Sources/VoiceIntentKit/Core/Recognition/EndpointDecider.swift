@@ -20,25 +20,40 @@ struct EndpointDecider {
     /// The trailing-silence window required to endpoint for a given content-aware
     /// verdict: complete commits fast, freeform gets a medium window, a verifiably
     /// unfinished answer gets the extended one.
-    func requiredStabilityWindow(for verdict: SlotAnswerAssessment) -> TimeInterval {
+    ///
+    /// When `adaptiveEndpointing` is on, the base window GROWS with `spokenFor` (how
+    /// long the user has already been speaking) beyond `adaptiveGraceStart`, capped at
+    /// `adaptiveMaxWindow`: a short command commits at the base window; a long
+    /// continuous utterance earns more time so sentence-boundary pauses don't cut it.
+    func requiredStabilityWindow(
+        for verdict: SlotAnswerAssessment,
+        spokenFor: TimeInterval = 0
+    ) -> TimeInterval {
+        let base: TimeInterval
         switch verdict {
-        case .complete:   return config.speechEndTimeout
-        case .freeform:   return max(config.speechEndTimeout, config.freeformAnswerTimeout)
-        case .incomplete: return config.incompleteAnswerTimeout
+        case .complete:   base = config.speechEndTimeout
+        case .freeform:   base = max(config.speechEndTimeout, config.freeformAnswerTimeout)
+        case .incomplete: base = config.incompleteAnswerTimeout
         }
+        guard config.adaptiveEndpointing else { return base }
+        let ext = max(0, spokenFor - config.adaptiveGraceStart) * config.adaptiveSlope
+        return min(config.adaptiveMaxWindow, base + ext)
     }
 
     /// Transcript-stability endpoint: true once the running transcript has been
-    /// unchanged for the verdict's window. `lastChangeAt` is when it last changed.
+    /// unchanged for the verdict's window. `lastChangeAt` is when it last changed;
+    /// `firstSpeechAt` (when the user started speaking) drives the adaptive window.
     func shouldEndpointForStableTranscript(
         now: CFAbsoluteTime,
         lastChangeAt: CFAbsoluteTime,
         hasVolatileText: Bool,
         hasReceivedFinalResult: Bool,
-        verdict: SlotAnswerAssessment
+        verdict: SlotAnswerAssessment,
+        firstSpeechAt: CFAbsoluteTime = 0
     ) -> Bool {
         guard hasVolatileText, !hasReceivedFinalResult, lastChangeAt > 0 else { return false }
-        return now - lastChangeAt >= requiredStabilityWindow(for: verdict)
+        let spokenFor = firstSpeechAt > 0 ? now - firstSpeechAt : 0
+        return now - lastChangeAt >= requiredStabilityWindow(for: verdict, spokenFor: spokenFor)
     }
 
     /// Runaway guard, word-boundary aware. Fires only once speech has run past

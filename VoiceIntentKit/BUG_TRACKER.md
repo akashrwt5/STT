@@ -4,7 +4,7 @@ Defects found while making the package data-driven. The pack compiler's own
 tracker lives in the IntentClassifier repo (`docs/BUG_TRACKER.md`); anything
 here is iOS-side, or a contract gap that bites iOS specifically.
 
-**Summary:** 18 fixed, 9 open.
+**Summary:** 20 fixed, 9 open.
 
 Two of the fixes (VIK-015, VIK-016) were found by the parity suite on its first
 run, in code that compiled cleanly and had been read against the reference twice.
@@ -46,6 +46,8 @@ evidence here.
 | VIK-025 | NLU | **High** | Topic stripping mirrored the wrong reference path — 8/20 utterances diverged | **Fixed** |
 | VIK-026 | contract | Med | Grammar cannot say which weekday synonyms are safe to strip | Open |
 | VIK-027 | testing | Med | Facade turn state-machine (external-TTS handoff) not unit-tested — needs a mockable engine/coordinator seam | Open |
+| VIK-028 | STT | **Critical** | Apple `isFinal` at a grammatical boundary treated as end-of-turn — mic cut off mid-sentence, wrong intent on an incomplete phrase | **Fixed** |
+| VIK-029 | concurrency | **High** | Result loop in the task-group body could hang (and swallow the error) when `analyzer.start()` fails | **Fixed** |
 
 ---
 
@@ -373,29 +375,69 @@ including negative cases ("buy sun cream", "sat with mom").
 silently — which is the actual lesson. The first version was read against the
 reference twice and reviewed; nothing but running both found it.
 
+### VIK-028 — Apple `isFinal` treated as end-of-turn (**Critical**)
+`SpeechTranscriber` (`.progressiveTranscription`) emits `isFinal = true` at each
+grammatical/pause boundary and then starts a fresh chunk — it marks a stable
+SEGMENT, not the end of the user's turn. `SpeechRecognitionService` forwarded any
+`isFinal` straight to the NLU and flagged the session complete, so a multi-clause
+sentence was cut mid-way: "It's a bit louder here, can you reduce the volume"
+endpointed after "…louder here", classified that incomplete phrase, and fired the
+wrong intent (`Cmd.VolumeIncrease`, on the word "louder"). No VAD/silence log ever
+appeared, because Apple's grammar boundary preempted our own 1s timer.
+
+**Fix:** on the live single-utterance path, `isFinal` no longer ends the turn.
+Every result (volatile or final) is accumulated into a running transcript
+(`finalizedTranscript` + the current volatile chunk — always the WHOLE utterance,
+never just the last segment) and surfaced as a partial; the turn commits only via
+our own endpointer (transcript-stability + acoustic VAD + max-utterance cap).
+Trailing partials arriving after the commit are dropped by a drain guard so the
+NLU can't be re-triggered. The file / continuous-captioning path keeps `isFinal`
+authoritative (there is no "turn" there). The decision math lives in the pure
+`EndpointDecider`; covered by `EndpointDeciderTests` + `SilenceDetectorTests`.
+
+### VIK-029 — Result loop could hang and swallow the analyzer error (**High**)
+The session task ran the feed loop and `analyzer.start()` / `finalize…` as
+task-group children but iterated `transcriber.results` in the GROUP BODY. If
+`analyzer.start()` threw, the body stayed blocked on a results stream that would
+never close (a failed analyzer never finalizes), so the child's error was never
+observed and `stopTranscribing`'s `await analysisTask.value` hung the teardown —
+freezing the main thread.
+
+**Fix:** result iteration moved into a third `@MainActor` task-group child (so
+delegate delivery stays synchronous, identical to before), and the group body now
+`for try await _ in group { }` — observing every child. The first child to throw
+rethrows there, the group cancels the siblings, and the error propagates to the
+outer `catch → didFailWith` instead of hanging. `group.cancelAll()` removed (the
+observation loop supersedes it). Not yet covered by an automated failure-injection
+test (needs a mockable analyzer — see the seam note in VIK-027).
+
 ---
 
 ## Open
 
-### VIK-007 — Fuzzy-matching rules exist only in Python (**High**)
+### VIK-007 — Fuzzy-matching rules exist only in Python (**High**, partially resolved)
 The pack declares `"fuzzy": true` on an entity and nothing else. The distance
-metric (Levenshtein), the 0.3 edit ratio, the 5-character minimum length, the
-confidence tiers (1.00 / 0.95 / 0.60–0.90) and a **40-word English stopword
-list** all live only in
-`packages/runtime/nlu_engine/entities.py::extract_enum`.
+metric (Levenshtein), the 0.3 edit ratio, the 5-character minimum length, and the
+confidence tiers (1.00 / 0.95 / 0.60–0.90) still live only in
+`packages/runtime/nlu_engine/entities.py::extract_enum`, and `PackEntityExtractor`
+mirrors them by hand — an unversioned contract for those four.
 
-`PackEntityExtractor` mirrors them by hand, which makes it an unversioned
-contract: if the reference changes its ratio or its stopwords, nothing in the
-pack says so, and a device silently resolves slots differently from the server
-that trained the model.
+**RESOLVED for the two word-list halves (`stopwords` + trailing function words).**
+The pack lexicon now carries both — `pack-en-v1.0.36` ships `lexicons/en.json` with
+`fuzzyStopwords` (42 words) and `trailingFunctionWords` (30 words), and `PackLexicon`
+decodes both. `PackEngineFactory.makeEngine` now sources them from the lexicon
+(`stopwords ?? lexicon.fuzzyStopwords`, `trailingFunctionWords ?? lexicon.trailingFunctionWords`),
+with the host `VoiceIntentConfiguration` fields as an optional override. So a
+non-English pack ships its own `le`/`la`/`de` (and its own mid-thought words) with no
+code change, and there is no hardcoded English fallback — the earlier silent-English
+risk (VIK-001 class) is gone for these. The stopword list was what stopped `the`
+fuzzy-matching the memory `three`; it is now data-driven.
 
-Worse for multi-language — the stopword list is what stops `the` fuzzy-matching
-the memory `three`. A French pack needs `le`/`la`/`de`, and the format has
-nowhere to put them. Currently a parameter on `init`, defaulting to the English
-set with an error logged when `pack.language != "en"`.
+Still open: the metric / ratio / min-length / confidence tiers remain hand-mirrored
+Python constants. If the reference changes one, nothing in the pack says so.
 
-**Ask:** carry `fuzzy: {algorithm, max_distance_ratio, min_length, stopwords}`
-per entity, or per language in the lexicon.
+**Ask:** carry the remaining `fuzzy: {algorithm, max_distance_ratio, min_length}`
+per entity (or per language) so the last four leave the code too.
 
 ### VIK-008 — Vectorizer parameters not in the pack (**High**)
 iOS rebuilds scikit-learn's TF-IDF in Swift. `ngram_range=(1,2)`, `min_df=2`,

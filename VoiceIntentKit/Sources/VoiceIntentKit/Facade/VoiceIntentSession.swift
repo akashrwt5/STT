@@ -252,6 +252,9 @@ public final class VoiceIntentSession {
     private func buildEngine() async throws -> any ConversationEngine {
         let code = config.language.languageCode
         let url = try await config.packProvider.packURL(for: code)
+        // These are OPTIONAL overrides. When nil (the normal case) `PackEngineFactory`
+        // sources both from the pack's own lexicon — the single place that default lives,
+        // so it stays consistent whether the engine is built here or via `classify(text:)`.
         let configStopwords = config.fuzzyStopwords
         let configTrailing = config.trailingFunctionWords
         let trust = config.trust
@@ -260,10 +263,8 @@ public final class VoiceIntentSession {
         // JSON decode and a CoreML load.
         return try await Task.detached(priority: .userInitiated) {
             let pack = try BundleDataLoader.load(packAt: url, language: code, trust: trust)
-            let stopwords = configStopwords ?? pack.lexicon.fuzzyStopwords.map { Set($0) }
-            let trailingWords = configTrailing ?? pack.lexicon.trailingFunctionWords.map { Set($0) }
             return try PackEngineFactory.makeEngine(
-                pack: pack, stopwords: stopwords, trailingFunctionWords: trailingWords
+                pack: pack, stopwords: configStopwords, trailingFunctionWords: configTrailing
             )
         }.value
     }

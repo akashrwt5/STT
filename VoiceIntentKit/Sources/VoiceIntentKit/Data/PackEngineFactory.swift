@@ -36,9 +36,12 @@ public enum PackEngineFactory {
     /// language. That is the point — there is no "fall back to English" branch
     /// to take, because there is no English to fall back to.
     /// - Parameters:
-    ///   - stopwords: fuzzy-matching stopwords. English by default; a non-English
-    ///     pack must supply its own, because the format has nowhere to carry them
-    ///     (VIK-007).
+    ///   - stopwords: OPTIONAL override for fuzzy-matching stopwords. When nil (the
+    ///     normal case) the pack's own `lexicon.fuzzyStopwords` is used, so each
+    ///     language ships its own list — no hardcoded English. Pass a value only to
+    ///     override the pack.
+    ///   - trailingFunctionWords: OPTIONAL override for the mid-thought endpointing
+    ///     word set. When nil, the pack's own `lexicon.trailingFunctionWords` is used.
     ///
     /// There is no longer a `gaps` parameter. `PackContentGaps` existed because
     /// the v3 projection dropped the `open` entity flag and the compiler's
@@ -57,12 +60,22 @@ public enum PackEngineFactory {
                                   stopwords: Set<String>? = nil,
                                   trailingFunctionWords: Set<String>? = nil) throws -> any ConversationEngine {
         let classifier = try PackClassifierAdapter(pack: pack)
-        let entities = PackSlotResolver(pack: pack, stopwords: stopwords)
+        let lexicon = pack.lexicon
+
+        // Fuzzy stopwords and trailing function words are DATA — they come from the
+        // pack's lexicon (`lexicons/<lang>.json`), which carries them per language, so
+        // a non-English pack ships its own without a code change. The host `stopwords` /
+        // `trailingFunctionWords` parameters are an OPTIONAL OVERRIDE for a host that
+        // wants to tune them; when nil (the normal case) the pack's own lists win. This
+        // is what makes them data-driven rather than hardcoded English (see VIK-007).
+        let effectiveStopwords = stopwords ?? lexicon.fuzzyStopwords.map { Set($0) }
+        let effectiveTrailingWords = trailingFunctionWords ?? lexicon.trailingFunctionWords.map { Set($0) }
+
+        let entities = PackSlotResolver(pack: pack, stopwords: effectiveStopwords)
 
         // Word lists come from the pack's lexicon. Empty is a legitimate answer
         // for a language that does not use a mechanism — it is NOT a signal to
         // substitute English, which is exactly what the predecessor did.
-        let lexicon = pack.lexicon
         let engine = NLUEngine(
             schema: schema(from: pack),
             classifier: classifier,
@@ -86,7 +99,7 @@ public enum PackEngineFactory {
             uncertain: [],
             noIdioms: [],
             carriers: lexicon.carriers,
-            trailingFunctionWords: trailingFunctionWords,
+            trailingFunctionWords: effectiveTrailingWords,
             leadingConnectors: lexicon.leadingConnectors,
             confirmationGates: confirmationGates(from: pack))
 

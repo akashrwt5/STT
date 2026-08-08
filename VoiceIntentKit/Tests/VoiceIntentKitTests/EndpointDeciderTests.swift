@@ -22,6 +22,20 @@ final class EndpointDeciderTests: XCTestCase {
             maxUtteranceHardCeiling: 3.0))
     }
 
+    /// Adaptive endpointing ON: base 1.0s, grows 0.12s per second spoken past 3s,
+    /// capped at 2.5s.
+    private func adaptiveDecider() -> EndpointDecider {
+        EndpointDecider(config: SilenceDetectionConfiguration(
+            isEnabled: true,
+            speechEndTimeout: 1.0,
+            freeformAnswerTimeout: 1.5,
+            incompleteAnswerTimeout: 2.5,
+            adaptiveEndpointing: true,
+            adaptiveGraceStart: 3.0,
+            adaptiveSlope: 0.12,
+            adaptiveMaxWindow: 2.5))
+    }
+
     // MARK: - Window selection
 
     func testRequiredStabilityWindowPerVerdict() {
@@ -29,6 +43,39 @@ final class EndpointDeciderTests: XCTestCase {
         XCTAssertEqual(d.requiredStabilityWindow(for: .complete), 1.0, accuracy: 0.0001)
         XCTAssertEqual(d.requiredStabilityWindow(for: .freeform), 1.5, accuracy: 0.0001)  // max(1.0, 1.5)
         XCTAssertEqual(d.requiredStabilityWindow(for: .incomplete), 2.5, accuracy: 0.0001)
+    }
+
+    // MARK: - Adaptive window
+
+    func testAdaptiveOffIgnoresSpokenFor() {
+        let d = decider()  // adaptiveEndpointing = false (default)
+        XCTAssertEqual(d.requiredStabilityWindow(for: .complete, spokenFor: 30), 1.0, accuracy: 0.0001)
+    }
+
+    func testAdaptiveGrowsWithDuration() {
+        let d = adaptiveDecider()
+        // Below / at the grace point → base window (short command stays snappy).
+        XCTAssertEqual(d.requiredStabilityWindow(for: .complete, spokenFor: 2), 1.0, accuracy: 0.0001)
+        XCTAssertEqual(d.requiredStabilityWindow(for: .complete, spokenFor: 3), 1.0, accuracy: 0.0001)
+        // 10s spoken → 1.0 + (10-3)*0.12 = 1.84s
+        XCTAssertEqual(d.requiredStabilityWindow(for: .complete, spokenFor: 10), 1.84, accuracy: 0.0001)
+    }
+
+    func testAdaptiveCappedAtMax() {
+        let d = adaptiveDecider()
+        XCTAssertEqual(d.requiredStabilityWindow(for: .complete, spokenFor: 1000), 2.5, accuracy: 0.0001)
+    }
+
+    func testAdaptiveStabilityNeedsLongerForLongUtterance() {
+        let d = adaptiveDecider()
+        // Spoken 10s → adaptive window 1.84s. Only 1.5s stable → not yet.
+        XCTAssertFalse(d.shouldEndpointForStableTranscript(
+            now: 100, lastChangeAt: 98.5, hasVolatileText: true,
+            hasReceivedFinalResult: false, verdict: .complete, firstSpeechAt: 90))
+        // 1.9s stable ≥ 1.84 → fire.
+        XCTAssertTrue(d.shouldEndpointForStableTranscript(
+            now: 100, lastChangeAt: 98.1, hasVolatileText: true,
+            hasReceivedFinalResult: false, verdict: .complete, firstSpeechAt: 90))
     }
 
     // MARK: - Stability endpoint

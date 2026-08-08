@@ -80,6 +80,18 @@ public struct SilenceDetectionConfiguration: Sendable, Equatable {
     /// between words (a continuous stream that offers no word boundary to cut at).
     public var maxUtteranceHardCeiling: TimeInterval
 
+    /// When true, the trailing-silence window GROWS with how long the user has already
+    /// been speaking: a short command commits fast (the base window), a long continuous
+    /// utterance gets a longer window so sentence-boundary pauses don't cut it off. A
+    /// lightweight heuristic stand-in for a neural end-of-query model. Default off.
+    public var adaptiveEndpointing: Bool
+    /// No adaptive extension until the user has been speaking at least this long (s).
+    public var adaptiveGraceStart: TimeInterval
+    /// Extra window (seconds) added per second spoken beyond `adaptiveGraceStart`.
+    public var adaptiveSlope: Double
+    /// Absolute ceiling (seconds) on the adaptive trailing-silence window.
+    public var adaptiveMaxWindow: TimeInterval
+
     public init(
         isEnabled: Bool,
         thresholdDBFS: Float = -45.0,
@@ -91,7 +103,11 @@ public struct SilenceDetectionConfiguration: Sendable, Equatable {
         noSpeechTimeout: TimeInterval = 5.0,
         maxUtteranceDuration: TimeInterval = 60.0,
         maxUtteranceWordBoundaryGrace: TimeInterval = 0.35,
-        maxUtteranceHardCeiling: TimeInterval = 3.0
+        maxUtteranceHardCeiling: TimeInterval = 3.0,
+        adaptiveEndpointing: Bool = false,
+        adaptiveGraceStart: TimeInterval = 3.0,
+        adaptiveSlope: Double = 0.12,
+        adaptiveMaxWindow: TimeInterval = 2.5
     ) {
         self.isEnabled = isEnabled
         self.thresholdDBFS = thresholdDBFS
@@ -104,21 +120,27 @@ public struct SilenceDetectionConfiguration: Sendable, Equatable {
         self.maxUtteranceDuration = maxUtteranceDuration
         self.maxUtteranceWordBoundaryGrace = maxUtteranceWordBoundaryGrace
         self.maxUtteranceHardCeiling = maxUtteranceHardCeiling
+        self.adaptiveEndpointing = adaptiveEndpointing
+        self.adaptiveGraceStart = adaptiveGraceStart
+        self.adaptiveSlope = adaptiveSlope
+        self.adaptiveMaxWindow = adaptiveMaxWindow
     }
 
     /// Silence detection off — the session runs until stopped manually.
     /// Use for continuous captioning of an ongoing conversation.
     public static let disabled = SilenceDetectionConfiguration(isEnabled: false)
 
-    /// Silence detection on, tuned for full-sentence natural-language capture. The
-    /// 1.5s complete-window survives clause/comma pauses and short hesitations that
-    /// occur *within* a sentence (~up to ~1s) without clipping, while still committing
-    /// promptly once the sentence actually ends. Terse commands endpoint on the same
-    /// window; clearly-unfinished input still extends via `incompleteAnswerTimeout`.
-    /// For slower speakers (e.g. hearing-aid users) consider raising to 1.8–2.0s.
+    /// Silence detection on — command + natural-language capture. Short utterances
+    /// commit at the **1.0s** base window (industry command norm — Alexa/Google sit at
+    /// ~0.5–1.0s); a long continuous utterance grows the window via `adaptiveEndpointing`
+    /// (up to `adaptiveMaxWindow` = 2.5s) so sentence-boundary pauses don't cut it, and
+    /// clearly-unfinished input still extends via `incompleteAnswerTimeout` (2.5s). For
+    /// consistently slower speakers (e.g. hearing-aid users) raise `speechEndTimeout` to
+    /// ~1.2s via a custom `SilenceDetectionConfiguration`.
     public static let singleUtterance = SilenceDetectionConfiguration(
         isEnabled: true,
-        speechEndTimeout: 1.5
+        speechEndTimeout: 1.0,
+        adaptiveEndpointing: true
     )
 
     /// Endpointing for slot answers (replies to a follow-up question). Uses a

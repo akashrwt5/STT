@@ -14,10 +14,11 @@ final class SilenceDetectionConfigurationTests: XCTestCase {
         XCTAssertFalse(SilenceDetectionConfiguration.disabled.isEnabled)
     }
 
-    func testSingleUtteranceIsTunedForSentenceCapture() {
+    func testSingleUtteranceBaseWindowAndAdaptive() {
         let c = SilenceDetectionConfiguration.singleUtterance
         XCTAssertTrue(c.isEnabled)
-        XCTAssertEqual(c.speechEndTimeout, 1.5, accuracy: 0.0001)
+        XCTAssertEqual(c.speechEndTimeout, 1.0, accuracy: 0.0001)   // industry command base
+        XCTAssertTrue(c.adaptiveEndpointing)                        // grows for long utterances
     }
 
     func testSlotAnswerWindows() {
@@ -32,13 +33,18 @@ final class SilenceDetectionConfigurationTests: XCTestCase {
         let c = SilenceDetectionConfiguration(isEnabled: true)
         XCTAssertEqual(c.thresholdDBFS, -45, accuracy: 0.0001)
         XCTAssertEqual(c.noSpeechTimeout, 5.0, accuracy: 0.0001)
-        // Runaway guard — high on purpose (Dialogflow-parity), never the "hang" lever.
-        XCTAssertEqual(c.maxUtteranceDuration, 60.0, accuracy: 0.0001)
+        // Runaway guard — matches Amazon Lex max-speech 12s (+3s ceiling = 15s).
+        XCTAssertEqual(c.maxUtteranceDuration, 12.0, accuracy: 0.0001)
         // Knobs promoted from hardcoded constants.
         XCTAssertEqual(c.noiseFloorMarginDB, 12.0, accuracy: 0.0001)
         XCTAssertEqual(c.initialNoiseFloorDBFS, -60.0, accuracy: 0.0001)
         XCTAssertEqual(c.maxUtteranceWordBoundaryGrace, 0.35, accuracy: 0.0001)
         XCTAssertEqual(c.maxUtteranceHardCeiling, 3.0, accuracy: 0.0001)
+        // Adaptive endpointing defaults (off unless a preset enables it).
+        XCTAssertFalse(c.adaptiveEndpointing)
+        XCTAssertEqual(c.adaptiveGraceStart, 3.0, accuracy: 0.0001)
+        XCTAssertEqual(c.adaptiveSlope, 0.12, accuracy: 0.0001)
+        XCTAssertEqual(c.adaptiveMaxWindow, 2.5, accuracy: 0.0001)
     }
 
     func testCustomValuesAreStored() {
