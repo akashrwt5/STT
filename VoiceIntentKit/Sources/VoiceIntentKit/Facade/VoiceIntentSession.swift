@@ -44,12 +44,21 @@ public final class VoiceIntentSession {
 
     private let config: VoiceIntentConfiguration
     private let continuation: AsyncStream<VoiceIntentEvent>.Continuation
-    private let coordinator = TranscriptionCoordinator()
+    private let coordinator: TranscriptionCoordinator
+    /// Non-nil only for `.appProvided` audio — the push target for `provideAudio(_:)`.
+    private let appAudio: AppAudioInputProvider?
     private let speaker = ConversationSpeaker()
     private var engine: (any ConversationEngine)?
     private var started = false
     /// True after a follow-up/confirmation, so the mic auto-restarts to hear the answer.
     private var awaitingAnswer = false
+    /// Generation tag for the external-TTS delivery watchdog. A fresh
+    /// `awaitHostDelivery()` or a `hostDidFinishSpeaking()` bumps it so a pending timer
+    /// can never advance a turn that already moved on.
+    private var hostDeliveryGeneration = 0
+    /// Safety net: if the host never calls `hostDidFinishSpeaking()` in external-TTS
+    /// mode, advance anyway after this long instead of sticking in `.speaking` forever.
+    private static let externalDeliveryTimeoutSeconds: Double = 30
     private let logger = Logger(subsystem: "com.voiceintentkit", category: "VoiceIntentSession")
 
     // MARK: - Init
@@ -64,6 +73,19 @@ public final class VoiceIntentSession {
     public init(configuration: VoiceIntentConfiguration) {
         self.config = configuration
         (self.events, self.continuation) = AsyncStream<VoiceIntentEvent>.makeStream()
+
+        // Build the audio pipeline for the requested source. For `.appProvided` the
+        // coordinator is told it does NOT own the AVAudioSession, and a push provider
+        // is created for `provideAudio(_:)` to feed.
+        switch configuration.audioSource {
+        case .microphone:
+            self.appAudio = nil
+            self.coordinator = TranscriptionCoordinator()
+        case .appProvided(let sampleRate):
+            let provider = AppAudioInputProvider(sampleRate: sampleRate)
+            self.appAudio = provider
+            self.coordinator = TranscriptionCoordinator(appAudioProvider: provider)
+        }
 
         speaker.onFinish = { [weak self] in self?.handleSpeechFinished() }
         speaker.onCancel = { [weak self] in self?.handleSpeechCancelled() }
@@ -81,6 +103,13 @@ public final class VoiceIntentSession {
     /// - Throws: a transcription error if microphone/speech permissions are denied
     ///   or the audio session cannot start.
     public func start() async throws {
+        // Fail-fast: app-owned audio owns the AVAudioSession, so the package's internal
+        // TTS cannot reliably play. Refuse the combination loudly rather than dropping
+        // prompts silently. The host must use external TTS (speaksPrompts == false).
+        if case .appProvided = config.audioSource, config.speaksPrompts {
+            throw VoiceIntentConfigurationError.internalTTSUnavailableWithAppProvidedAudio
+        }
+
         // Only re-enter from a quiescent state. `.listening` / `.thinking` /
         // `.speaking` / `.preparing` mean a session is already in flight.
         guard state == .idle || state == .stopped else { return }
@@ -127,7 +156,9 @@ public final class VoiceIntentSession {
         try? await coordinator.switchLocale(to: config.language.localeIdentifier)
 
         coordinator.delegate = self
-        coordinator.silenceConfiguration = config.autoStopOnSilence ? .singleUtterance : .disabled
+        coordinator.silenceConfiguration = config.autoStopOnSilence
+            ? (config.commandSilence ?? .singleUtterance)
+            : .disabled
         coordinator.endpointArbiter = { [weak self] text in
             guard let self, let engine = self.engine else { return .complete }
             return await engine.assessSlotAnswer(text)
@@ -153,6 +184,40 @@ public final class VoiceIntentSession {
     public func reset() async {
         awaitingAnswer = false
         await engine?.reset()
+    }
+
+    // MARK: - App-provided audio
+
+    /// Feeds one chunk of raw **Int16 mono** PCM (at the sample rate given in
+    /// `.appProvided`) into the recognition pipeline.
+    ///
+    /// No-op unless the session was created with `audioSource == .appProvided`. Audio
+    /// pushed while the session is not `.listening` is dropped, so trailing audio from
+    /// one turn cannot bleed into the next — feed only while `state == .listening`
+    /// (observe the `.stateChanged` event). Safe to call from a real-time audio thread.
+    public func provideAudio(_ data: Data) {
+        appAudio?.enqueue(data)
+    }
+
+    // MARK: - External TTS
+
+    /// Call from the host after it finishes delivering a prompt or result (speaking or
+    /// showing it) in external-TTS mode (`speaksPrompts == false`). This advances the
+    /// conversation: resume listening for the user's answer, restart for the next
+    /// command (continuous mode), or go idle.
+    ///
+    /// Required in external-TTS mode — the session deliberately does NOT reopen the mic
+    /// after emitting a prompt until you signal here, so your own speech is never
+    /// captured as the user's answer and the mic never reopens before the user has heard
+    /// the prompt. Without this call the session waits indefinitely in `.speaking`.
+    ///
+    /// No-op when the package's internal TTS is active (it advances itself), or when the
+    /// session is not currently awaiting host delivery.
+    public func hostDidFinishSpeaking() {
+        guard !config.speaksPrompts else { return }   // internal TTS drives its own advance
+        guard state == .speaking else { return }       // only valid while delivering a prompt
+        hostDeliveryGeneration &+= 1                    // invalidate the pending watchdog
+        handleTurnAdvance()
     }
 
     // MARK: - Text-only classification (no microphone)
@@ -187,14 +252,19 @@ public final class VoiceIntentSession {
     private func buildEngine() async throws -> any ConversationEngine {
         let code = config.language.languageCode
         let url = try await config.packProvider.packURL(for: code)
-        let stopwords = config.fuzzyStopwords
+        let configStopwords = config.fuzzyStopwords
+        let configTrailing = config.trailingFunctionWords
         let trust = config.trust
 
         // Off the main actor: signature verification, sha256 over every file,
         // JSON decode and a CoreML load.
         return try await Task.detached(priority: .userInitiated) {
             let pack = try BundleDataLoader.load(packAt: url, language: code, trust: trust)
-            return try PackEngineFactory.makeEngine(pack: pack, stopwords: stopwords)
+            let stopwords = configStopwords ?? pack.lexicon.fuzzyStopwords.map { Set($0) }
+            let trailingWords = configTrailing ?? pack.lexicon.trailingFunctionWords.map { Set($0) }
+            return try PackEngineFactory.makeEngine(
+                pack: pack, stopwords: stopwords, trailingFunctionWords: trailingWords
+            )
         }.value
     }
 
@@ -203,8 +273,8 @@ public final class VoiceIntentSession {
     private func beginListening() async throws {
         // Slot answers get the unhurried window; first commands the standard one.
         coordinator.silenceConfiguration = awaitingAnswer
-            ? .slotAnswer
-            : (config.autoStopOnSilence ? .singleUtterance : .disabled)
+            ? (config.slotAnswerSilence ?? .slotAnswer)
+            : (config.autoStopOnSilence ? (config.commandSilence ?? .singleUtterance) : .disabled)
         try await coordinator.startLiveTranscription()
         state = .listening
     }
@@ -236,7 +306,8 @@ public final class VoiceIntentSession {
             continuation.yield(.turn(.notUnderstood(
                 fallbackURL: url, confidence: confidence,
                 stages: Self.stages(from: bd))))
-            finishTurnIfNeeded()
+            // External TTS: the host may want to speak "didn't understand" — wait for it.
+            if config.speaksPrompts { finishTurnIfNeeded() } else { awaitHostDelivery() }
 
         case .interrupted(let cancelled, let inner):
             continuation.yield(.turn(.interrupted(cancelledIntent: cancelled)))
@@ -273,13 +344,20 @@ public final class VoiceIntentSession {
     // MARK: - Speech (TTS)
 
     private func ask(_ question: String) {
-        guard config.speaksPrompts else { finishTurnIfNeeded(); return }
-        speakSerialized(question)
+        if config.speaksPrompts {
+            speakSerialized(question)          // internal TTS: onFinish advances the turn
+        } else {
+            awaitHostDelivery()                // external TTS: wait for hostDidFinishSpeaking()
+        }
     }
 
     private func announce(_ message: String) {
-        guard config.speaksPrompts, !message.isEmpty else { finishTurnIfNeeded(); return }
-        speakSerialized(message)
+        if config.speaksPrompts {
+            guard !message.isEmpty else { finishTurnIfNeeded(); return }
+            speakSerialized(message)
+        } else {
+            awaitHostDelivery()                // external TTS: host delivers the result
+        }
     }
 
     /// Stops the mic (keeping the audio session active), waits for the recognizer to
@@ -297,6 +375,15 @@ public final class VoiceIntentSession {
 
     private func handleSpeechFinished() {
         state = .thinking   // brief transitional state between speaking and next action
+        handleTurnAdvance()
+    }
+
+    /// The single place that decides what happens once a turn's prompt/result has been
+    /// delivered: resume listening for the answer, restart for the next command
+    /// (continuous mode), or go idle (single-utterance, conversation done). Driven by
+    /// the internal TTS finishing (`handleSpeechFinished`), by `hostDidFinishSpeaking()`
+    /// in external-TTS mode, or immediately for turns with nothing to speak.
+    private func handleTurnAdvance() {
         if awaitingAnswer {
             // Mid-conversation: listen for the user's answer.
             Task { try? await beginListening() }
@@ -306,6 +393,26 @@ public final class VoiceIntentSession {
         } else {
             // Single-utterance mode, conversation done — leave the mic off.
             state = .idle
+        }
+    }
+
+    /// External-TTS hold: the turn's text has been emitted on `events`; the host is now
+    /// delivering it (speaking / showing). Stay here — do NOT reopen the mic or go idle
+    /// — until the host calls `hostDidFinishSpeaking()`. This is what keeps the host's
+    /// own speech from being captured as the user's answer, and keeps the mic from
+    /// reopening before the user has heard the prompt.
+    private func awaitHostDelivery() {
+        state = .speaking
+        // Arm the watchdog so a host that forgets to signal can't wedge the session.
+        hostDeliveryGeneration &+= 1
+        let generation = hostDeliveryGeneration
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Self.externalDeliveryTimeoutSeconds))
+            guard let self,
+                  generation == self.hostDeliveryGeneration,
+                  self.state == .speaking else { return }
+            self.logger.warning("External-TTS watchdog: hostDidFinishSpeaking() not called within \(Self.externalDeliveryTimeoutSeconds)s — advancing to avoid a stuck session.")
+            self.handleTurnAdvance()
         }
     }
 
@@ -319,13 +426,7 @@ public final class VoiceIntentSession {
     /// `.thinking` forever (there's no `didFinishSpeaking` callback to fire)
     /// and consumers watching `.stateChanged` for `.idle` never see it.
     private func finishTurnIfNeeded() {
-        if awaitingAnswer {
-            Task { try? await beginListening() }
-        } else if !config.autoStopOnSilence {
-            Task { try? await beginListening() }
-        } else {
-            state = .idle
-        }
+        handleTurnAdvance()
     }
 }
 

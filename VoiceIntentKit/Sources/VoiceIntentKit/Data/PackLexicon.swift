@@ -31,12 +31,17 @@ public struct PackLexicon: Decodable, Sendable {
     /// this table entirely.
     public let contractions: [String: String]
     public let datetime: DateTimeGrammar
+    
+    public let fuzzyStopwords: [String]?
+    public let trailingFunctionWords: [String]?
 
     enum CodingKeys: String, CodingKey {
         case lang, affirmative, negative, carriers, contractions
         case negationCues = "negation_cues"
         case leadingConnectors = "leading_connectors"
         case datetime = "datetime_grammar"
+        case fuzzyStopwords
+        case trailingFunctionWords
     }
 
     public init(from decoder: Decoder) throws {
@@ -49,6 +54,8 @@ public struct PackLexicon: Decodable, Sendable {
         leadingConnectors = try c.decode([String].self, forKey: .leadingConnectors)
         contractions = try c.decodeIfPresent([String: String].self, forKey: .contractions) ?? [:]
         datetime = try c.decode(DateTimeGrammar.self, forKey: .datetime)
+        fuzzyStopwords = try c.decodeIfPresent([String].self, forKey: .fuzzyStopwords)
+        trailingFunctionWords = try c.decodeIfPresent([String].self, forKey: .trailingFunctionWords)
     }
 }
 

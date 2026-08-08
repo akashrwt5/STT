@@ -64,6 +64,10 @@ public final class TranscriptionCoordinator {
     // create AVAudioEngine/AVAudioFile which are @MainActor-isolated in iOS 26.
     private let captureServiceFactory: @MainActor () -> any AudioInputProvider
     private let fileServiceFactory: @MainActor (URL) -> any AudioInputProvider
+    /// False when the host owns the microphone + `AVAudioSession` (app-provided audio):
+    /// the coordinator then skips session configuration, route management, interruption
+    /// handling, and microphone-permission requests.
+    private let ownsAudioSession: Bool
 
     private var activeProvider: (any AudioInputProvider)?
     /// The reusable live-mic provider. Created once and reused across sessions so each
@@ -99,7 +103,8 @@ public final class TranscriptionCoordinator {
         recognitionService: SpeechRecognitionService,
         captureServiceFactory: @MainActor @escaping () -> any AudioInputProvider = { AudioCaptureService() },
         fileServiceFactory: @MainActor @escaping (URL) -> any AudioInputProvider = { FileCaptureService(fileURL: $0) },
-        locale: Locale? = nil
+        locale: Locale? = nil,
+        ownsAudioSession: Bool = true
     ) {
         let (stream, continuation) = AsyncStream<TranscriptionResult>.makeStream()
         self.results = stream
@@ -109,6 +114,7 @@ public final class TranscriptionCoordinator {
         self.recognitionService = recognitionService
         self.captureServiceFactory = captureServiceFactory
         self.fileServiceFactory = fileServiceFactory
+        self.ownsAudioSession = ownsAudioSession
 
         // Default to en-IN; will be resolved asynchronously in startLiveTranscription/transcribeFile
         // if no explicit locale is provided.
@@ -128,6 +134,22 @@ public final class TranscriptionCoordinator {
             sessionManager: AudioSessionManager(),
             recognitionService: recognitionService,
             locale: defaultLocale
+        )
+    }
+
+    /// Convenience initializer for host-owned audio. The given `AppAudioInputProvider`
+    /// is fed by the app via `provideAudio`; the coordinator does not open the mic or
+    /// touch the `AVAudioSession` (`ownsAudioSession: false`).
+    public convenience init(appAudioProvider: AppAudioInputProvider) {
+        let savedOverride = UserDefaults.standard.string(forKey: localeDefaultsKey)
+        let defaultLocale = Locale(identifier: savedOverride ?? "en-IN")
+        let recognitionService = SpeechRecognitionService(locale: defaultLocale)
+        self.init(
+            sessionManager: AudioSessionManager(),
+            recognitionService: recognitionService,
+            captureServiceFactory: { appAudioProvider },
+            locale: defaultLocale,
+            ownsAudioSession: false
         )
     }
 
@@ -224,7 +246,8 @@ public final class TranscriptionCoordinator {
         guard !state.isActive, state != .stopping else { return }
 
         transition(to: .requestingPermissions)
-        try await requestPermissionsOrThrow()
+        // App-owned audio: host handles mic permission; we still need speech-recognition auth.
+        try await requestPermissionsOrThrow(requiresMicrophone: ownsAudioSession)
         phase("permissions")
 
         // Resolve the locale asynchronously now that we're in an async context.
@@ -232,9 +255,13 @@ public final class TranscriptionCoordinator {
         phase("resolveLocale")
         transition(to: .preparingAudio)
 
-        try await sessionManager.configure()
+        // App-owned audio: the host owns the AVAudioSession (category, activation, route,
+        // interruptions), so the coordinator must not configure or inspect it.
+        if ownsAudioSession {
+            try await sessionManager.configure()
+            currentRoute = sessionManager.currentRoute
+        }
         phase("sessionConfigure")
-        currentRoute = sessionManager.currentRoute
         currentTranscript = ""
 
         let provider = liveProvider ?? captureServiceFactory()
@@ -279,7 +306,7 @@ public final class TranscriptionCoordinator {
             activeProvider?.stop()
             activeProvider = nil
             let t1 = CFAbsoluteTimeGetCurrent()
-            if deactivateSession {
+            if deactivateSession && ownsAudioSession {
                 sessionManager.tearDown()
             }
             let tearMs = (CFAbsoluteTimeGetCurrent() - t1) * 1000
@@ -301,7 +328,7 @@ public final class TranscriptionCoordinator {
     /// `recognitionServiceDidDetectSilence`); the owning screen calls this on dismiss
     /// so the session doesn't outlive the conversation.
     public func releaseAudioSession() {
-        guard state == .idle else { return }
+        guard ownsAudioSession, state == .idle else { return }
         sessionManager.tearDown()
     }
 

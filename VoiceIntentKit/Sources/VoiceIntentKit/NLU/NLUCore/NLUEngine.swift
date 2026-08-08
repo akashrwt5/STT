@@ -47,6 +47,10 @@ public actor NLUEngine: ConversationEngine {
     /// that default is a safety net rather than a path anything takes.
     /// See `ConfirmationGate`.
     private let confirmationGates: [String: ConfirmationGate]
+    /// Language-specific connective/function words that signal a mid-thought pause when
+    /// a stable transcript ends on one. Injected from the host/pack; defaults to the
+    /// English set when not supplied. See `endsWithTrailingFunctionWord`.
+    private let trailingFunctionWords: Set<String>
 
     // MARK: - Init
     //
@@ -72,6 +76,9 @@ public actor NLUEngine: ConversationEngine {
         uncertain: [String],
         noIdioms: [String],
         carriers: [String],
+        /// Language-specific trailing function words. `nil` → the English default set,
+        /// preserving prior behaviour for English packs.
+        trailingFunctionWords: Set<String>? = nil,
         // Empty by default, which is a no-op — the pre-pack path never had this
         // step, so leaving it out keeps that path byte-identical.
         leadingConnectors: [String] = [],
@@ -88,6 +95,7 @@ public actor NLUEngine: ConversationEngine {
         self.noIdioms = noIdioms
         self.carrierPatterns = carriers
         self.confirmationGates = confirmationGates
+        self.trailingFunctionWords = trailingFunctionWords ?? []
 
         // Longest first so "regarding" is not pre-empted by a shorter word that
         // prefixes it, and `(?:\s+|$)` so a connector that is the ENTIRE
@@ -443,7 +451,7 @@ public actor NLUEngine: ConversationEngine {
             // so extend the window instead of committing at the fast timeout. Anything
             // else endpoints normally. This gives first commands the same short-pause
             // tolerance that slot answers already had.
-            return Self.endsWithTrailingFunctionWord(text) ? .incomplete : .complete
+            return endsWithTrailingFunctionWord(text) ? .incomplete : .complete
         }
 
         if entities.isDateTime(slot.entity) {
@@ -459,7 +467,7 @@ public actor NLUEngine: ConversationEngine {
             // A free-text answer whose last word is a connective/function word is
             // almost certainly mid-phrase ("going out for a…"). English-only
             // heuristic; other languages skip it and report .freeform.
-            if Self.endsWithTrailingFunctionWord(trimmed) { return .incomplete }
+            if endsWithTrailingFunctionWord(trimmed) { return .incomplete }
             // Free text can never be VERIFIED complete ("drink" vs "drink water") —
             // report .freeform so the endpoint uses the medium window, tolerating a
             // mid-topic thinking pause without paying the full extended wait.
@@ -472,17 +480,11 @@ public actor NLUEngine: ConversationEngine {
     /// Words that essentially never end a complete English phrase. A stable
     /// transcript ending in one of these is mid-thought — extend the endpoint
     /// window rather than committing the turn.
-    private static let trailingFunctionWords: Set<String> = [
-        "a", "an", "the", "to", "for", "at", "in", "on", "of", "and", "or",
-        "my", "me", "our", "your", "with", "about", "that", "this", "by",
-        "from", "so", "but", "is", "are", "be", "it", "when", "if", "then"
-    ]
-
-    /// True when the last word of `text` is a connective/function word — a strong
-    /// signal the speaker is mid-thought ("set the volume to…", "remind me to…").
-    /// English-only heuristic; callers for other languages should treat a `false`
-    /// here as "no signal", not "verified complete".
-    private static func endsWithTrailingFunctionWord(_ text: String) -> Bool {
+    ///
+    /// True when the last word of `text` is a connective/function word in the active
+    /// language's set — a strong signal the speaker is mid-thought ("set the volume
+    /// to…", "remind me to…"). A `false` means "no signal", not "verified complete".
+    private func endsWithTrailingFunctionWord(_ text: String) -> Bool {
         let lastWord = text.trimmingCharacters(in: .whitespaces).lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }

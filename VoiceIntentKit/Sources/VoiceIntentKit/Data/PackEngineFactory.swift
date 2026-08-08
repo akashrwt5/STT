@@ -54,7 +54,8 @@ public enum PackEngineFactory {
     /// `SlotResolving`, so the pack-driven implementation is built here where the
     /// pack is.
     public static func makeEngine(pack: ResolvedPack,
-                                  stopwords: Set<String>? = nil) throws -> any ConversationEngine {
+                                  stopwords: Set<String>? = nil,
+                                  trailingFunctionWords: Set<String>? = nil) throws -> any ConversationEngine {
         let classifier = try PackClassifierAdapter(pack: pack)
         let entities = PackSlotResolver(pack: pack, stopwords: stopwords)
 
@@ -85,6 +86,7 @@ public enum PackEngineFactory {
             uncertain: [],
             noIdioms: [],
             carriers: lexicon.carriers,
+            trailingFunctionWords: trailingFunctionWords,
             leadingConnectors: lexicon.leadingConnectors,
             confirmationGates: confirmationGates(from: pack))
 

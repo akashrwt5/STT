@@ -4,7 +4,7 @@ Defects found while making the package data-driven. The pack compiler's own
 tracker lives in the IntentClassifier repo (`docs/BUG_TRACKER.md`); anything
 here is iOS-side, or a contract gap that bites iOS specifically.
 
-**Summary:** 18 fixed, 8 open.
+**Summary:** 18 fixed, 9 open.
 
 Two of the fixes (VIK-015, VIK-016) were found by the parity suite on its first
 run, in code that compiled cleanly and had been read against the reference twice.
@@ -45,6 +45,7 @@ evidence here.
 | VIK-024 | NLU | **High** | `leading_connectors` shipped by every pack, applied by nothing | **Fixed** |
 | VIK-025 | NLU | **High** | Topic stripping mirrored the wrong reference path — 8/20 utterances diverged | **Fixed** |
 | VIK-026 | contract | Med | Grammar cannot say which weekday synonyms are safe to strip | Open |
+| VIK-027 | testing | Med | Facade turn state-machine (external-TTS handoff) not unit-tested — needs a mockable engine/coordinator seam | Open |
 
 ---
 
@@ -621,3 +622,36 @@ Related, and deliberately not worked around: `_en_strip_patterns` has no
 continental clock forms (`15h30`, `15.30`), which the lexicon path does have.
 Adding them now would strip "5.50" out of an English topic to serve a 24-hour
 pack that does not exist yet.
+
+### VIK-027 — Facade turn state-machine is not unit-tested (Med)
+
+The endpointing DECISION math was lifted into `EndpointDecider` (pure, clock-free)
+and is covered by `EndpointDeciderTests`. What remains uncovered is the
+`VoiceIntentSession` turn state-machine — specifically the external-TTS handoff
+sequencing: a prompt emits, the session holds in `.speaking`, and only
+`hostDidFinishSpeaking()` (or the 30s watchdog) advances it to resume listening. The
+turn-advance branching (`awaitingAnswer` → listen, `autoStopOnSilence` → idle vs
+continuous) and the invariant that the mic never reopens before the host has finished
+speaking (no self-capture, no premature reopen) are likewise unverified.
+
+They cannot be unit-tested as written. `VoiceIntentSession` constructs a concrete
+`TranscriptionCoordinator` internally and drives a real `ConversationEngine`, so a
+test cannot advance a turn without a live recognizer, a pack, and a microphone. The
+same is true of the app-provided-audio lifecycle (`.listening` gating of
+`provideAudio`, drop-between-turns) beyond the provider-level unit tests already in
+`AppAudioInputProviderTests`.
+
+**Needs:** a mockable seam — a protocol for the coordinator (start/stop live
+transcription, silence config, delegate callbacks) and injection of the
+`ConversationEngine` — so a test can push a synthetic final result, assert the emitted
+`.turn` event and the `.speaking` hold, call `hostDidFinishSpeaking()`, and assert
+listening resumes; and assert the watchdog auto-advances after the timeout. This is a
+facade refactor with real regression surface, deliberately NOT done alongside the
+endpoint-math extraction so the working facade stays untouched.
+
+**Related debt (not this ticket):** the two `SpeechRecognitionService` copies —
+`VoiceIntentKit/Sources/.../Core/Recognition/` and the app's `STT/STT/Recognition/` —
+have diverged. The endpointing / `isFinal` / app-audio fixes landed only in the
+package copy; the app copy still carries the old behaviour. Consolidating to the
+single package source (per MIGRATION.md Phase 2) removes the drift and the risk of a
+fix being made in one and not the other.

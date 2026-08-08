@@ -40,6 +40,48 @@ public enum VoiceLanguage: Sendable, Equatable {
     }
 }
 
+// MARK: - Audio source
+
+/// Where the session's microphone audio comes from.
+public enum AudioSource: Sendable, Equatable {
+    /// The package opens and manages the built-in microphone, the `AVAudioSession`
+    /// (category, activation, hearing-aid routing), and interruptions. The default.
+    case microphone
+    /// The host app owns the microphone and audio session and feeds raw **Int16 mono**
+    /// PCM via `VoiceIntentSession.provideAudio(_:)`. In this mode the package touches
+    /// no `AVAudioSession` state and requests no microphone permission (it still
+    /// requires speech-recognition authorization, which Apple's transcriber mandates).
+    ///
+    /// The host should feed audio only while the session is `.listening` (observe the
+    /// `.stateChanged` event); audio pushed at other times is dropped.
+    ///
+    /// Requires `speaksPrompts == false` — the app owns the audio session, so the
+    /// package's internal TTS cannot reliably play. Combining the two throws
+    /// `VoiceIntentConfigurationError.internalTTSUnavailableWithAppProvidedAudio`.
+    ///
+    /// - Parameter sampleRate: sample rate of the pushed Int16 mono PCM (e.g. 16_000).
+    case appProvided(sampleRate: Double)
+}
+
+/// A programmer-error configuration that cannot be reconciled at run time. Thrown
+/// from `VoiceIntentSession.start()` before any audio work begins.
+public enum VoiceIntentConfigurationError: Error, Equatable, Sendable, CustomStringConvertible {
+    /// `.appProvided` audio was combined with the package's internal TTS. The app owns
+    /// the `AVAudioSession` in app-provided mode, so `AVSpeechSynthesizer` cannot be
+    /// relied on to play — set `speaksPrompts = false` and speak prompts from the app
+    /// using the `.turn` events.
+    case internalTTSUnavailableWithAppProvidedAudio
+
+    public var description: String {
+        switch self {
+        case .internalTTSUnavailableWithAppProvidedAudio:
+            return "audioSource == .appProvided requires speaksPrompts == false: the app owns "
+                 + "the audio session, so the package's internal TTS cannot play. Speak prompts "
+                 + "from the app using the .turn events."
+        }
+    }
+}
+
 // MARK: - Configuration
 
 /// Everything needed to stand up a session.
@@ -75,6 +117,22 @@ public struct VoiceIntentConfiguration: Sendable {
     /// When true, a turn ends automatically shortly after the user stops speaking.
     /// When false, the session captions continuously until `stop()` is called.
     public var autoStopOnSilence: Bool
+    /// Where microphone audio comes from — the package's own mic (`.microphone`,
+    /// default) or raw PCM the host pushes (`.appProvided`). See `AudioSource`.
+    public var audioSource: AudioSource
+    /// Language-specific connective/function words that mark a stable transcript as
+    /// mid-thought (extending the endpoint window). `nil` uses the built-in English
+    /// set. A non-English pack SHOULD supply its own (e.g. Hindi "ke", "ko", "par"),
+    /// mirroring `fuzzyStopwords`; otherwise mid-thought detection for that language
+    /// falls back to the medium window instead of the extended one.
+    public var trailingFunctionWords: Set<String>?
+    /// Overrides the endpointing windows/thresholds for an initial command turn. `nil`
+    /// uses the tuned default (`.singleUtterance`). Only applied when
+    /// `autoStopOnSilence == true`.
+    public var commandSilence: SilenceDetectionConfiguration?
+    /// Overrides the endpointing windows/thresholds while awaiting a follow-up (slot)
+    /// answer. `nil` uses the tuned default (`.slotAnswer`).
+    public var slotAnswerSilence: SilenceDetectionConfiguration?
     /// When true, the MiniLM semantic-rescue stage (Stage 3) is loaded so
     /// low-confidence utterances get a second opinion. Costs ~16 MB of memory.
     public var loadsSemanticRescue: Bool
@@ -86,7 +144,11 @@ public struct VoiceIntentConfiguration: Sendable {
         speaksPrompts: Bool = true,
         autoStopOnSilence: Bool = true,
         loadsSemanticRescue: Bool = false,
-        fuzzyStopwords: Set<String>? = nil
+        fuzzyStopwords: Set<String>? = nil,
+        audioSource: AudioSource = .microphone,
+        trailingFunctionWords: Set<String>? = nil,
+        commandSilence: SilenceDetectionConfiguration? = nil,
+        slotAnswerSilence: SilenceDetectionConfiguration? = nil
     ) {
         self.language = language
         self.packProvider = packProvider
@@ -95,6 +157,10 @@ public struct VoiceIntentConfiguration: Sendable {
         self.autoStopOnSilence = autoStopOnSilence
         self.loadsSemanticRescue = loadsSemanticRescue
         self.fuzzyStopwords = fuzzyStopwords
+        self.audioSource = audioSource
+        self.trailingFunctionWords = trailingFunctionWords
+        self.commandSilence = commandSilence
+        self.slotAnswerSilence = slotAnswerSilence
     }
 }
 

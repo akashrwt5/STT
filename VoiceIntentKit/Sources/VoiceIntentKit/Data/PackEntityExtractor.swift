@@ -62,16 +62,6 @@ public struct PackEntityExtractor: Sendable {
     /// that happens to be two edits away. Without this list an off-topic
     /// sentence ("who is the prime minister of india") fuzzy-matched an enum
     /// value through a stopword and silently filled a slot.
-    ///
-    /// THIS LIST IS ENGLISH. A French or German pack needs its own, and the pack
-    /// format has nowhere to put it — see `stopwords` on the initialiser.
-    public static let englishFuzzyStopwords: Set<String> = [
-        "the", "a", "an", "of", "to", "in", "on", "at", "is", "it", "as", "by",
-        "be", "or", "and", "for", "with", "who", "what", "when", "where", "why",
-        "how", "my", "me", "you", "your", "i", "we", "he", "she", "they", "this",
-        "that", "these", "those", "please", "can", "could", "would", "do", "does",
-    ]
-
     // MARK: - State
 
     /// entity id → lowercased surface form → canonical value.
@@ -123,16 +113,8 @@ public struct PackEntityExtractor: Sendable {
         self.fuzzyEnabled = fuzzy
         self.dynamicEntities = pack.dynamicEntities
         self.openEntities = openEntities
-        self.stopwords = stopwords ?? Self.englishFuzzyStopwords
+        self.stopwords = stopwords ?? []
         self.log = Logger(subsystem: "com.voiceintentkit", category: "EntityExtractor")
-
-        if stopwords == nil && pack.language != "en" {
-            log.error("""
-                Pack language is '\(pack.language, privacy: .public)' but the fuzzy stopword \
-                list is English — approximate enum matching will misbehave. Supply \
-                language-appropriate stopwords.
-                """)
-        }
     }
 
     /// Designated initialiser for callers that know an entity's fuzzy flag —
