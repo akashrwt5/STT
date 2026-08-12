@@ -4,13 +4,20 @@ import OSLog
 /// Defines the protocol for the Host Application to provide the active inference engine.
 /// Used to run a smoke test before a model is permanently activated.
 public protocol NLUEngineProvider {
-    /// Attempts to initialize the engine and run a lightweight smoke test.
-    /// Should throw an error if the model is corrupted or incompatible.
-    func smokeTest(modelPath: URL, vocabularyPath: URL) throws
-    
+    /// Builds an engine from the *staged* pack and runs a lightweight inference, throwing if the
+    /// pack cannot actually be loaded on this device.
+    ///
+    /// This receives the pack ROOT (the staging directory), not resolved model/vocab paths, so the
+    /// host can load it through the exact same path a live `VoiceIntentSession` uses
+    /// (`BundleDataLoader` + `PackEngineFactory`). That makes the smoke test a true dress rehearsal:
+    /// if it passes, the next session load will succeed; if it throws, the pack is never activated,
+    /// so a crypto-valid but device-unloadable pack can never become `Current`. It is `async`
+    /// because building a CoreML-backed engine and running one classification is async.
+    func smokeTest(packRoot: URL, language: String) async throws
+
     /// Fully loads the model into memory and prepares it for live voice sessions.
     func load(modelPath: URL, vocabularyPath: URL) throws
-    
+
     /// Returns true if the engine is not currently processing audio or holding inference locks.
     var isIdle: Bool { get }
 }
@@ -105,72 +112,88 @@ public final class NLUPackInstaller: @unchecked Sendable {
     }
     
     /// Safely activates the pack that was previously prepared in the staging directory.
-    /// This performs a smoke test and atomically swaps the active directory.
+    /// This runs a real smoke test (async) and then atomically swaps the active directory.
     /// - Parameter language: The language code (e.g., "en").
+    ///
+    /// The smoke test is `async`, and awaiting under a lock is unsafe, so the flow is split into
+    /// three short critical sections — claim → (await smoke test, no lock) → commit — each guarded
+    /// by `stateLock`. The transient `.validating` state between claim and commit means a second,
+    /// racing `activatePreparedPack` is rejected (`commitActive` requires `.validating`).
     public func activatePreparedPack(language: String) async throws {
         logger.info("Activation started for language: \(language)")
-        let start = DispatchTime.now()
 
-        stateLock.lock()
-        defer { stateLock.unlock() }
-
-        guard _stagingState == .readyToActivate, let manifest = preparedManifest else {
-            throw InstallerError.invalidStateForActivation
-        }
-
-        // Ensure we don't disrupt an active voice session
-        guard engineProvider.isIdle else {
-            logger.warning("Activation blocked: Engine is currently busy.")
-            throw InstallerError.activationFailedEngineNotIdle
-        }
-
-        let stagingDir = try storage.stagingDirectory(for: language, clean: false)
+        // 1. Claim: verify we are ready + idle, then move to the transient `.validating` state.
+        let manifest = try claimForActivation()
         let version = manifest.version
+        let stagingDir = try storage.stagingDirectory(for: language, clean: false)
 
         // TOKEN GUARD (C8) — the cached `preparedManifest` is only valid for the exact pack still
-        // sitting in staging. If staging was wiped and rebuilt (e.g. a cancelled prepare followed
-        // by a new one), the cached manifest no longer describes what is on disk. Re-read the
-        // staging bundle.json and refuse to activate unless its version still matches.
+        // sitting in staging. If staging was wiped and rebuilt, refuse to activate.
         let stagedBundleURL = stagingDir.appendingPathComponent("bundle.json")
         guard
             let stagedData = try? Data(contentsOf: stagedBundleURL),
             let stagedManifest = try? JSONDecoder().decode(NLUPackManifest.self, from: stagedData),
             stagedManifest.version == version
         else {
-            _stagingState = .failed
+            markFailed()
             throw InstallerError.invalidStateForActivation
         }
 
-        // SMOKE TEST — Resolve model paths from manifest
-        let resolution: ModelResolution
+        // 2. Real smoke test — build an engine from staging and run one inference. No lock held.
         do {
-            resolution = try manifest.resolveModelPaths(for: language, relativeTo: stagingDir)
+            try await engineProvider.smokeTest(packRoot: stagingDir, language: language)
         } catch {
-            _stagingState = .failed
+            // The model does not load on this device: fail staging, leave the existing on-disk
+            // models untouched. A bad pack never becomes `Current`.
+            markFailed()
             throw InstallerError.smokeTestFailed(error)
         }
 
-        // 1. Independent Smoke Test Block
+        // 3. Commit: atomic activation under the lock.
         do {
-            try engineProvider.smokeTest(modelPath: resolution.modelURL, vocabularyPath: resolution.vocabularyURL)
+            try commitActive(version: version, language: language)
+        } catch is InstallerError {
+            throw InstallerError.invalidStateForActivation
         } catch {
-            // If the model crashes, we fail the staging, but we don't break the existing models on disk.
-            _stagingState = .failed
-            throw InstallerError.smokeTestFailed(error)
-        }
-
-        // 2. Independent Filesystem Activation Block
-        do {
-            // ATOMIC ACTIVATION
-            try storage.commitStagingAndActivate(version: version, for: language)
-
-            // Clear the state
-            self.preparedManifest = nil
-            _stagingState = .active
-        } catch {
-            // Explicitly transition to a failed state if the filesystem operation fails
-            _stagingState = .failed
+            markFailed()
             throw InstallerError.filesystemActivationFailed(error)
         }
+
+        logger.info("Activation completed for language: \(language). Version: \(version)")
+    }
+
+    // MARK: - Activation critical sections
+
+    /// Verifies the installer is ready and the engine is idle, then transitions to the transient
+    /// `.validating` state and returns the prepared manifest. Locked.
+    private func claimForActivation() throws -> NLUPackManifest {
+        stateLock.lock(); defer { stateLock.unlock() }
+        guard _stagingState == .readyToActivate, let manifest = preparedManifest else {
+            throw InstallerError.invalidStateForActivation
+        }
+        // Ensure we don't disrupt an active voice session.
+        guard engineProvider.isIdle else {
+            logger.warning("Activation blocked: Engine is currently busy.")
+            throw InstallerError.activationFailedEngineNotIdle
+        }
+        _stagingState = .validating
+        return manifest
+    }
+
+    /// Commits staging → active atomically. Requires the transient `.validating` state set by
+    /// `claimForActivation`; throws `invalidStateForActivation` if a racing caller changed it. Locked.
+    private func commitActive(version: String, language: String) throws {
+        stateLock.lock(); defer { stateLock.unlock() }
+        guard _stagingState == .validating else {
+            throw InstallerError.invalidStateForActivation
+        }
+        try storage.commitStagingAndActivate(version: version, for: language)
+        self.preparedManifest = nil
+        _stagingState = .active
+    }
+
+    private func markFailed() {
+        stateLock.lock(); defer { stateLock.unlock() }
+        _stagingState = .failed
     }
 }

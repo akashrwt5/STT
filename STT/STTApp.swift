@@ -25,14 +25,33 @@ enum OTAStorageLocator {
     }
 }
 
-// A simple bridge between STT and VoiceIntentKit's engine protocol
-class STTNLUEngineProvider: NLUEngineProvider {
-    var isIdle: Bool { true } // Replace with actual STT engine state
+/// Bridges STT to VoiceIntentKit's OTA engine hooks.
+///
+/// `smokeTest` is a real dress rehearsal: it loads the staged pack through the SAME path a live
+/// `VoiceIntentSession` uses (`BundleDataLoader` + `PackEngineFactory`) and runs one classification.
+/// If it throws, the OTA installer refuses to activate the pack — so a crypto-valid but
+/// device-unloadable pack can never become `Current`.
+final class STTNLUEngineProvider: NLUEngineProvider {
+    /// Trust policy for the smoke-test load. Must match the session's policy.
+    /// TODO: (Security) a production build must use a signing-key policy, not `.unverifiedForTesting`.
+    private let trust: PackTrustPolicy = .unverifiedForTesting
+
+    /// OTA activation never interrupts the live engine in this app — serving happens through
+    /// `VoiceIntentSession`, which loads the freshest pack on its next build (apply-on-next-build).
+    /// So the installer's idle-gate is always satisfiable here.
+    var isIdle: Bool { true }
+
     func load(modelPath: URL, vocabularyPath: URL) throws {
-        // Replace with actual STT engine load
+        // No-op: this app serves via VoiceIntentSession, which loads packs itself. The OTA path is
+        // publish-only and does not load into a separate live engine. Kept to satisfy the protocol.
     }
-    func smokeTest(modelPath: URL, vocabularyPath: URL) throws {
-        // Replace with actual STT engine smoke test
+
+    func smokeTest(packRoot: URL, language: String) async throws {
+        // Load the staged pack exactly as a live session would, and run one inference. Throwing here
+        // aborts activation before the pack becomes `Current`.
+        let pack = try BundleDataLoader.load(packAt: packRoot, language: language, trust: trust)
+        let engine = try PackEngineFactory.makeEngine(pack: pack)
+        _ = await engine.handle("hello")
     }
 }
 
@@ -128,13 +147,13 @@ struct STTApp: App {
             seedPackURL: seedURL
         )
         self.otaManager = NLUOTAManager(voiceClient: self.voiceClient, apiBaseURL: URL(string: "https://stingily-vowed-dutiful.ngrok-free.dev/api/v1/nlu")!)
-        
-        // Asynchronously boot the SDK so the active CoreML model is ready
-        let client = self.voiceClient
-        let language = Self.primaryOTALanguage
-        Task {
-            try? await client.start(for: language)
-        }
+
+        // NOTE: We deliberately do NOT call `voiceClient.start(...)` at launch. In this app the live
+        // NLU is served by `VoiceIntentSession` (see PackageVoiceView), which loads the freshest pack
+        // via `PackProviderForApp` on its next build — the "apply-on-next-build" model. The OTA path
+        // is publish-only: it downloads, verifies and atomically activates a pack on disk; nothing
+        // needs to be pre-loaded into a separate live engine here. `voiceClient` remains as the OTA
+        // orchestration handle used by `otaManager`.
     }
     
     var body: some Scene {
