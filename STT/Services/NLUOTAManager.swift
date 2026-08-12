@@ -20,15 +20,17 @@ fileprivate struct NLUUpdateResponse: Codable {
 public enum OTAUpdateError: LocalizedError {
     case invalidHTTPResponse(Int)
     case downloadFailed
+    case sizeMismatch(expected: Int, got: Int)
     case invalidMetadata
     case cancelled
     case engineBusy
     case sdk(Error)
-    
+
     public var errorDescription: String? {
         switch self {
         case .invalidHTTPResponse(let code): return "Server returned non-200 HTTP response: \(code)"
         case .downloadFailed: return "Download failed with non-200 status code"
+        case .sizeMismatch(let expected, let got): return "Downloaded payload size (\(got) bytes) does not match the advertised size (\(expected) bytes)."
         case .invalidMetadata: return "Invalid metadata in response"
         case .cancelled: return "OTA Update cancelled by the system"
         case .engineBusy: return "Engine never became idle. OTA activation aborted."
@@ -186,12 +188,15 @@ public actor NLUOTAManager {
                 return .failed(.downloadFailed)
             }
             
-            // Verify file size before extraction (Sanity Check)
+            // Verify file size before extraction (hard fail). A size mismatch means the payload is
+            // not what the BFF advertised — a truncated download, a wrong asset, or tampering. We do
+            // NOT proceed and "rely on crypto later": fail fast and cheaply here. (Full Ed25519 +
+            // sha256 verification still runs in preparePack regardless.)
             let fileAttributes = try FileManager.default.attributesOfItem(atPath: tempZipURL.path)
-            if let fileSize = fileAttributes[.size] as? Int, let expectedSize = updateResponse.sizeBytes {
-                if fileSize != expectedSize {
-                    logger.warning("Download size mismatch. Expected: \(expectedSize), Got: \(fileSize). Proceeding anyway, relying on SDK crypto validation.")
-                }
+            if let fileSize = fileAttributes[.size] as? Int, let expectedSize = updateResponse.sizeBytes,
+               fileSize != expectedSize {
+                logger.error("Download size mismatch. Expected: \(expectedSize), Got: \(fileSize). Aborting.")
+                return .failed(.sizeMismatch(expected: expectedSize, got: fileSize))
             }
             
             // 4. Handoff to VoiceIntentKit

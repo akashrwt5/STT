@@ -10,6 +10,21 @@ import ZIPFoundation
 import VoiceIntentSeedPackEN
 #endif
 
+/// Single source of truth for where OTA packs live on disk.
+///
+/// Both the OTA writer (`PackStorageController`, created in `STTApp`) and the read side
+/// (`PackProviderForApp`, which serves the active pack to `VoiceIntentSession`) resolve the same
+/// base here. This is what wires the two halves together: OTA activates a pack under this base,
+/// and the very next `VoiceIntentSession` build reads it back from the same base. If these two
+/// ever computed the location independently they would silently drift — which is exactly the bug
+/// that left downloaded packs unused.
+enum OTAStorageLocator {
+    /// Application Support. `PackStorageController` appends `VoiceIntentKit/Packs` under it.
+    static var baseStorageURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    }
+}
+
 // A simple bridge between STT and VoiceIntentKit's engine protocol
 class STTNLUEngineProvider: NLUEngineProvider {
     var isIdle: Bool { true } // Replace with actual STT engine state
@@ -80,18 +95,30 @@ struct STTApp: App {
         let seedURL = Bundle.main.url(forResource: "en", withExtension: "nlu") ?? URL(fileURLWithPath: "/dev/null")
 #endif
         
-        // Initialize dependencies
-        let storageURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("VoiceIntentKit")
-        
+        // Initialize dependencies.
+        //
+        // The base is Application Support itself. PackStorageController appends its own
+        // `VoiceIntentKit/Packs` under it, so packs live at
+        // `…/Application Support/VoiceIntentKit/Packs/{lang}/…`. Passing an already-`VoiceIntentKit`
+        // suffixed URL here (as before) produced a doubled `VoiceIntentKit/VoiceIntentKit/Packs`
+        // path — and, critically, a path NOTHING on the read side ever looked at.
+        //
+        // OTAStorageLocator.baseStorageURL is the single source of truth for this location so the
+        // OTA writer (here) and the read side (PackProviderForApp) can never drift apart.
+        let storageBase = OTAStorageLocator.baseStorageURL
+
         let storage: PackStorageController
         do {
-            storage = try PackStorageController(baseStorageURL: storageURL, fileManager: .default)
+            storage = try PackStorageController(baseStorageURL: storageBase, fileManager: .default)
         } catch {
-            fatalError("[STT] Critical: Failed to initialize VoiceIntentKit storage at \(storageURL.path). Error: \(error.localizedDescription)")
+            fatalError("[STT] Critical: Failed to initialize VoiceIntentKit storage at \(storageBase.path). Error: \(error.localizedDescription)")
         }
-        
+
         let extractor = STTPackExtractor()
-        let validator = PackValidator(extractor: extractor)
+        // TODO: (Security / ADR-005 Part 11) A release build must pass a production PackTrustPolicy
+        // carrying the real Ed25519 public key(s) and `refusesDevelopmentPacks: true`. This dev
+        // policy skips signature verification — never ship it.
+        let validator = PackValidator(extractor: extractor, trust: .unverifiedForTesting)
         let engineProvider = STTNLUEngineProvider()
         
         self.voiceClient = VoiceIntentClient(

@@ -150,35 +150,48 @@ public struct ModelResolution {
 
 /// Errors thrown when resolving model paths from a manifest.
 public enum ModelResolutionError: Error, LocalizedError {
-    case missingModelInfo(String)
-    case missingCoreMLArtifact
-    
+    case missingModelInfo(component: String, language: String)
+    case missingCoreMLArtifact(component: String)
+
     public var errorDescription: String? {
         switch self {
-        case .missingModelInfo(let lang):
-            return "Manifest missing intent model definition for language '\(lang)'."
-        case .missingCoreMLArtifact:
-            return "Manifest missing compiled CoreML artifact. ONNX is strictly disabled."
+        case .missingModelInfo(let component, let lang):
+            return "Manifest missing '\(component)' model definition for language '\(lang)'."
+        case .missingCoreMLArtifact(let component):
+            return "Manifest missing compiled CoreML artifact for '\(component)'. ONNX is strictly disabled."
         }
     }
 }
 
 extension NLUPackManifest {
-    /// Resolves the CoreML model and vocabulary file paths from this manifest.
-    /// - Parameters:
-    ///   - language: The language code (e.g., "en").
-    ///   - baseURL: The root directory of the extracted pack.
-    /// - Returns: A `ModelResolution` containing the resolved model and vocabulary URLs.
+    /// The model component the OTA activation path loads and smoke-tests. Kept as a named constant
+    /// rather than a literal so adding a second head (e.g. `"semantic_head"`) is an additive change
+    /// — call `resolveModelPaths(for:component:relativeTo:)` with the new name — not an edit to the
+    /// resolution logic (Open/Closed).
+    public static let primaryModelComponent = "intent"
+
+    /// Resolves the primary (`intent`) CoreML model and vocabulary file paths from this manifest.
     public func resolveModelPaths(for language: String, relativeTo baseURL: URL) throws -> ModelResolution {
-        guard let modelInfo = models["intent"]?[language] ?? models["intent"]?["default"] else {
-            throw ModelResolutionError.missingModelInfo(language)
+        try resolveModelPaths(for: language, component: Self.primaryModelComponent, relativeTo: baseURL)
+    }
+
+    /// Resolves the CoreML model and vocabulary file paths for an arbitrary model component.
+    /// - Parameters:
+    ///   - language: The language code (e.g. "en"). Falls back to the `"default"` variant.
+    ///   - component: The model component to resolve (e.g. "intent", "semantic_head").
+    ///   - baseURL: The root directory of the extracted pack.
+    public func resolveModelPaths(for language: String,
+                                  component: String,
+                                  relativeTo baseURL: URL) throws -> ModelResolution {
+        guard let modelInfo = models[component]?[language] ?? models[component]?["default"] else {
+            throw ModelResolutionError.missingModelInfo(component: component, language: language)
         }
-        
+
         // Enforce CoreML usage (ONNX is strictly disabled on iOS)
         guard let artifactPath = modelInfo.coremlCompiledArtifact else {
-            throw ModelResolutionError.missingCoreMLArtifact
+            throw ModelResolutionError.missingCoreMLArtifact(component: component)
         }
-        
+
         let modelURL = baseURL.appendingPathComponent(artifactPath)
         let vocabURL: URL
         if let vocabPath = modelInfo.vocabularyArtifact {
@@ -186,7 +199,7 @@ extension NLUPackManifest {
         } else {
             vocabURL = modelURL.deletingLastPathComponent().appendingPathComponent("vocab.txt")
         }
-        
+
         return ModelResolution(modelURL: modelURL, vocabularyURL: vocabURL)
     }
 }

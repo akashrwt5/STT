@@ -17,21 +17,25 @@ import SwiftUI
 import VoiceIntentKit
 import VoiceIntentSeedPackEN
 
-/// Finds the pack for a language: seeded, already downloaded, or download it.
+/// Finds the pack for a language: the OTA-activated pack if one exists and verifies,
+/// otherwise the bundled seed.
 ///
-/// This is the host half of the contract. VoiceIntentKit ships no data and does
-/// no networking; it asks for a local URL and verifies whatever it is handed.
-/// Three places to look, in order:
+/// This is the host half of the contract, and it is where the OTA subsystem and the live
+/// `VoiceIntentSession` finally meet. VoiceIntentKit ships no data and does no networking; the
+/// `NLUOTAManager` downloads, verifies and atomically publishes a pack to
+/// `PackStorageController`'s `Current` symlink, and this provider reads that same location back.
+/// Two places to look, in order:
 ///
-///   1. a linked seed library — SwiftPM copies it into the app at build time,
-///      so a fresh install works offline with no Xcode file wrangling
-///   2. Application Support — a pack downloaded on an earlier run
-///   3. the network — download it now
+///   1. the OTA-activated pack — `PackStorageController.currentPack(for:)`, under the SAME storage
+///      base the OTA writer uses (`OTAStorageLocator`). Served only if it passes an integrity
+///      pre-check, so a half-written or corrupt `Current` never reaches the session.
+///   2. the bundled seed — SwiftPM copies it into the app at build time, so a fresh install (or a
+///      failed/absent OTA pack) works offline. Same-language fallback only.
 ///
-/// The caller cannot tell these apart, which is the point. `packURL` is `async`,
-/// so step 3 simply takes longer: the session sits in `.preparing` and the UI
-/// says so. No fallback to another language, ever — a wrong-language model
-/// produces confident wrong actions, and this is a hearing aid.
+/// "Apply on next build": because `VoiceIntentSession.buildEngine()` calls this every time it
+/// stands up, an OTA activation is picked up by the very next session with no app restart and no
+/// live hot-swap. No fallback to another LANGUAGE, ever — a wrong-language model produces confident
+/// wrong actions, and this is a hearing aid.
 struct PackProviderForApp: PackProvider {
 
     /// Seed packs linked into this app, by language.
@@ -43,20 +47,30 @@ struct PackProviderForApp: PackProvider {
         VoiceIntentSeedPackEN.language: { VoiceIntentSeedPackEN.url },
     ]
 
-    private static func shipsBundledPack(for language: String) -> Bool {
-        seeds[language] != nil
-    }
+    /// The trust policy used to gate an OTA pack before serving it. Must match the policy the
+    /// session loads with (see `PackageVoiceSessionView`). Dev builds skip signatures; a release
+    /// build must supply a production policy with the real key(s).
+    /// TODO: (Security / ADR-005 Part 11) replace with the production policy for release builds.
+    static let trust: PackTrustPolicy = .unverifiedForTesting
+
+    /// Reads the OTA-activated pack location. Built against the shared `OTAStorageLocator` base so
+    /// it resolves the exact directory the OTA writer publishes into.
+    private static let otaStorage: PackStorageControlling? = {
+        try? PackStorageController(baseStorageURL: OTAStorageLocator.baseStorageURL)
+    }()
 
     func packURL(for language: String) async throws -> URL {
-        // Two SEPARATE questions, deliberately not one `if let` chain:
-        //   · do we claim to ship this language?
-        //   · is it actually in the bundle?
-        //
-        // Collapsing them means a pack that is declared but missing falls
-        // through to the download branch, which then reports "no pack for 'en'"
-        // while listing 'en' as available. That is a real error message this
-        // file produced, and it sent the reader looking for a language problem
-        // when the cause was a missing folder reference in Xcode.
+        // 1. OTA-activated pack — the freshest verified pack, if one has been published. Gated by
+        //    a full integrity check so a corrupt `Current` falls through to the seed instead of
+        //    being handed to the session (which would throw rather than degrade).
+        if let current = Self.otaStorage?.currentPack(for: language),
+           (try? PackIntegrity.verify(packRoot: current, trust: Self.trust)) != nil {
+            return current
+        }
+
+        // 2. Bundled seed — same-language floor. Two SEPARATE questions, deliberately not one
+        //    `if let` chain: do we claim to ship this language, and is it actually in the bundle?
+        //    Collapsing them turns a missing-in-Xcode pack into a misleading "no pack for 'en'".
         if let seed = Self.seeds[language] {
             guard let url = seed() else {
                 throw VoiceIntentError.unreadableFile(
@@ -70,37 +84,8 @@ struct PackProviderForApp: PackProvider {
             }
             return url
         }
-        if let cached = Self.downloadedURL(for: language) {
-            return cached
-        }
-        return try await download(language)
-    }
 
-    // MARK: - Downloaded packs
-
-    private static var packsDirectory: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory,
-                                            in: .userDomainMask)[0]
-        return base.appendingPathComponent("VoicePacks", isDirectory: true)
-    }
-
-    private static func downloadedURL(for language: String) -> URL? {
-        let dir = packsDirectory
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
-        // `pack-<lang>-v<version>` — newest wins if several are present.
-        guard let newest = names.filter({ $0.hasPrefix("pack-\(language)-") }).sorted().last else {
-            return nil
-        }
-        return dir.appendingPathComponent(newest, isDirectory: true)
-    }
-
-    /// Fetch, unpack and return a local URL.
-    ///
-    /// Not built yet — the catalog endpoint and signing-key distribution are
-    /// still open (compiler asks A2/B6c). Throwing a specific error is the
-    /// honest placeholder: the session refuses, the UI says the language is not
-    /// ready, and nothing runs in a language the user did not ask for.
-    private func download(_ language: String) async throws -> URL {
+        // 3. Neither an OTA pack nor a seed for this language.
         throw VoiceIntentError.languageUnavailable(
             requested: language,
             available: Self.seeds.keys.sorted())
@@ -145,20 +130,24 @@ private struct PackageVoiceSessionView: View {
     // multiple turns without re-tapping Start.
     @State private var session: VoiceIntentSession
 
-    init(language: VoiceLanguage, provider: PackProviderForApp) {
-        _session = State(wrappedValue: VoiceIntentSession(configuration: .init(
-            language: language,
-            packProvider: provider,
-            // Dev-signed pack, dev build. A release build must supply the
-            // production public key and refuse dev-signed packs (ADR-005 Part 11).
-            trust: .unverifiedForTesting,
-            autoStopOnSilence: true)))
-    }
-
     @State private var transcript = ""
     @State private var status = "Idle"
     @State private var lastTurn = ""
     @State private var listening = false
+    @State private var packVersion = "Loading..."
+    
+    private let provider: PackProviderForApp
+    private let language: VoiceLanguage
+
+    init(language: VoiceLanguage, provider: PackProviderForApp) {
+        self.language = language
+        self.provider = provider
+        _session = State(wrappedValue: VoiceIntentSession(configuration: .init(
+            language: language,
+            packProvider: provider,
+            trust: .unverifiedForTesting,
+            autoStopOnSilence: true)))
+    }
 
     var body: some View {
         NavigationStack {
@@ -177,6 +166,7 @@ private struct PackageVoiceSessionView: View {
                 .background(.blue.opacity(0.12), in: Capsule())
 
                 Text(status).font(.footnote).foregroundStyle(.secondary)
+                Text("Model: \(packVersion)").font(.caption).foregroundStyle(.tertiary)
                 Text(transcript.isEmpty ? "Say something…" : transcript)
                     .font(.title3).multilineTextAlignment(.center)
                 if !lastTurn.isEmpty {
@@ -212,6 +202,19 @@ private struct PackageVoiceSessionView: View {
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Close") { session.stop(); dismiss() } } }
         }
         .task {
+            do {
+                let url = try await provider.packURL(for: language.languageCode)
+                let bundleURL = url.appendingPathComponent("bundle.json")
+                if let data = try? Data(contentsOf: bundleURL),
+                   let manifest = try? JSONDecoder().decode(NLUPackManifest.self, from: data) {
+                    packVersion = manifest.version
+                } else {
+                    packVersion = "Unknown version"
+                }
+            } catch {
+                packVersion = "Error loading pack"
+            }
+            
             for await event in session.events {
                 switch event {
                 case .partialTranscript(let t), .finalTranscript(let t):

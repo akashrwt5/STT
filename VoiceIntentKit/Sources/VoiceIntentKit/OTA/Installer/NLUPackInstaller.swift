@@ -3,7 +3,7 @@ import OSLog
 
 /// Defines the protocol for the Host Application to provide the active inference engine.
 /// Used to run a smoke test before a model is permanently activated.
-public protocol NLUEngineProvider: Sendable {
+public protocol NLUEngineProvider {
     /// Attempts to initialize the engine and run a lightweight smoke test.
     /// Should throw an error if the model is corrupted or incompatible.
     func smokeTest(modelPath: URL, vocabularyPath: URL) throws
@@ -35,23 +35,35 @@ public enum InstallerError: Error, LocalizedError {
     }
 }
 
-/// The main orchestration actor for NLU over-the-air updates.
+/// The main orchestration class for NLU over-the-air updates.
 /// The Host Application uses this to prepare downloaded zips and activate them when safe.
 ///
-/// Thread Safety: Native actor isolation protects mutable staging state.
-public actor NLUPackInstaller {
-    
+/// Thread safety: the mutable state (`preparedManifest`, `stagingState`) is guarded by the
+/// internal `stateLock` below — NOT by an assumption that some upstream actor serializes callers.
+/// `preparePack`/`activatePreparedPack` do no `await` inside the critical section, so holding the
+/// lock across each call is safe and cannot deadlock.
+public final class NLUPackInstaller: @unchecked Sendable {
+
     private let storage: PackStorageControlling
     private let validator: PackValidating
     private let engineProvider: NLUEngineProvider
-    
+
     private let logger = Logger(subsystem: "com.starkey.voiceintentkit", category: "OTAInstaller")
-    
+
+    /// Serializes access to `preparedManifest` and `stagingState`.
+    private let stateLock = NSLock()
+
     /// The parsed manifest from the most recent prepare operation.
     private var preparedManifest: NLUPackManifest?
-    
+
     /// Tracks the state of the pack currently sitting in the staging directory.
-    public private(set) var stagingState: PackState = .downloaded
+    private var _stagingState: PackState = .downloaded
+
+    /// The state of the pack currently sitting in the staging directory. Thread-safe.
+    public var stagingState: PackState {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return _stagingState
+    }
     
     public init(storage: PackStorageControlling, validator: PackValidating, engineProvider: NLUEngineProvider) {
         self.storage = storage
@@ -68,24 +80,27 @@ public actor NLUPackInstaller {
     public func preparePack(from packageURL: URL, language: String) async throws -> NLUPackManifest {
         logger.info("Preparation started for language: \(language)")
         let start = DispatchTime.now()
-        
-        stagingState = .downloaded
-        
+
+        stateLock.lock()
+        defer { stateLock.unlock() }
+
+        _stagingState = .downloaded
+
         // 1. Get a clean staging directory
         let stagingDir = try storage.stagingDirectory(for: language, clean: true)
-        
+
         // 2. Extract and Validate
-        stagingState = .validating
+        _stagingState = .validating
         let manifest = try validator.extractAndValidate(from: packageURL, into: stagingDir)
-        
+
         // 3. Mark as Ready
         // If validation succeeds, the package remains in `staging` safely until activation.
         self.preparedManifest = manifest
-        stagingState = .readyToActivate
-        
+        _stagingState = .readyToActivate
+
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000_000
         logger.info("Preparation completed successfully in \(elapsed)s. State: readyToActivate.")
-        
+
         return manifest
     }
     
@@ -95,49 +110,66 @@ public actor NLUPackInstaller {
     public func activatePreparedPack(language: String) async throws {
         logger.info("Activation started for language: \(language)")
         let start = DispatchTime.now()
-        
-        guard stagingState == .readyToActivate, let manifest = preparedManifest else {
+
+        stateLock.lock()
+        defer { stateLock.unlock() }
+
+        guard _stagingState == .readyToActivate, let manifest = preparedManifest else {
             throw InstallerError.invalidStateForActivation
         }
-        
+
         // Ensure we don't disrupt an active voice session
         guard engineProvider.isIdle else {
             logger.warning("Activation blocked: Engine is currently busy.")
             throw InstallerError.activationFailedEngineNotIdle
         }
-        
+
         let stagingDir = try storage.stagingDirectory(for: language, clean: false)
         let version = manifest.version
-        
+
+        // TOKEN GUARD (C8) — the cached `preparedManifest` is only valid for the exact pack still
+        // sitting in staging. If staging was wiped and rebuilt (e.g. a cancelled prepare followed
+        // by a new one), the cached manifest no longer describes what is on disk. Re-read the
+        // staging bundle.json and refuse to activate unless its version still matches.
+        let stagedBundleURL = stagingDir.appendingPathComponent("bundle.json")
+        guard
+            let stagedData = try? Data(contentsOf: stagedBundleURL),
+            let stagedManifest = try? JSONDecoder().decode(NLUPackManifest.self, from: stagedData),
+            stagedManifest.version == version
+        else {
+            _stagingState = .failed
+            throw InstallerError.invalidStateForActivation
+        }
+
         // SMOKE TEST — Resolve model paths from manifest
         let resolution: ModelResolution
         do {
             resolution = try manifest.resolveModelPaths(for: language, relativeTo: stagingDir)
         } catch {
-            stagingState = .failed
+            _stagingState = .failed
             throw InstallerError.smokeTestFailed(error)
         }
-        
+
         // 1. Independent Smoke Test Block
         do {
             try engineProvider.smokeTest(modelPath: resolution.modelURL, vocabularyPath: resolution.vocabularyURL)
         } catch {
             // If the model crashes, we fail the staging, but we don't break the existing models on disk.
-            stagingState = .failed
+            _stagingState = .failed
             throw InstallerError.smokeTestFailed(error)
         }
-        
+
         // 2. Independent Filesystem Activation Block
         do {
             // ATOMIC ACTIVATION
             try storage.commitStagingAndActivate(version: version, for: language)
-            
+
             // Clear the state
             self.preparedManifest = nil
-            stagingState = .active
+            _stagingState = .active
         } catch {
             // Explicitly transition to a failed state if the filesystem operation fails
-            stagingState = .failed
+            _stagingState = .failed
             throw InstallerError.filesystemActivationFailed(error)
         }
     }

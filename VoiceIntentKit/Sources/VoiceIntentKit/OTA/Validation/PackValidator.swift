@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 
 /// Protocol allowing the Host App to inject their preferred ZIP extraction library (e.g., ZIPFoundation).
 /// This keeps VoiceIntentKit a thin SDK without forcing 3rd party dependencies.
@@ -13,19 +12,24 @@ public protocol PackValidating {
     func extractAndValidate(from packageURL: URL, into stagingDirectory: URL) throws -> NLUPackManifest
 }
 
-/// Responsible for extracting the OTA package, parsing the manifest, and verifying cryptographic integrity.
+/// Responsible for extracting the OTA package, parsing the manifest, and verifying its
+/// integrity and authenticity.
+///
+/// The trust chain itself is NOT reimplemented here — it delegates to `PackIntegrity.verify`,
+/// the same Ed25519 + sha256 chain the live `VoiceIntentSession` runs when it loads a pack. That
+/// makes OTA validation and session load use ONE verifier and ONE `PackTrustPolicy`, instead of
+/// the two divergent implementations that existed before (this class used to bypass signatures
+/// when a key was absent and had an empty checksum stub).
 public final class PackValidator: PackValidating {
-    
+
     public enum ValidationError: Error, LocalizedError {
         case extractionFailed(Error)
         case missingBundleJSON
         case invalidBundleJSON(Error)
         case unsupportedFormatVersion(String)
         case incompatibleEngine(required: Int, current: Int)
-        case signatureVerificationFailed
-        case checksumMismatch(file: String)
-        case missingRequiredArtifact(String)
-        
+        case integrityCheckFailed(Error)
+
         public var errorDescription: String? {
             switch self {
             case .extractionFailed(let e): return "Failed to extract package: \(e.localizedDescription)"
@@ -33,36 +37,38 @@ public final class PackValidator: PackValidating {
             case .invalidBundleJSON(let e): return "Failed to parse bundle.json: \(e.localizedDescription)"
             case .unsupportedFormatVersion(let v): return "Unsupported format version: \(v)."
             case .incompatibleEngine(let required, let current): return "Incompatible engine. Required: \(required), Current: \(current)."
-            case .signatureVerificationFailed: return "Cryptographic signature verification failed."
-            case .checksumMismatch(let file): return "Checksum mismatch for file: \(file)."
-            case .missingRequiredArtifact(let file): return "Missing required artifact: \(file)."
+            case .integrityCheckFailed(let e): return "Package integrity/authenticity verification failed: \(e.localizedDescription)"
             }
         }
     }
-    
+
     private let fileManager: FileManager
     private let extractor: PackExtractor
-    
+
     /// The current runtime contract of the VoiceIntentKit engine.
     /// This should be bumped when breaking changes are made to inference logic.
     public let currentRuntimeContract = 1
-    
-    /// The Ed25519 public key used to verify the `dev-key-golden` signatures.
-    /// In production, this should be securely embedded or retrieved.
-    /// TODO: (Security) Make this non-optional in the next release to enforce authenticity.
-    private let trustedPublicKeyBase64: String?
-    
-    public init(fileManager: FileManager = .default, extractor: PackExtractor, trustedPublicKeyBase64: String? = nil) {
+
+    /// Who is allowed to have signed an OTA pack, and how strict to be. Required — there is no
+    /// nil bypass. Pass `.unverifiedForTesting` explicitly (dev builds only) to skip signatures;
+    /// a production trust policy has `refusesDevelopmentPacks == true`, which makes the skip path
+    /// unreachable.
+    private let trust: PackTrustPolicy
+    private let loadPolicy: PackLoadPolicy
+
+    public init(fileManager: FileManager = .default,
+                extractor: PackExtractor,
+                trust: PackTrustPolicy,
+                loadPolicy: PackLoadPolicy = .default) {
         self.fileManager = fileManager
         self.extractor = extractor
-        self.trustedPublicKeyBase64 = trustedPublicKeyBase64
+        self.trust = trust
+        self.loadPolicy = loadPolicy
     }
-    
-    /// Extracts the package and validates its structure, compatibility, and cryptographic signatures.
-    /// - Parameters:
-    ///   - packageURL: The URL of the downloaded `.nlu` zip file.
-    ///   - stagingDirectory: The URL of the clean staging directory to extract into.
-    /// - Returns: The parsed and validated `NLUPackManifest`.
+
+    /// Extracts the package and validates its structure, compatibility, integrity, and authenticity.
+    /// - Returns: The parsed and verified `NLUPackManifest`, decoded from the exact bytes that were
+    ///   covered by the signature.
     public func extractAndValidate(from packageURL: URL, into stagingDirectory: URL) throws -> NLUPackManifest {
         // 1. Extraction
         do {
@@ -70,124 +76,40 @@ public final class PackValidator: PackValidating {
         } catch {
             throw ValidationError.extractionFailed(error)
         }
-        
+
         // 2. Verify bundle.json exists
         let bundleURL = stagingDirectory.appendingPathComponent("bundle.json")
         guard fileManager.fileExists(atPath: bundleURL.path) else {
             throw ValidationError.missingBundleJSON
         }
-        
-        // 3. Parse Manifest
+
+        // 3. FULL trust chain — Ed25519 signature, checksums_root binding, every-file digest, and
+        //    a no-unsigned-files sweep. Mandatory. Throws on the first failure.
+        let verified: PackIntegrity.Verified
+        do {
+            verified = try PackIntegrity.verify(packRoot: stagingDirectory, trust: trust, policy: loadPolicy)
+        } catch {
+            throw ValidationError.integrityCheckFailed(error)
+        }
+
+        // 4. Parse the manifest from the VERIFIED bytes (provably what was signed), not by
+        //    re-reading the file.
         let manifest: NLUPackManifest
         do {
-            let data = try Data(contentsOf: bundleURL)
-            manifest = try JSONDecoder().decode(NLUPackManifest.self, from: data)
+            manifest = try JSONDecoder().decode(NLUPackManifest.self, from: verified.bundleJSONBytes)
         } catch {
             throw ValidationError.invalidBundleJSON(error)
         }
-        
-        // 4. Verify Format & Compatibility
+
+        // 5. Format & engine compatibility.
         guard manifest.formatVersion.starts(with: "3.") else {
             throw ValidationError.unsupportedFormatVersion(manifest.formatVersion)
         }
-        
         guard currentRuntimeContract >= manifest.engineCompat.minRuntimeContract else {
-            throw ValidationError.incompatibleEngine(required: manifest.engineCompat.minRuntimeContract, current: currentRuntimeContract)
+            throw ValidationError.incompatibleEngine(required: manifest.engineCompat.minRuntimeContract,
+                                                     current: currentRuntimeContract)
         }
-        
-        // 5. Verify Cryptographic Signature
-        try verifySignature(for: manifest, stagingDirectory: stagingDirectory)
-        
-        // 6. Verify Artifact Checksums
-        try verifyChecksums(stagingDirectory: stagingDirectory)
-        
-        // 7. Verify Required Models Exist
-        try verifyRequiredModels(manifest: manifest, stagingDirectory: stagingDirectory)
-        
+
         return manifest
-    }
-    
-    /// Verifies the Ed25519 signature of the package using `CryptoKit`.
-    private func verifySignature(for manifest: NLUPackManifest, stagingDirectory: URL) throws {
-        guard let publicKeyString = trustedPublicKeyBase64 else {
-            // TODO: (Security) Enforce signature verification in the next release.
-            print("[PackValidator] WARNING: Signature verification bypassed because trustedPublicKeyBase64 is nil.")
-            return
-        }
-        
-        // Find the signature file in the integrity directory
-        let signatureURL = stagingDirectory.appendingPathComponent("integrity").appendingPathComponent("signature.sig")
-        let bundleURL = stagingDirectory.appendingPathComponent("bundle.json")
-        
-        if manifest.signatureInfo.scheme == "ed25519-v1" {
-            guard fileManager.fileExists(atPath: signatureURL.path), fileManager.fileExists(atPath: bundleURL.path) else {
-                throw ValidationError.signatureVerificationFailed
-            }
-            
-            do {
-                let signatureData = try Data(contentsOf: signatureURL)
-                let bundleData = try Data(contentsOf: bundleURL)
-                
-                if let keyData = Data(base64Encoded: publicKeyString) {
-                    let publicKey = try Curve25519.Signing.PublicKey(rawRepresentation: keyData)
-                    let isValid = publicKey.isValidSignature(signatureData, for: bundleData)
-                    if !isValid {
-                        // Enforce signature check
-                        throw ValidationError.signatureVerificationFailed
-                    }
-                } else {
-                    // Fallback if public key is malformed in SDK config
-                    throw ValidationError.signatureVerificationFailed
-                }
-            } catch {
-                throw ValidationError.signatureVerificationFailed
-            }
-        }
-    }
-    
-    /// Verifies the SHA256 checksums of all files in the package.
-    private func verifyChecksums(stagingDirectory: URL) throws {
-        // Implementation would read `integrity/checksums.json`, iterate through the files,
-        // hash them with `SHA256.hash(data:)`, and compare.
-        // Left as an extension point depending on exact integrity format.
-    }
-    
-    private func verifyRequiredModels(manifest: NLUPackManifest, stagingDirectory: URL) throws {
-        for (_, localeDict) in manifest.models {
-            for (_, artifact) in localeDict {
-                // On iOS, OTA packages strip out the .onnx files to save bandwidth.
-                // We only need to verify that at least one of the declared CoreML artifacts exists.
-                let possibleCoreMLPaths = [
-                    artifact.coremlFullCompiledArtifact,
-                    artifact.coremlFullArtifact,
-                    artifact.coremlCompiledArtifact,
-                    artifact.coremlArtifact
-                ].compactMap { $0 }
-                
-                var foundValidModel = false
-                
-                if !possibleCoreMLPaths.isEmpty {
-                    for coreMLPath in possibleCoreMLPaths {
-                        let path = stagingDirectory.appendingPathComponent(coreMLPath)
-                        if fileManager.fileExists(atPath: path.path) {
-                            foundValidModel = true
-                            break
-                        }
-                    }
-                }
-                
-                // Fallback to the base artifact (e.g. ONNX/JSON) if it's not a CoreML model
-                if !foundValidModel {
-                    let path = stagingDirectory.appendingPathComponent(artifact.artifact)
-                    if fileManager.fileExists(atPath: path.path) {
-                        foundValidModel = true
-                    }
-                }
-                
-                if !foundValidModel {
-                    throw ValidationError.missingRequiredArtifact(possibleCoreMLPaths.first ?? artifact.artifact)
-                }
-            }
-        }
     }
 }

@@ -15,8 +15,12 @@ public enum VoiceIntentClientError: Error, LocalizedError {
 /// The main entry point for the VoiceIntentKit SDK.
 /// The Host Application should instantiate this class (avoiding Singletons) and hold a strong reference to it.
 ///
-/// Thread Safety: This class is fully stateless and thread-safe. All mutable state is isolated within the `NLUPackInstaller` actor.
-public final class VoiceIntentClient: Sendable {
+/// Thread safety: this type has NO mutable stored state — every property is a `let`. It is therefore
+/// genuinely safe to share across threads; the `@unchecked Sendable` only exists because the injected
+/// `storage`/`engineProvider` are protocol existentials the compiler can't prove `Sendable`. All
+/// mutable pack state lives in `installer` (guarded by its own lock) and on disk (guarded by
+/// `PackStorageController`'s lock + atomic swap), not here.
+public final class VoiceIntentClient: @unchecked Sendable {
     
     /// The orchestration layer for preparing and activating new OTA packages.
     public let installer: NLUPackInstaller
@@ -80,7 +84,7 @@ public final class VoiceIntentClient: Sendable {
         
         // 1. Try to load the active OTA pack
         if storage.hasActivePack(for: language) {
-            didLoadActive = try await attemptLoadActivePack(for: language)
+            didLoadActive = await attemptLoadActivePack(for: language)
         }
         
         // 2. Fallback to Seed Pack if no OTA pack exists, or if they all failed & rolled back
@@ -91,42 +95,41 @@ public final class VoiceIntentClient: Sendable {
     
     /// Recursively attempts to load the currently active pack. If it fails, it rolls back and tries the older version.
     /// - Parameter retriesRemaining: Maximum number of rollback attempts to prevent infinite recursion.
-    private func attemptLoadActivePack(for language: String, retriesRemaining: Int = 3) async throws -> Bool {
+    ///
+    /// Returns `false` — rather than throwing — whenever no OTA pack can be loaded, INCLUDING when a
+    /// rollback itself fails (e.g. there is no previous version). The bundled seed pack is the
+    /// guaranteed floor: a broken OTA pack must never be able to throw past `start()` and prevent the
+    /// seed from loading. Previously `try storage.rollback(...)` propagated `noPreviousVersionAvailable`
+    /// straight out of `start()`, bricking startup with a perfectly good seed pack sitting in the bundle.
+    private func attemptLoadActivePack(for language: String, retriesRemaining: Int = 3) async -> Bool {
         guard retriesRemaining > 0 else { return false }
         guard let currentURL = storage.currentPack(for: language) else { return false }
-        
+
         // Ensure bundle.json exists
         let bundleURL = currentURL.appendingPathComponent("bundle.json")
         guard FileManager.default.fileExists(atPath: bundleURL.path) else {
-            // Corrupted! Rollback to the previous version
-            do {
-                try storage.rollback(for: language)
-                return try await attemptLoadActivePack(for: language, retriesRemaining: retriesRemaining - 1)
-            } catch {
-                return false
-            }
+            // Corrupted! Roll back to the previous version and retry — but if rollback is
+            // impossible, fall through to the seed pack rather than throwing.
+            guard (try? storage.rollback(for: language)) != nil else { return false }
+            return await attemptLoadActivePack(for: language, retriesRemaining: retriesRemaining - 1)
         }
-        
+
         do {
             let data = try Data(contentsOf: bundleURL)
             let manifest = try JSONDecoder().decode(NLUPackManifest.self, from: data)
             let resolution = try manifest.resolveModelPaths(for: language, relativeTo: currentURL)
-            
+
             // Load the model into the live engine
             try engineProvider.load(modelPath: resolution.modelURL, vocabularyPath: resolution.vocabularyURL)
-            
+
             // Success! The model is active.
             return true
-            
+
         } catch {
             // Either JSON parsing failed or the engine failed to load the model.
-            // Rollback and try the older version.
-            do {
-                try storage.rollback(for: language)
-                return try await attemptLoadActivePack(for: language, retriesRemaining: retriesRemaining - 1)
-            } catch {
-                return false
-            }
+            // Roll back and try the older version; if rollback is impossible, fall through to seed.
+            guard (try? storage.rollback(for: language)) != nil else { return false }
+            return await attemptLoadActivePack(for: language, retriesRemaining: retriesRemaining - 1)
         }
     }
     
