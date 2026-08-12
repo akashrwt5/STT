@@ -2,12 +2,12 @@ import XCTest
 @testable import VoiceIntentKit
 
 final class VoiceIntentClientTests: XCTestCase {
-    
+
     var storage: MockPackStorageController!
     var validator: MockPackValidator!
     var engine: MockNLUEngineProvider!
     var client: VoiceIntentClient!
-    
+
     override func setUp() {
         super.setUp()
         storage = MockPackStorageController()
@@ -17,30 +17,50 @@ final class VoiceIntentClientTests: XCTestCase {
             storage: storage,
             validator: validator,
             engineProvider: engine,
-            seedPackURL: URL(fileURLWithPath: "/seed.nlu")
+            seedPackURL: URL(fileURLWithPath: "/nonexistent-seed")
         )
     }
-    
-    func testStartupLoadsActivePack() async throws {
-        storage.activePacks["en"] = URL(fileURLWithPath: "/active.nlu")
-        
-        // In this isolated mock environment without a real bundle.json in the mocked URL,
-        // the attemptLoadActivePack should hit its catch block and call storage.rollback.
-        try await client.start(for: "en")
-        
-        // Verify rollback was correctly triggered for a corrupted active pack
-        XCTAssertTrue(storage.rollbackCalledPacks.contains("en"))
-    }
-    
-    func testStartupFallsBackToSeedPack() async throws {
-        // No active OTA pack exists
+
+    /// No OTA pack → start bypasses OTA and attempts the seed, which is absent in this mock env,
+    /// so it surfaces `seedPackInvalid` (never a silent success on the wrong data).
+    func testStartupFallsBackToSeedPack() async {
         do {
             try await client.start(for: "en")
-            XCTFail("Expected seed pack invalid error due to missing physical seed bundle.json in mock environment")
+            XCTFail("Expected seedPackInvalid because the mock seed has no bundle.json")
         } catch VoiceIntentClientError.seedPackInvalid {
-            // Success, it bypassed OTA and gracefully attempted to load the seed pack
+            // expected
         } catch {
-            XCTFail("Expected seedPackInvalid error")
+            XCTFail("Expected seedPackInvalid, got \(error)")
+        }
+    }
+
+    /// A corrupt active OTA pack triggers a rollback, then falls through to the seed.
+    func testCorruptActivePackTriggersRollback() async {
+        storage.activePacks["en"] = URL(fileURLWithPath: "/nonexistent-active")
+        do {
+            try await client.start(for: "en")
+            XCTFail("Expected seedPackInvalid after rollback")
+        } catch VoiceIntentClientError.seedPackInvalid {
+            XCTAssertTrue(storage.rollbackCalledPacks.contains("en"), "A corrupt pack must trigger rollback")
+        } catch {
+            XCTFail("Expected seedPackInvalid, got \(error)")
+        }
+    }
+
+    /// C6: even when rollback itself fails (no previous version), start() must NOT throw the rollback
+    /// error past the seed — the seed pack is the guaranteed floor. So we still see `seedPackInvalid`,
+    /// never a `PackStorageError`.
+    func testRollbackFailureStillFallsThroughToSeed() async {
+        storage.activePacks["en"] = URL(fileURLWithPath: "/nonexistent-active")
+        storage.rollbackError = PackStorageError.noPreviousVersionAvailable
+
+        do {
+            try await client.start(for: "en")
+            XCTFail("Expected seedPackInvalid")
+        } catch VoiceIntentClientError.seedPackInvalid {
+            // expected — the rollback failure did not escape past the seed fallback
+        } catch {
+            XCTFail("A rollback failure must not propagate past the seed floor; got \(error)")
         }
     }
 }

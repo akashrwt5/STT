@@ -41,6 +41,7 @@ final class SpeechRecognitionServiceTests: XCTestCase {
 
     // MARK: - Locale Switch
 
+    @MainActor
     func testSwitchLocaleToUnsupportedThrows() async {
         let service = SpeechRecognitionService(locale: Locale(identifier: "en-IN"))
         do {
