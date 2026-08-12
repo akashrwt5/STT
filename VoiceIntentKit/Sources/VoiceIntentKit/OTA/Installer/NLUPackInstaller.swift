@@ -3,7 +3,7 @@ import OSLog
 
 /// Defines the protocol for the Host Application to provide the active inference engine.
 /// Used to run a smoke test before a model is permanently activated.
-public protocol NLUEngineProvider {
+public protocol NLUEngineProvider: Sendable {
     /// Attempts to initialize the engine and run a lightweight smoke test.
     /// Should throw an error if the model is corrupted or incompatible.
     func smokeTest(modelPath: URL, vocabularyPath: URL) throws
@@ -35,9 +35,11 @@ public enum InstallerError: Error, LocalizedError {
     }
 }
 
-/// The main orchestration class for NLU over-the-air updates.
+/// The main orchestration actor for NLU over-the-air updates.
 /// The Host Application uses this to prepare downloaded zips and activate them when safe.
-public final class NLUPackInstaller {
+///
+/// Thread Safety: Native actor isolation protects mutable staging state.
+public actor NLUPackInstaller {
     
     private let storage: PackStorageControlling
     private let validator: PackValidating
@@ -107,29 +109,18 @@ public final class NLUPackInstaller {
         let stagingDir = try storage.stagingDirectory(for: language, clean: false)
         let version = manifest.version
         
-        // SMOKE TEST
-        guard let modelInfo = manifest.models["intent"]?[language] ?? manifest.models["intent"]?["default"] else {
-            throw InstallerError.smokeTestFailed(NSError(domain: "NLUPackInstaller", code: 1, userInfo: [NSLocalizedDescriptionKey: "Manifest missing intent model definition."]))
-        }
-        
-        // Enforce CoreML usage (ONNX is strictly disabled)
-        guard let artifactPath = modelInfo.coremlCompiledArtifact else {
-            throw InstallerError.smokeTestFailed(NSError(domain: "NLUPackInstaller", code: 2, userInfo: [NSLocalizedDescriptionKey: "Manifest missing compiled CoreML artifact. ONNX is strictly disabled."]))
-        }
-        let modelURL = stagingDir.appendingPathComponent(artifactPath)
-        
-        // Resolve vocabulary dynamically from the manifest
-        let vocabURL: URL
-        if let vocabPath = modelInfo.vocabularyArtifact {
-            vocabURL = stagingDir.appendingPathComponent(vocabPath)
-        } else {
-            // Fallback assumption for older manifests if needed
-            vocabURL = modelURL.deletingLastPathComponent().appendingPathComponent("vocab.txt")
+        // SMOKE TEST — Resolve model paths from manifest
+        let resolution: ModelResolution
+        do {
+            resolution = try manifest.resolveModelPaths(for: language, relativeTo: stagingDir)
+        } catch {
+            stagingState = .failed
+            throw InstallerError.smokeTestFailed(error)
         }
         
         // 1. Independent Smoke Test Block
         do {
-            try engineProvider.smokeTest(modelPath: modelURL, vocabularyPath: vocabURL)
+            try engineProvider.smokeTest(modelPath: resolution.modelURL, vocabularyPath: resolution.vocabularyURL)
         } catch {
             // If the model crashes, we fail the staging, but we don't break the existing models on disk.
             stagingState = .failed

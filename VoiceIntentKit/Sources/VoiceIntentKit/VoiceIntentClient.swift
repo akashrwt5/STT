@@ -14,7 +14,9 @@ public enum VoiceIntentClientError: Error, LocalizedError {
 
 /// The main entry point for the VoiceIntentKit SDK.
 /// The Host Application should instantiate this class (avoiding Singletons) and hold a strong reference to it.
-public final class VoiceIntentClient {
+///
+/// Thread Safety: This class is fully stateless and thread-safe. All mutable state is isolated within the `NLUPackInstaller` actor.
+public final class VoiceIntentClient: Sendable {
     
     /// The orchestration layer for preparing and activating new OTA packages.
     public let installer: NLUPackInstaller
@@ -88,40 +90,30 @@ public final class VoiceIntentClient {
     }
     
     /// Recursively attempts to load the currently active pack. If it fails, it rolls back and tries the older version.
-    private func attemptLoadActivePack(for language: String) async throws -> Bool {
+    /// - Parameter retriesRemaining: Maximum number of rollback attempts to prevent infinite recursion.
+    private func attemptLoadActivePack(for language: String, retriesRemaining: Int = 3) async throws -> Bool {
+        guard retriesRemaining > 0 else { return false }
         guard let currentURL = storage.currentPack(for: language) else { return false }
         
         // Ensure bundle.json exists
         let bundleURL = currentURL.appendingPathComponent("bundle.json")
         guard FileManager.default.fileExists(atPath: bundleURL.path) else {
             // Corrupted! Rollback to the previous version
-            try storage.rollback(for: language)
-            return try await attemptLoadActivePack(for: language)
+            do {
+                try storage.rollback(for: language)
+                return try await attemptLoadActivePack(for: language, retriesRemaining: retriesRemaining - 1)
+            } catch {
+                return false
+            }
         }
         
         do {
             let data = try Data(contentsOf: bundleURL)
             let manifest = try JSONDecoder().decode(NLUPackManifest.self, from: data)
-            
-            // Resolve paths
-            guard let modelInfo = manifest.models["intent"]?[language] ?? manifest.models["intent"]?["default"] else {
-                throw NSError(domain: "VoiceIntentClient", code: 1, userInfo: [NSLocalizedDescriptionKey: "Manifest missing model info"])
-            }
-            
-            // Enforce CoreML usage (ONNX is strictly disabled)
-            guard let artifactPath = modelInfo.coremlCompiledArtifact else {
-                throw NSError(domain: "VoiceIntentClient", code: 2, userInfo: [NSLocalizedDescriptionKey: "Manifest missing compiled CoreML artifact. ONNX is strictly disabled."])
-            }
-            let modelURL = currentURL.appendingPathComponent(artifactPath)
-            let vocabURL: URL
-            if let vocabPath = modelInfo.vocabularyArtifact {
-                vocabURL = currentURL.appendingPathComponent(vocabPath)
-            } else {
-                vocabURL = modelURL.deletingLastPathComponent().appendingPathComponent("vocab.txt")
-            }
+            let resolution = try manifest.resolveModelPaths(for: language, relativeTo: currentURL)
             
             // Load the model into the live engine
-            try engineProvider.load(modelPath: modelURL, vocabularyPath: vocabURL)
+            try engineProvider.load(modelPath: resolution.modelURL, vocabularyPath: resolution.vocabularyURL)
             
             // Success! The model is active.
             return true
@@ -129,8 +121,12 @@ public final class VoiceIntentClient {
         } catch {
             // Either JSON parsing failed or the engine failed to load the model.
             // Rollback and try the older version.
-            try storage.rollback(for: language)
-            return try await attemptLoadActivePack(for: language)
+            do {
+                try storage.rollback(for: language)
+                return try await attemptLoadActivePack(for: language, retriesRemaining: retriesRemaining - 1)
+            } catch {
+                return false
+            }
         }
     }
     
@@ -141,25 +137,10 @@ public final class VoiceIntentClient {
         do {
             let data = try Data(contentsOf: bundleURL)
             let manifest = try JSONDecoder().decode(NLUPackManifest.self, from: data)
-            
-            guard let modelInfo = manifest.models["intent"]?[language] ?? manifest.models["intent"]?["default"] else {
-                throw NSError(domain: "VoiceIntentClient", code: 1, userInfo: [NSLocalizedDescriptionKey: "Seed missing model info"])
-            }
-            
-            // Enforce CoreML usage (ONNX is strictly disabled)
-            guard let artifactPath = modelInfo.coremlCompiledArtifact else {
-                throw NSError(domain: "VoiceIntentClient", code: 2, userInfo: [NSLocalizedDescriptionKey: "Seed missing compiled CoreML artifact. ONNX is strictly disabled."])
-            }
-            let modelURL = seedPackURL.appendingPathComponent(artifactPath)
-            let vocabURL: URL
-            if let vocabPath = modelInfo.vocabularyArtifact {
-                vocabURL = seedPackURL.appendingPathComponent(vocabPath)
-            } else {
-                vocabURL = modelURL.deletingLastPathComponent().appendingPathComponent("vocab.txt")
-            }
+            let resolution = try manifest.resolveModelPaths(for: language, relativeTo: seedPackURL)
             
             // Load the seed model into the live engine
-            try engineProvider.load(modelPath: modelURL, vocabularyPath: vocabURL)
+            try engineProvider.load(modelPath: resolution.modelURL, vocabularyPath: resolution.vocabularyURL)
             
         } catch {
             throw VoiceIntentClientError.seedPackInvalid(error)

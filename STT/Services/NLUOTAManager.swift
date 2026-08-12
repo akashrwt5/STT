@@ -4,10 +4,17 @@ import VoiceIntentKit
 
 // Define the response from the BFF API
 fileprivate struct NLUUpdateResponse: Codable {
-    let update_available: Bool
+    let updateAvailable: Bool
     let version: String?
-    let download_url: String?
-    let size_bytes: Int?
+    let downloadUrl: String?
+    let sizeBytes: Int?
+    
+    enum CodingKeys: String, CodingKey {
+        case updateAvailable = "update_available"
+        case version
+        case downloadUrl = "download_url"
+        case sizeBytes = "size_bytes"
+    }
 }
 
 public enum OTAUpdateError: LocalizedError {
@@ -149,8 +156,8 @@ public actor NLUOTAManager {
             }
             
             // 2. Evaluate update availability
-            guard updateResponse.update_available,
-                  let downloadString = updateResponse.download_url,
+            guard updateResponse.updateAvailable,
+                  let downloadString = updateResponse.downloadUrl,
                   let downloadURL = URL(string: downloadString) else {
                 logger.info("No OTA update available. Device is up to date.")
                 return .noUpdate
@@ -181,7 +188,7 @@ public actor NLUOTAManager {
             
             // Verify file size before extraction (Sanity Check)
             let fileAttributes = try FileManager.default.attributesOfItem(atPath: tempZipURL.path)
-            if let fileSize = fileAttributes[.size] as? Int, let expectedSize = updateResponse.size_bytes {
+            if let fileSize = fileAttributes[.size] as? Int, let expectedSize = updateResponse.sizeBytes {
                 if fileSize != expectedSize {
                     logger.warning("Download size mismatch. Expected: \(expectedSize), Got: \(fileSize). Proceeding anyway, relying on SDK crypto validation.")
                 }

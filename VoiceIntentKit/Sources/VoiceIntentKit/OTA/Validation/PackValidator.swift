@@ -80,21 +80,7 @@ public final class PackValidator: PackValidating {
         // 3. Parse Manifest
         let manifest: NLUPackManifest
         do {
-            var data = try Data(contentsOf: bundleURL)
-            
-            // Hotfix: Inject 'version' if the backend hasn't implemented it yet (TODO_Python.md)
-            if let jsonObject = try JSONSerialization.jsonObject(with: data, options: .mutableContainers) as? NSMutableDictionary {
-                if jsonObject["version"] == nil, let bundleId = jsonObject["bundle_id"] as? String {
-                    if let range = bundleId.range(of: "-v") {
-                        jsonObject["version"] = String(bundleId[range.upperBound...])
-                        data = try JSONSerialization.data(withJSONObject: jsonObject)
-                        
-                        // Persist the hotfix back to disk so VoiceIntentClient can read it later
-                        try data.write(to: bundleURL)
-                    }
-                }
-            }
-            
+            let data = try Data(contentsOf: bundleURL)
             manifest = try JSONDecoder().decode(NLUPackManifest.self, from: data)
         } catch {
             throw ValidationError.invalidBundleJSON(error)

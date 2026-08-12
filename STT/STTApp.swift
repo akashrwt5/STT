@@ -27,8 +27,9 @@ class STTPackExtractor: PackExtractor {
         // Use ZIPFoundation to unzip the payload directly into the staging directory
         try FileManager.default.unzipItem(at: source, to: destination)
         
-        // Hoist files if the backend zipped a top-level folder instead of the raw contents
         let bundleURL = destination.appendingPathComponent("bundle.json")
+        
+        // Step 1: Hoist files if the backend zipped a top-level folder instead of the raw contents
         if !FileManager.default.fileExists(atPath: bundleURL.path) {
             let contents = try FileManager.default.contentsOfDirectory(at: destination, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
             
@@ -43,6 +44,20 @@ class STTPackExtractor: PackExtractor {
                 try FileManager.default.removeItem(at: subDir)
             }
         }
+        
+        // Step 2: Hotfix — Inject 'version' field if the Python backend hasn't added it yet.
+        // TODO: Remove once Python backend ships the version field (TODO_Python.md)
+        if FileManager.default.fileExists(atPath: bundleURL.path),
+           let data = try? Data(contentsOf: bundleURL),
+           let jsonObject = try? JSONSerialization.jsonObject(with: data, options: .mutableContainers) as? NSMutableDictionary {
+            if jsonObject["version"] == nil, let bundleId = jsonObject["bundle_id"] as? String,
+               let range = bundleId.range(of: "-v") {
+                jsonObject["version"] = String(bundleId[range.upperBound...])
+                if let patched = try? JSONSerialization.data(withJSONObject: jsonObject) {
+                    try patched.write(to: bundleURL)
+                }
+            }
+        }
     }
 }
 
@@ -52,6 +67,10 @@ struct STTApp: App {
     // Shared dependencies instantiated once at app launch
     private let voiceClient: VoiceIntentClient
     private let otaManager: NLUOTAManager
+    
+    /// The primary language for OTA updates.
+    /// TODO: Make this dynamic based on user's language selection when multilingual OTA is supported.
+    private static let primaryOTALanguage = "en"
     
     init() {
         // Find the bundled seed pack from the SPM module
@@ -63,7 +82,14 @@ struct STTApp: App {
         
         // Initialize dependencies
         let storageURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("VoiceIntentKit")
-        let storage = try! PackStorageController(baseStorageURL: storageURL, fileManager: .default)
+        
+        let storage: PackStorageController
+        do {
+            storage = try PackStorageController(baseStorageURL: storageURL, fileManager: .default)
+        } catch {
+            fatalError("[STT] Critical: Failed to initialize VoiceIntentKit storage at \(storageURL.path). Error: \(error.localizedDescription)")
+        }
+        
         let extractor = STTPackExtractor()
         let validator = PackValidator(extractor: extractor)
         let engineProvider = STTNLUEngineProvider()
@@ -78,8 +104,9 @@ struct STTApp: App {
         
         // Asynchronously boot the SDK so the active CoreML model is ready
         let client = self.voiceClient
+        let language = Self.primaryOTALanguage
         Task {
-            try? await client.start(for: "en")
+            try? await client.start(for: language)
         }
     }
     
@@ -98,7 +125,7 @@ struct STTApp: App {
             Self.scheduleAppRefresh()
             
             // 2. Perform the update using the exact same shared otaManager instance
-            await manager.checkForUpdates(language: "en")
+            await manager.checkForUpdates(language: Self.primaryOTALanguage)
         }
     }
     

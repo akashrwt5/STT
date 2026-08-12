@@ -70,14 +70,25 @@ public final class PackStorageController: PackStorageControlling {
     /// Returns the active (Current) pack URL for a given language, resolving the symbolic link.
     public func currentPack(for language: String) -> URL? {
         guard let langDir = try? languageDirectory(for: language) else { return nil }
-        let currentLink = langDir.appendingPathComponent("Current", isDirectory: false)
+        let currentLink = langDir.appendingPathComponent("Current")
         
-        // Check if the symlink exists
-        if fileManager.fileExists(atPath: currentLink.path) {
-            return currentLink
+        // Resolve the symbolic link to the actual version directory
+        guard let destination = try? fileManager.destinationOfSymbolicLink(atPath: currentLink.path) else {
+            return nil // No symlink exists
         }
-        return nil
+        
+        // Resolve the relative symlink target to an absolute URL
+        let resolvedURL = langDir.appendingPathComponent(destination)
+        
+        guard fileManager.fileExists(atPath: resolvedURL.path) else {
+            // Dangling symlink (target was deleted) — clean it up silently
+            try? fileManager.removeItem(at: currentLink)
+            return nil
+        }
+        
+        return resolvedURL
     }
+
     
     /// Checks if an active OTA pack is installed for the given language.
     public func hasActivePack(for language: String) -> Bool {

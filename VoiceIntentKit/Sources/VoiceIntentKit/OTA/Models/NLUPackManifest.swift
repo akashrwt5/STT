@@ -139,3 +139,54 @@ public struct CapabilityStatus: Codable, Equatable {
     public let status: String
     public let version: String
 }
+
+// MARK: - Model Resolution
+
+/// Resolved paths for a model's CoreML and vocabulary artifacts.
+public struct ModelResolution {
+    public let modelURL: URL
+    public let vocabularyURL: URL
+}
+
+/// Errors thrown when resolving model paths from a manifest.
+public enum ModelResolutionError: Error, LocalizedError {
+    case missingModelInfo(String)
+    case missingCoreMLArtifact
+    
+    public var errorDescription: String? {
+        switch self {
+        case .missingModelInfo(let lang):
+            return "Manifest missing intent model definition for language '\(lang)'."
+        case .missingCoreMLArtifact:
+            return "Manifest missing compiled CoreML artifact. ONNX is strictly disabled."
+        }
+    }
+}
+
+extension NLUPackManifest {
+    /// Resolves the CoreML model and vocabulary file paths from this manifest.
+    /// - Parameters:
+    ///   - language: The language code (e.g., "en").
+    ///   - baseURL: The root directory of the extracted pack.
+    /// - Returns: A `ModelResolution` containing the resolved model and vocabulary URLs.
+    public func resolveModelPaths(for language: String, relativeTo baseURL: URL) throws -> ModelResolution {
+        guard let modelInfo = models["intent"]?[language] ?? models["intent"]?["default"] else {
+            throw ModelResolutionError.missingModelInfo(language)
+        }
+        
+        // Enforce CoreML usage (ONNX is strictly disabled on iOS)
+        guard let artifactPath = modelInfo.coremlCompiledArtifact else {
+            throw ModelResolutionError.missingCoreMLArtifact
+        }
+        
+        let modelURL = baseURL.appendingPathComponent(artifactPath)
+        let vocabURL: URL
+        if let vocabPath = modelInfo.vocabularyArtifact {
+            vocabURL = baseURL.appendingPathComponent(vocabPath)
+        } else {
+            vocabURL = modelURL.deletingLastPathComponent().appendingPathComponent("vocab.txt")
+        }
+        
+        return ModelResolution(modelURL: modelURL, vocabularyURL: vocabURL)
+    }
+}
