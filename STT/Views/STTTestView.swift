@@ -8,6 +8,9 @@ import SwiftUI
 /// Provides a prominent launch point for the onDevice PVA session (full sheet with
 /// S1/S2/S3 pipeline) and secondary access to file transcription.
 struct STTTestView: View {
+    // Shared OTA Manager passed from App Root
+    var otaManager: NLUOTAManager? = nil
+    
     @State private var coordinator = TranscriptionCoordinator()
     @State private var showLanguagePicker = false
     @State private var showFileTranscription = false
@@ -23,6 +26,9 @@ struct STTTestView: View {
     /// First-screen selection including the package path. English/Multilingual map
     /// to the existing NLUVariant flow; Package routes to VoiceIntentKit.
     @State private var pipeline: PipelineChoice = .english
+    
+    /// Displays the actively loaded SDK model version on the UI.
+    @State private var activeVersion: String = "Loading..."
 
     enum PipelineChoice: String, CaseIterable, Identifiable {
         case english, multilingual, package
@@ -46,7 +52,34 @@ struct STTTestView: View {
                 pvaLauncher
                 Spacer()
                 fileTranscriptionLink
-                    .padding(.bottom, 52)
+                    .padding(.bottom, 16)
+                
+#if DEBUG
+                if let otaManager = otaManager {
+                    VStack(spacing: 6) {
+                        Text("Active Engine Version: \(activeVersion)")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.45))
+                        
+                        Button("Force OTA Update") {
+                            let currentLang = coordinator.currentLocale.language.languageCode?.identifier ?? "en"
+                            Task {
+                                await otaManager.checkForUpdates(language: currentLang)
+                                activeVersion = await otaManager.getActivePackVersion(language: currentLang)
+                            }
+                        }
+                        .font(.caption.bold())
+                        .foregroundStyle(.white.opacity(0.6))
+                    }
+                    .padding(.bottom, 36)
+                    .task(id: coordinator.currentLocale) {
+                        let currentLang = coordinator.currentLocale.language.languageCode?.identifier ?? "en"
+                        activeVersion = await otaManager.getActivePackVersion(language: currentLang)
+                    }
+                }
+#else
+                Spacer().frame(height: 52)
+#endif
             }
         }
         .preferredColorScheme(.dark)

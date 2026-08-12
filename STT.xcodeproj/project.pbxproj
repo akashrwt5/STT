@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		C83FD9BD2FFE22F000EEE84F /* VoiceIntentKit in Frameworks */ = {isa = PBXBuildFile; productRef = C83FD9BC2FFE22F000EEE84F /* VoiceIntentKit */; };
 		C8FEACF3302206C7009BADD9 /* VoiceIntentSeedPackEN in Frameworks */ = {isa = PBXBuildFile; productRef = C8FEACF2302206C7009BADD9 /* VoiceIntentSeedPackEN */; };
+		C8FEBFBD302C560E009BADD9 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = C8FEBFBC302C560E009BADD9 /* ZIPFoundation */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -59,6 +60,7 @@
 			files = (
 				C8FEACF3302206C7009BADD9 /* VoiceIntentSeedPackEN in Frameworks */,
 				C83FD9BD2FFE22F000EEE84F /* VoiceIntentKit in Frameworks */,
+				C8FEBFBD302C560E009BADD9 /* ZIPFoundation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -129,6 +131,7 @@
 			packageProductDependencies = (
 				C83FD9BC2FFE22F000EEE84F /* VoiceIntentKit */,
 				C8FEACF2302206C7009BADD9 /* VoiceIntentSeedPackEN */,
+				C8FEBFBC302C560E009BADD9 /* ZIPFoundation */,
 			);
 			productName = STT;
 			productReference = C8CD16062FD17F76003B4792 /* STT.app */;
@@ -214,6 +217,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				C83FD9BB2FFE22F000EEE84F /* XCLocalSwiftPackageReference "VoiceIntentKit" */,
+				C8FEBFBB302C560E009BADD9 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C8CD16072FD17F76003B4792 /* Products */;
@@ -643,6 +647,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		C8FEBFBB302C560E009BADD9 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/weichsel/ZIPFoundation.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.20;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		C83FD9BC2FFE22F000EEE84F /* VoiceIntentKit */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -652,6 +667,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C83FD9BB2FFE22F000EEE84F /* XCLocalSwiftPackageReference "VoiceIntentKit" */;
 			productName = VoiceIntentSeedPackEN;
+		};
+		C8FEBFBC302C560E009BADD9 /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C8FEBFBB302C560E009BADD9 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

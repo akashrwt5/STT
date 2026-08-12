@@ -24,3 +24,7 @@ This document tracks required updates for the Python team responsible for compil
 }
 ```
 - **iOS Impact:** The SDK has already been updated to dynamically read this field to locate the vocabulary, avoiding hardcoded paths.
+
+## 3. Pre-filter OTA Updates by SDK Compatibility
+- **Context:** The Host Application currently fetches `/api/v1/nlu/latest?current_pack_version=X`. If a backend NLU package uses `format_version: "4.0"` but the iOS app only supports `3.0`, the iOS SDK will reject it *after* downloading the 30MB file.
+- **Action Item:** Update the BFF `/latest` endpoint to accept an `&sdk_version=` query parameter. Use this parameter to evaluate if a compatible OTA update exists, returning `update_available: false` if the only new models require a newer SDK.

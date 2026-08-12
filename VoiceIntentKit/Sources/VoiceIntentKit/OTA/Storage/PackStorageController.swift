@@ -118,15 +118,12 @@ public final class PackStorageController: PackStorageControlling {
         let tempLinkURL = langDir.appendingPathComponent("Current_temp_\(UUID().uuidString)", isDirectory: false)
         
         // Create a relative symlink (e.g., pointing to "1.0.36")
-        try fileManager.createSymbolicLink(at: tempLinkURL, withDestinationPath: version)
+        try fileManager.createSymbolicLink(atPath: tempLinkURL.path, withDestinationPath: version)
         
         do {
-            if fileManager.fileExists(atPath: currentLinkURL.path) {
-                // replaceItemAt is atomic on APFS/HFS+
-                _ = try fileManager.replaceItemAt(currentLinkURL, withItemAt: tempLinkURL, backupItemName: nil, options: .usingNewMetadataOnly)
-            } else {
-                try fileManager.moveItem(at: tempLinkURL, to: currentLinkURL)
-            }
+            // Safely remove the existing symlink (whether valid or broken) to avoid Apple's replaceItemAt resolving the target.
+            _ = try? fileManager.removeItem(at: currentLinkURL)
+            try fileManager.moveItem(at: tempLinkURL, to: currentLinkURL)
         } catch {
             // Cleanup temp link if swap failed
             try? fileManager.removeItem(at: tempLinkURL)

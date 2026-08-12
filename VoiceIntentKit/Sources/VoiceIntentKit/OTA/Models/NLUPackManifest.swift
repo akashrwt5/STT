@@ -109,6 +109,12 @@ public struct ModelArtifact: Codable, Equatable {
     /// Path to the compiled CoreML model (`.mlmodelc`), optimized for Apple Neural Engine.
     public let coremlCompiledArtifact: String?
     
+    /// Path to the full uncompiled CoreML package, if available.
+    public let coremlFullArtifact: String?
+    
+    /// Path to the full compiled CoreML model (`.mlmodelc`).
+    public let coremlFullCompiledArtifact: String?
+    
     /// The format of the primary artifact (e.g., "onnx", "json").
     public let format: String
     
@@ -120,6 +126,8 @@ public struct ModelArtifact: Codable, Equatable {
         case vocabularyArtifact = "vocabulary_artifact"
         case coremlArtifact = "coreml_artifact"
         case coremlCompiledArtifact = "coreml_compiled_artifact"
+        case coremlFullArtifact = "coreml_full_artifact"
+        case coremlFullCompiledArtifact = "coreml_full_compiled_artifact"
         case format
         case modelVersion = "model_version"
     }

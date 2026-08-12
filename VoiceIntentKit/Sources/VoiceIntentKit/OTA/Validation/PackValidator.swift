@@ -78,11 +78,24 @@ public final class PackValidator: PackValidating {
         }
         
         // 3. Parse Manifest
-        let manifestData = try Data(contentsOf: bundleURL)
         let manifest: NLUPackManifest
         do {
-            let decoder = JSONDecoder()
-            manifest = try decoder.decode(NLUPackManifest.self, from: manifestData)
+            var data = try Data(contentsOf: bundleURL)
+            
+            // Hotfix: Inject 'version' if the backend hasn't implemented it yet (TODO_Python.md)
+            if let jsonObject = try JSONSerialization.jsonObject(with: data, options: .mutableContainers) as? NSMutableDictionary {
+                if jsonObject["version"] == nil, let bundleId = jsonObject["bundle_id"] as? String {
+                    if let range = bundleId.range(of: "-v") {
+                        jsonObject["version"] = String(bundleId[range.upperBound...])
+                        data = try JSONSerialization.data(withJSONObject: jsonObject)
+                        
+                        // Persist the hotfix back to disk so VoiceIntentClient can read it later
+                        try data.write(to: bundleURL)
+                    }
+                }
+            }
+            
+            manifest = try JSONDecoder().decode(NLUPackManifest.self, from: data)
         } catch {
             throw ValidationError.invalidBundleJSON(error)
         }
@@ -153,13 +166,40 @@ public final class PackValidator: PackValidating {
         // Left as an extension point depending on exact integrity format.
     }
     
-    /// Ensures all artifacts declared in the manifest actually exist on disk.
     private func verifyRequiredModels(manifest: NLUPackManifest, stagingDirectory: URL) throws {
         for (_, localeDict) in manifest.models {
             for (_, artifact) in localeDict {
-                let path = stagingDirectory.appendingPathComponent(artifact.artifact)
-                if !fileManager.fileExists(atPath: path.path) {
-                    throw ValidationError.missingRequiredArtifact(artifact.artifact)
+                // On iOS, OTA packages strip out the .onnx files to save bandwidth.
+                // We only need to verify that at least one of the declared CoreML artifacts exists.
+                let possibleCoreMLPaths = [
+                    artifact.coremlFullCompiledArtifact,
+                    artifact.coremlFullArtifact,
+                    artifact.coremlCompiledArtifact,
+                    artifact.coremlArtifact
+                ].compactMap { $0 }
+                
+                var foundValidModel = false
+                
+                if !possibleCoreMLPaths.isEmpty {
+                    for coreMLPath in possibleCoreMLPaths {
+                        let path = stagingDirectory.appendingPathComponent(coreMLPath)
+                        if fileManager.fileExists(atPath: path.path) {
+                            foundValidModel = true
+                            break
+                        }
+                    }
+                }
+                
+                // Fallback to the base artifact (e.g. ONNX/JSON) if it's not a CoreML model
+                if !foundValidModel {
+                    let path = stagingDirectory.appendingPathComponent(artifact.artifact)
+                    if fileManager.fileExists(atPath: path.path) {
+                        foundValidModel = true
+                    }
+                }
+                
+                if !foundValidModel {
+                    throw ValidationError.missingRequiredArtifact(possibleCoreMLPaths.first ?? artifact.artifact)
                 }
             }
         }
