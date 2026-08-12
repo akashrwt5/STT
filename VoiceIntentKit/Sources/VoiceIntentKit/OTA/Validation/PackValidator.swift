@@ -2,12 +2,12 @@ import Foundation
 
 /// Protocol allowing the Host App to inject their preferred ZIP extraction library (e.g., ZIPFoundation).
 /// This keeps VoiceIntentKit a thin SDK without forcing 3rd party dependencies.
-public protocol PackExtractor {
+public protocol PackExtractor: Sendable {
     /// Extracts the package from the source URL into the destination URL.
     func extract(from source: URL, to destination: URL) throws
 }
 
-public protocol PackValidating {
+public protocol PackValidating: Sendable {
     var currentRuntimeContract: Int { get }
     func extractAndValidate(from packageURL: URL, into stagingDirectory: URL) throws -> NLUPackManifest
 }
@@ -20,7 +20,10 @@ public protocol PackValidating {
 /// makes OTA validation and session load use ONE verifier and ONE `PackTrustPolicy`, instead of
 /// the two divergent implementations that existed before (this class used to bypass signatures
 /// when a key was absent and had an empty checksum stub).
-public final class PackValidator: PackValidating {
+/// `@unchecked Sendable`: all stored properties are immutable `let`s, but `FileManager` is not
+/// itself `Sendable`. There is no mutable state to protect — the unchecked conformance only bridges
+/// that one non-`Sendable` (but effectively thread-safe) dependency.
+public final class PackValidator: PackValidating, @unchecked Sendable {
 
     public enum ValidationError: Error, LocalizedError {
         case extractionFailed(Error)

@@ -15,12 +15,12 @@ public enum VoiceIntentClientError: Error, LocalizedError {
 /// The main entry point for the VoiceIntentKit SDK.
 /// The Host Application should instantiate this class (avoiding Singletons) and hold a strong reference to it.
 ///
-/// Thread safety: this type has NO mutable stored state — every property is a `let`. It is therefore
-/// genuinely safe to share across threads; the `@unchecked Sendable` only exists because the injected
-/// `storage`/`engineProvider` are protocol existentials the compiler can't prove `Sendable`. All
-/// mutable pack state lives in `installer` (guarded by its own lock) and on disk (guarded by
-/// `PackStorageController`'s lock + atomic swap), not here.
-public final class VoiceIntentClient: @unchecked Sendable {
+/// Thread safety: this type has NO mutable stored state — every property is a `let` — and all of its
+/// dependencies (`PackStorageControlling`, `NLUEngineProvider`, `NLUPackInstaller`, `URL`) are now
+/// `Sendable`, so it is a *checked* `Sendable` with no `@unchecked` escape hatch. Mutable pack state
+/// lives in `installer` (guarded by its own lock) and on disk (guarded by `PackStorageController`'s
+/// lock + atomic swap), not here.
+public final class VoiceIntentClient: Sendable {
     
     /// The orchestration layer for preparing and activating new OTA packages.
     public let installer: NLUPackInstaller

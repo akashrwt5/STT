@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-public protocol PackStorageControlling {
+public protocol PackStorageControlling: Sendable {
     func stagingDirectory(for language: String, clean: Bool) throws -> URL
     func currentPack(for language: String) -> URL?
     func hasActivePack(for language: String) -> Bool

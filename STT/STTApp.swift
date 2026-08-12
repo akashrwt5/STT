@@ -31,7 +31,7 @@ enum OTAStorageLocator {
 /// `VoiceIntentSession` uses (`BundleDataLoader` + `PackEngineFactory`) and runs one classification.
 /// If it throws, the OTA installer refuses to activate the pack — so a crypto-valid but
 /// device-unloadable pack can never become `Current`.
-final class STTNLUEngineProvider: NLUEngineProvider {
+final class STTNLUEngineProvider: NLUEngineProvider, Sendable {
     /// Trust policy for the smoke-test load. Must match the session's policy.
     /// TODO: (Security) a production build must use a signing-key policy, not `.unverifiedForTesting`.
     private let trust: PackTrustPolicy = .unverifiedForTesting
@@ -55,8 +55,8 @@ final class STTNLUEngineProvider: NLUEngineProvider {
     }
 }
 
-// A simple bridge for extracting the OTA ZIP payload
-class STTPackExtractor: PackExtractor {
+// A simple bridge for extracting the OTA ZIP payload. Stateless, so a checked `Sendable`.
+final class STTPackExtractor: PackExtractor, Sendable {
     func extract(from source: URL, to destination: URL) throws {
         // Use ZIPFoundation to unzip the payload directly into the staging directory
         try FileManager.default.unzipItem(at: source, to: destination)

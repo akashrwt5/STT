@@ -1,7 +1,7 @@
 import XCTest
 @testable import VoiceIntentKit
 
-final class MockPackExtractor: PackExtractor {
+final class MockPackExtractor: PackExtractor, @unchecked Sendable {
     var shouldThrowError: Error?
     var didExtractSource: URL?
     var didExtractDestination: URL?

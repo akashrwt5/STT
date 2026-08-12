@@ -7,7 +7,7 @@ import Foundation
 /// On success it writes a minimal, decodable `bundle.json` into the staging directory (so the
 /// installer's C8 token guard, which re-reads that file, is satisfied) and returns the manifest
 /// decoded from those same bytes.
-public final class MockPackValidator: PackValidating {
+public final class MockPackValidator: PackValidating, @unchecked Sendable {
 
     public var shouldThrowError: Error?
     /// The version the produced manifest / bundle.json will carry.

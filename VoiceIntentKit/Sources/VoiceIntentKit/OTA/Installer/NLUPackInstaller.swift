@@ -3,7 +3,10 @@ import OSLog
 
 /// Defines the protocol for the Host Application to provide the active inference engine.
 /// Used to run a smoke test before a model is permanently activated.
-public protocol NLUEngineProvider {
+///
+/// `Sendable`: the engine is shared across the OTA actor and the host, so conformers must be safe
+/// to reference from any isolation domain.
+public protocol NLUEngineProvider: Sendable {
     /// Builds an engine from the *staged* pack and runs a lightweight inference, throwing if the
     /// pack cannot actually be loaded on this device.
     ///
