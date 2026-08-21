@@ -41,8 +41,8 @@ Two products:
 
 `swift test` does not work from a Mac: SwiftPM builds for the host platform, and `AVAudioSession`
 and `SpeechAnalyzer` do not exist there. Run the tests against an **iOS Simulator** destination —
-open `Package.swift` in Xcode and press Cmd+U, or `xcodebuild test -scheme VoiceAIKit
--destination "id=<simulator udid>"`.
+open `Package.swift` in Xcode and press Cmd+U, or `xcodebuild test -scheme VoiceAIKit-Package
+-destination "id=<simulator udid>"` — note `-Package`: it is the only scheme with a test action..
 
 ## The whole public API
 
