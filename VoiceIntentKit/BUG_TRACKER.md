@@ -4,7 +4,7 @@ Defects found while making the package data-driven. The pack compiler's own
 tracker lives in the IntentClassifier repo (`docs/BUG_TRACKER.md`); anything
 here is iOS-side, or a contract gap that bites iOS specifically.
 
-**Summary:** 20 fixed, 9 open.
+**Summary:** 26 fixed, 11 open.
 
 Two of the fixes (VIK-015, VIK-016) were found by the parity suite on its first
 run, in code that compiled cleanly and had been read against the reference twice.
@@ -48,6 +48,14 @@ evidence here.
 | VIK-027 | testing | Med | Facade turn state-machine (external-TTS handoff) not unit-tested — needs a mockable engine/coordinator seam | Open |
 | VIK-028 | STT | **Critical** | Apple `isFinal` at a grammatical boundary treated as end-of-turn — mic cut off mid-sentence, wrong intent on an incomplete phrase | **Fixed** |
 | VIK-029 | concurrency | **High** | Result loop in the task-group body could hang (and swallow the error) when `analyzer.start()` fails | **Fixed** |
+| VIK-030 | contract | Med | `runtime/routing.json` is decoded and never read — the pack's ladder and `assist_cloud` switch do nothing | Open |
+| VIK-031 | security | **High** | Unresolved turns returned a URL built from pack data, with the user's transcript in its query string | **Fixed** |
+| VIK-032 | STT | **High** | A locale the device cannot transcribe was swallowed by `try?` — pack in one language, recogniser in another, silently | **Fixed** |
+| VIK-033 | packaging | Med | The package persisted the transcription locale in the HOST app's `UserDefaults.standard` | **Fixed** |
+| VIK-034 | contract | Med | `bundle.json` has TWO independent Decodable models that read different subsets of it | Open |
+| VIK-035 | security | **High** | The host extractor rewrote `bundle.json` before signature verification — every OTA install would fail once signing is on | **Fixed** |
+| VIK-036 | NLU | **High** | Keyword-routed intents skipped the confirmation gate — `Cmd.SendMessage` (`always`) sent without asking | **Fixed** |
+| VIK-037 | NLU | Med | An open slot's free text was overwritten by a gazetteer canonical — a reminder the user named "drink water" was stored as "Drink Water" | **Fixed** |
 
 ---
 
@@ -697,3 +705,237 @@ have diverged. The endpointing / `isFinal` / app-audio fixes landed only in the
 package copy; the app copy still carries the old behaviour. Consolidating to the
 single package source (per MIGRATION.md Phase 2) removes the drift and the risk of a
 fix being made in one and not the other.
+
+### VIK-031 — Unresolved turns handed back a pack-supplied URL (**High**) — Fixed
+
+`NLUEngine` answered every unresolved turn with
+`.fallback(url: await classifier.genaiURL(for: text), …)`. That URL was built by
+`PackClassifierAdapter` from `genai_base_url` in the classifier weights blob, with
+the user's **verbatim transcript** appended as `?q=`.
+
+Three things were wrong with it at once:
+
+1. **Security.** The base URL is pack data. Until pack signatures are enforced
+   (see `TODO.md`), an attacker-authored pack chooses where transcripts are sent —
+   the only path in the package that reaches the network at all, in an SDK whose
+   selling point is that it does not.
+2. **Nobody used it.** `PackageVoiceView` discarded it with `_`; the app's own
+   view model rendered a card and never opened it; the tests stubbed
+   `example.invalid`. The shipping en pack's value is the placeholder
+   `https://genai.yourcompany.com/chat?query=` — a domain that does not resolve —
+   and `genaiURL` overwrote the query string anyway, so even that was discarded.
+3. **Wrong layer.** `SPEC-voice-understanding-provider.md` is explicit: the host
+   runs its own fallback chain, and a provider "MUST NOT attempt any fallback
+   themselves". A URL is the engine answering a question that is not its own.
+
+**Fix:** the URL leaves and the intent name takes its place —
+`NLUResponse.fallback(intent:confidence:breakdown:)`, surfaced as
+`VoiceIntentTurn.notUnderstood(intent:confidence:stages:)`. The name is the pack's
+own out-of-scope label (`ResolvedPack.outOfScopeIntent`), which is
+`Default Fallback Intent` for every pack shipping today — the same name the host's
+intent table already dispatches from its Dialogflow days, so an unrecognised
+utterance needs no special-casing on the host side at all. `genaiURL` is gone from
+`IntentClassifying` and `genai_base_url` is no longer read.
+
+`outOfScopeIntent` had to be widened to match it. It looked only for
+`*.oos.fallback` / `sys.oos.fallback`, which is nil for every current pack — so
+`PackClassifierAdapter` was substituting `""` on the vacuous-prediction path
+(VIK-011), and an empty label matched nothing downstream.
+
+Follow-on for the compiler team: drop `genai_base_url` from the weights blob, and
+replace the `Default Fallback Intent.done` response — it currently reads "Done.",
+which is what a hearing aid would say aloud to a user it did not understand.
+
+### VIK-030 — `runtime/routing.json` is decoded and never read (Med)
+
+Every pack ships it, `BundleDataLoader` decodes it, `ResolvedPack.routing` holds it,
+and no code path consults it. The en pack says:
+
+```json
+{"assist_cloud":{"enabled":false},
+ "ladder":[{"step":"reprompt","when":{"below_confidence":0.7}},
+           {"step":"give_up","when":{"after_attempts":3}}]}
+```
+
+So the pack disables cloud assist while the engine was building a cloud URL (VIK-031),
+and declares a two-step ladder that the engine approximates with a hardcoded
+`slotAttempts >= 3` and no reprompt step at all. Same shape as VIK-024: a table
+shipped by every pack and applied by nothing, which means the pack cannot change the
+behaviour it appears to control.
+
+**Ask:** wire the ladder — `below_confidence` → reprompt (bounded by
+`budget_per_session`), `after_attempts` → give up — and honour `assist_cloud.enabled`
+as the gate on whether a below-gate turn is offered to the host as a hand-off
+candidate at all. Today all three routes (out of scope, below gate, three failed slot
+attempts) collapse into one `.fallback(intent:)`, so a host that wants the ladder has
+to rebuild it from confidence alone.
+
+### VIK-032 — An unsupported locale was swallowed, not surfaced (**High**) — Fixed
+
+`VoiceIntentSession.prepare()` called
+
+```swift
+try? await coordinator.switchLocale(to: config.language.localeIdentifier)
+```
+
+`switchLocale` throws `TranscriptionError.localeNotSupported` when
+`SpeechTranscriber.supportedLocale(equivalentTo:)` has no model for the requested
+locale — a Danish session on a device with no Danish speech model, say. `try?`
+dropped that on the floor, and the recogniser carried on with the locale it had been
+CONSTRUCTED with, which came from the persisted override or the hardcoded `en-IN`.
+
+The result is the failure this package is otherwise careful to make impossible: the
+NLU bound to a verified Danish pack, the recogniser listening in English, no error
+thrown, no `.error` event, and a confident wrong intent at the end of the turn.
+`buildEngine()` refuses to substitute a language; this line did it anyway, one step
+later, on the other half of the pipeline.
+
+**Fix:** `try`, not `try?`. `start()` already wraps `prepare()` in a `do/catch` that
+sets `.stopped`, yields `.error` and rethrows, so the host now learns that the
+language it asked for is not one this device can hear.
+
+### VIK-033 — The package persisted the locale in the host's `UserDefaults` (Med) — Fixed
+
+`TranscriptionCoordinator` read and wrote `UserDefaults.standard` under
+`stt.userSelectedLocale` in eight places, and `SpeechRecognitionService.performPrewarm`
+read the same key directly to decide which model to warm. An un-namespaced key in a
+host application's shared defaults, written by an SDK the host did not ask to store
+anything.
+
+It arrived by copy. In the app this code came from, a real language-picker screen
+(`LanguageSelectorView`) legitimately wanted the user's choice to survive a relaunch;
+`MIGRATION.md` Phase 1 copied the coordinator across verbatim and the persistence came
+with it. What is a feature in an app is global mutable state in a package.
+
+Ordering was, to be fair, correct on the happy path: the write happened before the
+prewarm re-arm, so the prewarm read back the value just written. The damage was on the
+failure path (VIK-032), where the rolled-back stale value became the locale the
+recogniser actually ran in.
+
+**Fix:** the locale is a constructor parameter with no default —
+`TranscriptionCoordinator(locale:)` / `(appAudioProvider:locale:)`, passed from
+`VoiceIntentConfiguration.language` at session construction. Prewarm warms the locale
+the service already holds. Nothing is persisted, and the hardcoded `en-IN` is gone.
+
+`resolveCurrentLocaleIfNeeded` changed shape too, and this part is a behaviour fix
+rather than a move: it used to run the auto-detect chain (override → device locale →
+device language → en-IN), whose later steps substitute a DIFFERENT LANGUAGE. It now
+canonicalises the configured locale against `SpeechTranscriber`'s supported set and
+leaves an unsupported one alone, so it fails loudly through VIK-032's path instead of
+quietly becoming English.
+
+Downstream: with `UserDefaults` gone the target uses no required-reason API, so the
+`PrivacyInfo.xcprivacy` added for CA92.1 was removed, and with it the only `resources:`
+entry — restoring the structural zero-data guarantee (no resource means SwiftPM does
+not synthesise `Bundle.module` at all).
+
+### VIK-034 — Two Decodable models of `bundle.json`, each missing what the other reads (Med)
+
+`NLUBundle` (`Data/`, the session load path) and `NLUPackManifest` (`OTA/Models/`, the
+installer and `VoiceIntentClient`) both decode `bundle.json`, independently, and
+disagree about what is in it:
+
+| field | `NLUBundle` | `NLUPackManifest` |
+|---|---|---|
+| `bundle_id` | yes | yes |
+| `version` | **was absent** — added for `PackIdentity` | yes, required |
+| `channel` | yes | **absent** |
+| `compiler_version` | yes | **absent** |
+| `checksums_root` / `signature_info` / `created_at` | yes | yes |
+
+Two live consequences. The session path could not report a pack version at all until
+`version` was added to `NLUBundle` — which is why `activePackVersion()` had to re-read
+the file from disk and answer a subtly different question than "what is loaded?". And
+the OTA path cannot see `channel`, so `refusesDevelopmentPacks` is enforced only inside
+`BundleDataLoader`: the installer stages and activates a pack without ever asking which
+channel signed it, and the refusal lands later, when a session tries to load it.
+
+There is no reason for two models. One type, decoded once from the verified bytes,
+handed to whoever needs it.
+
+**Also:** `version` is optional in one and required in the other, for the same file.
+Confirm with the compiler team whether it is guaranteed; if it is, tighten `NLUBundle`
+and drop the optionality out of `PackIdentity`.
+
+### VIK-035 — The host extractor rewrote `bundle.json` before it was verified (**High**) — Fixed
+
+`STTPackExtractor.extract` — the host's `PackExtractor`, called by
+`PackValidator.extractAndValidate` as **step 1** — injected a `version` field into
+`bundle.json` when the compiler had not emitted one, parsing it out of `bundle_id`, and
+wrote the patched JSON back to disk.
+
+`PackValidator` then ran `PackIntegrity.verify` as **step 3**. The Ed25519 signature
+covers `integrity/manifest.sha256 ‖ bundle.json`, and `bundle.json` is deliberately
+excluded from the checksum table — the signature is the only thing binding it. So the
+bytes being verified were bytes the host had just edited.
+
+Nothing caught it, and nothing would have until production. The dev trust policy sets
+`skipsSignatureVerification: true`, so that step never ran. The day ADR-005 Part 11's
+production policy is switched on, every OTA install fails with `integrityCheckFailed` —
+and the message reads as *"this pack was tampered with"*, which is true, by us.
+
+**Fix:** the injection is gone, with a comment at the site saying nothing below that line
+may write into a pack. Hoisting a single top-level directory stays: it moves files, it
+does not edit them, and it produces the pack root the manifest's relative paths assume.
+
+**Why the field can be required now:** `nlu_compiler` commit `bd3c5bf` emits `version`
+from the same variable that builds `bundle_id`, before `build.py` signs. So
+`NLUBundle.version` and `PackIdentity.version` are non-optional, and a pack built before
+that commit is refused at decode instead of being silently repaired.
+
+**Still to do:** the vendored seed pack was built 2026-08-08, four days before `bd3c5bf`,
+and only loads today because a `version` was hand-added to it for OTA testing. Rebuild
+and re-vendor it from the fixed compiler.
+
+### VIK-036 — The keyword path skipped the confirmation gate (**High**) — Fixed
+
+VIK-021 again, on the other road into the engine. `handleNewIntent`'s Stage 0 matched a
+declarative keyword rule and returned `advanceSlots(kwIntent, cfg)` directly. The gate
+check — `gate(for: intent).fires(confidence: conf)` — existed only in the branch below
+it, the one reached after classification.
+
+`pack-en` is the worst possible pack for that gap. It gates exactly ONE intent
+(`Cmd.SendMessage`, policy `always`) and that intent ships FOUR keyword rules: `^ptt$`,
+`^push to talk$`, `\bsend\b.{0,30}\bmessage\b`, and a `ping <relative>` pattern. So the
+single intent the pack insists on confirming was also the one most likely to arrive by
+the path that could not confirm. "Send a message to mom" composed and sent, with no
+question asked.
+
+The bypass was intended for the CLASSIFIER — a declarative rule is higher precision than
+TF-IDF, which is a statement about confidence. Confirmation policy is not about
+confidence, it is about consequence: `always` means ask however sure you are.
+
+**Fix:** the keyword branch consults the same gate before `advanceSlots`, at
+**confidence 1.0**. A pattern either matched or it did not, so there is no ambiguity to
+gate on, and the three policies land where they should — `always` fires, `when_ambiguous`
+does not, `never` does not.
+
+**Found by:** `ConfirmationAndSlotFlowTests` after the taxonomy fixes. Its utterance
+("set a reminder…") matched a keyword rule, so four tests failed for the visible reason
+and three passed while proving nothing — a "yes" answering a slot prompt is
+indistinguishable, at the assertion, from a "yes" answering a confirmation. Guarded now
+by `testAKeywordRoutedAlwaysGatedIntentStillConfirms`, plus
+`testTheTwoUtterancesTakeTheRoutesTheseTestsAssume`, which fails if a future keyword rule
+routes the confirmation tests around the gate again.
+
+### VIK-037 — An open slot's free text was overwritten by a gazetteer canonical (Med) — Fixed
+
+"Set a reminder to drink water" created a reminder named **"Drink Water"**.
+
+`extractAllSlots` runs first and sweeps the whole utterance against every entity table,
+including open ones. `remind` carries "drink water" as a hint value, so the slot was
+filled with its CANONICAL, title-cased form. `fillOpenTopics` — which derives the topic
+from the user's actual words — then skipped the slot, because its guard was
+`slots[slot.name] == nil` and the slot was no longer nil.
+
+An open entity's value list is a hint, not a vocabulary (VIK-017). When the slot is the
+thing the user is naming, their words are the answer; the gazetteer's capitalisation is a
+rewrite of them, and it reaches the user as the title of their own reminder.
+
+**Fix:** `fillOpenTopics` overrides rather than fills-if-empty. Only the three
+opening-utterance paths call it, so the mid-flow opportunistic sweep is untouched.
+
+**Found by:** `TopicDerivationParityTests` — 2 of 15 cases, both where the free text
+happened to collide with a hint value ("drink water", "take medication"). Exactly the
+class of divergence the parity fixtures exist to catch, and exactly why VIK-013 wants
+them published by the pack's own build rather than captured by hand.
