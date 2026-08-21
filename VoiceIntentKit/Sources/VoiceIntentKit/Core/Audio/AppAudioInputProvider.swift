@@ -23,13 +23,13 @@ import os.log
 /// Lifecycle mirrors the live mic: the coordinator calls `start()` when a turn opens
 /// and `stop()` when it endpoints. Audio pushed between turns (no active stream) is
 /// dropped, so trailing audio from one turn can't bleed into the next.
-public final class AppAudioInputProvider: AudioInputProvider, @unchecked Sendable {
+final class AppAudioInputProvider: AudioInputProvider, @unchecked Sendable {
 
     // MARK: - AudioInputProvider
 
-    public private(set) var state: AudioInputState = .idle
+    private(set) var state: AudioInputState = .idle
 
-    public var audioFormat: AVAudioFormat { get async throws { format } }
+    var audioFormat: AVAudioFormat { get async throws { format } }
 
     // MARK: - Private
 
@@ -49,7 +49,7 @@ public final class AppAudioInputProvider: AudioInputProvider, @unchecked Sendabl
 
     /// - Parameter sampleRate: sample rate of the Int16 mono PCM the host will push
     ///   (e.g. 16_000 for a BLE / hearing-aid stream).
-    public init(sampleRate: Double) {
+    init(sampleRate: Double) {
         let rate = sampleRate > 0 ? sampleRate : 16_000
         // Int16 / mono / interleaved is a universally valid PCM format description.
         self.format = AVAudioFormat(
@@ -66,7 +66,7 @@ public final class AppAudioInputProvider: AudioInputProvider, @unchecked Sendabl
     /// Opens a fresh buffer stream for one recognition turn. Bounded so a slow
     /// consumer can never grow memory without limit — the newest audio wins, which
     /// is the correct policy for live speech (stale backlog is worthless).
-    public func start() -> AsyncStream<AVAudioPCMBuffer> {
+    func start() -> AsyncStream<AVAudioPCMBuffer> {
         state = .preparing
         let (stream, continuation) = AsyncStream<AVAudioPCMBuffer>.makeStream(
             bufferingPolicy: .bufferingNewest(32)
@@ -82,7 +82,7 @@ public final class AppAudioInputProvider: AudioInputProvider, @unchecked Sendabl
 
     /// Ends the current turn's stream. Audio pushed after this (until the next
     /// `start()`) is dropped.
-    public func stop() {
+    func stop() {
         continuationLock.withLock { c in
             c?.finish()
             c = nil
@@ -104,7 +104,7 @@ public final class AppAudioInputProvider: AudioInputProvider, @unchecked Sendabl
     ///   - the chunk is empty.
     /// A non-frame-aligned byte count (odd, for Int16) is truncated to whole frames
     /// and the remainder logged — it never crashes or builds a malformed buffer.
-    public func enqueue(_ data: Data) {
+    func enqueue(_ data: Data) {
         guard !data.isEmpty else { return }
 
         // Only build/yield if a turn is active. Snapshot under the lock; yielding to a

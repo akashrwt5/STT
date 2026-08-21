@@ -23,32 +23,32 @@ import Foundation
 
 // MARK: - capabilities/<id>/capability.json
 
-public struct CapabilityManifest: Decodable, Sendable {
-    public let id: String
-    public let version: String
-    public let status: String
-    public let owner: String
-    public let platforms: [String]
-    public let languages: [String]
-    public let actions: [Action]
+struct CapabilityManifest: Decodable, Sendable {
+    let id: String
+    let version: String
+    let status: String
+    let owner: String
+    let platforms: [String]
+    let languages: [String]
+    let actions: [Action]
 
-    public struct Action: Decodable, Sendable {
-        public let key: String
-        public let descriptor: String
-        public let params: [Param]
+    struct Action: Decodable, Sendable {
+        let key: String
+        let descriptor: String
+        let params: [Param]
 
-        public struct Param: Decodable, Sendable {
-            public let name: String
+        struct Param: Decodable, Sendable {
+            let name: String
             /// "entity_ref" today. The vocabulary is the capability schema's,
             /// not ours, so it stays a string.
-            public let type: String
+            let type: String
             /// Entity id backing this parameter, when `type` is an entity ref.
-            public let entity: String?
-            public let required: Bool
+            let entity: String?
+            let required: Bool
 
             enum CodingKeys: String, CodingKey { case name, type, entity, required }
 
-            public init(from decoder: Decoder) throws {
+            init(from decoder: Decoder) throws {
                 let c = try decoder.container(keyedBy: CodingKeys.self)
                 name = try c.decode(String.self, forKey: .name)
                 type = try c.decode(String.self, forKey: .type)
@@ -61,55 +61,55 @@ public struct CapabilityManifest: Decodable, Sendable {
 
 // MARK: - capabilities/<id>/workflows.json
 
-public struct CapabilityWorkflows: Decodable, Sendable {
-    public let intents: [String: IntentWorkflow]
+struct CapabilityWorkflows: Decodable, Sendable {
+    let intents: [String: IntentWorkflow]
 }
 
 /// One intent's dialog shape. `response`/`prompt` fields are response KEYS, not
 /// text — the string lives in `responses/<lang>.json`. That indirection is what
 /// makes a new language a new responses file instead of a new schema.
-public struct IntentWorkflow: Decodable, Sendable {
-    public let slots: [SlotSpec]
-    public let completion: Completion?
-    public let confirmation: Confirmation?
+struct IntentWorkflow: Decodable, Sendable {
+    let slots: [SlotSpec]
+    let completion: Completion?
+    let confirmation: Confirmation?
 
     enum CodingKeys: String, CodingKey { case slots, completion, confirmation }
 
-    public init(from decoder: Decoder) throws {
+    init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         slots = try c.decodeIfPresent([SlotSpec].self, forKey: .slots) ?? []
         completion = try c.decodeIfPresent(Completion.self, forKey: .completion)
         confirmation = try c.decodeIfPresent(Confirmation.self, forKey: .confirmation)
     }
 
-    public struct Completion: Decodable, Sendable {
-        public let action: String
-        public let response: String
+    struct Completion: Decodable, Sendable {
+        let action: String
+        let response: String
     }
 
-    public struct Confirmation: Decodable, Sendable {
-        public let prompt: String
-        public let required: Bool
+    struct Confirmation: Decodable, Sendable {
+        let prompt: String
+        let required: Bool
     }
 
-    public struct SlotSpec: Decodable, Sendable {
-        public let name: String
-        public let entity: String
-        public let required: Bool
+    struct SlotSpec: Decodable, Sendable {
+        let name: String
+        let entity: String
+        let required: Bool
         /// Response key for the question that collects this slot.
-        public let prompt: String
+        let prompt: String
     }
 }
 
 // MARK: - runtime/policies.json
 
-public struct PackPolicies: Decodable, Sendable {
-    public let policySchema: Int
-    public let policyContent: Int
+struct PackPolicies: Decodable, Sendable {
+    let policySchema: Int
+    let policyContent: Int
     /// intent id → "always" | "never" | "when_ambiguous"
-    public let confirmation: [String: String]
-    public let thresholds: Thresholds
-    public let limits: Limits
+    let confirmation: [String: String]
+    let thresholds: Thresholds
+    let limits: Limits
 
     enum CodingKeys: String, CodingKey {
         case policySchema = "policy_schema"
@@ -117,7 +117,7 @@ public struct PackPolicies: Decodable, Sendable {
         case confirmation, thresholds, limits
     }
 
-    public init(from decoder: Decoder) throws {
+    init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         policySchema = try c.decode(Int.self, forKey: .policySchema)
         policyContent = try c.decode(Int.self, forKey: .policyContent)
@@ -126,19 +126,19 @@ public struct PackPolicies: Decodable, Sendable {
         limits = try c.decodeIfPresent(Limits.self, forKey: .limits) ?? Limits()
     }
 
-    public struct Thresholds: Decodable, Sendable {
-        public let confidence: Double
-        public let interrupt: Double
-        public let semantic: Double
-        public let agreement: Double?
+    struct Thresholds: Decodable, Sendable {
+        let confidence: Double
+        let interrupt: Double
+        let semantic: Double
+        let agreement: Double?
         /// Upper bound of the confirmation band. `confirmation` says WHICH
         /// intents are gated; these two say WHEN. Without them a runtime knows
         /// the gated set but not the band, so it confirms always or never —
         /// both wrong.
-        public let uncertainConfirmBelow: Double?
+        let uncertainConfirmBelow: Double?
         /// Lower bound. Under this the utterance is too weak to confirm and
         /// falls through to the routing ladder.
-        public let uncertainConfirmFloor: Double?
+        let uncertainConfirmFloor: Double?
 
         enum CodingKeys: String, CodingKey {
             case confidence, interrupt, semantic, agreement
@@ -147,10 +147,10 @@ public struct PackPolicies: Decodable, Sendable {
         }
     }
 
-    public struct Limits: Decodable, Sendable {
-        public let maxSlotAttempts: Int
-        public let sessionTimeoutSeconds: Int
-        public let maxFollowupDepth: Int?
+    struct Limits: Decodable, Sendable {
+        let maxSlotAttempts: Int
+        let sessionTimeoutSeconds: Int
+        let maxFollowupDepth: Int?
 
         enum CodingKeys: String, CodingKey {
             case maxSlotAttempts = "max_slot_attempts"
@@ -158,9 +158,9 @@ public struct PackPolicies: Decodable, Sendable {
             case maxFollowupDepth = "max_followup_depth"
         }
 
-        public init() { maxSlotAttempts = 3; sessionTimeoutSeconds = 120; maxFollowupDepth = nil }
+        init() { maxSlotAttempts = 3; sessionTimeoutSeconds = 120; maxFollowupDepth = nil }
 
-        public init(from decoder: Decoder) throws {
+        init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             maxSlotAttempts = try c.decodeIfPresent(Int.self, forKey: .maxSlotAttempts) ?? 3
             sessionTimeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .sessionTimeoutSeconds) ?? 120
@@ -174,23 +174,23 @@ public struct PackPolicies: Decodable, Sendable {
 /// Stage wiring. The pack is authoritative over host configuration: en-1.0.28
 /// disables the semantic stage, and a host asking for semantic rescue must not
 /// override a decision the pack's report card was measured under.
-public struct PackCascade: Decodable, Sendable {
-    public let stages: [Stage]
+struct PackCascade: Decodable, Sendable {
+    let stages: [Stage]
 
-    public struct Stage: Decodable, Sendable {
-        public let id: String
-        public let enabled: Bool
-        public let input: IO?
-        public let output: IO?
+    struct Stage: Decodable, Sendable {
+        let id: String
+        let enabled: Bool
+        let input: IO?
+        let output: IO?
 
-        public struct IO: Decodable, Sendable {
-            public let dtype: String?
-            public let dim: Int?
-            public let shape: [Int]?
+        struct IO: Decodable, Sendable {
+            let dtype: String?
+            let dim: Int?
+            let shape: [Int]?
         }
     }
 
-    public func isEnabled(_ id: String) -> Bool {
+    func isEnabled(_ id: String) -> Bool {
         stages.first { $0.id == id }?.enabled ?? false
     }
 
@@ -200,37 +200,37 @@ public struct PackCascade: Decodable, Sendable {
     /// Note the *input* contract here describes the server ONNX graph
     /// (`{dtype: string, shape: [1]}`), not the device CoreML head, which takes
     /// a dense float32 vector. Do not validate the device model against it.
-    public var tfidfOutputDim: Int? {
+    var tfidfOutputDim: Int? {
         stages.first { $0.id == "tfidf" }?.output?.dim
     }
 }
 
 // MARK: - runtime/routing.json
 
-public struct PackRouting: Decodable, Sendable {
-    public let ladder: [Step]
-    public let assistCloud: AssistCloud?
+struct PackRouting: Decodable, Sendable {
+    let ladder: [Step]
+    let assistCloud: AssistCloud?
 
     enum CodingKeys: String, CodingKey {
         case ladder
         case assistCloud = "assist_cloud"
     }
 
-    public struct Step: Decodable, Sendable {
-        public let step: String
-        public let when: When
-        public let budgetPerSession: Int?
+    struct Step: Decodable, Sendable {
+        let step: String
+        let when: When
+        let budgetPerSession: Int?
 
         enum CodingKeys: String, CodingKey {
             case step, when
             case budgetPerSession = "budget_per_session"
         }
 
-        public struct When: Decodable, Sendable {
-            public let belowConfidence: Double?
-            public let afterAttempts: Int?
-            public let requiresFeature: String?
-            public let requiresConsent: Bool?
+        struct When: Decodable, Sendable {
+            let belowConfidence: Double?
+            let afterAttempts: Int?
+            let requiresFeature: String?
+            let requiresConsent: Bool?
 
             enum CodingKeys: String, CodingKey {
                 case belowConfidence = "below_confidence"
@@ -241,9 +241,9 @@ public struct PackRouting: Decodable, Sendable {
         }
     }
 
-    public struct AssistCloud: Decodable, Sendable {
-        public let enabled: Bool
-        public let timeoutMS: Int?
+    struct AssistCloud: Decodable, Sendable {
+        let enabled: Bool
+        let timeoutMS: Int?
 
         enum CodingKeys: String, CodingKey {
             case enabled
@@ -259,60 +259,60 @@ public struct PackRouting: Decodable, Sendable {
 /// a guard fires regardless of confidence.
 ///
 /// Additive section — a pack without it simply has no guards.
-public struct PackGuards: Decodable, Sendable {
-    public let helpMarker: HelpMarker?
-    public let polarity: [PolarityGuard]
+struct PackGuards: Decodable, Sendable {
+    let helpMarker: HelpMarker?
+    let polarity: [PolarityGuard]
 
     enum CodingKeys: String, CodingKey {
         case helpMarker = "help_marker"
         case polarity
     }
 
-    public init(from decoder: Decoder) throws {
+    init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         helpMarker = try c.decodeIfPresent(HelpMarker.self, forKey: .helpMarker)
         polarity = try c.decodeIfPresent([PolarityGuard].self, forKey: .polarity) ?? []
     }
 
-    public static let empty = PackGuards()
+    static let empty = PackGuards()
     private init() { helpMarker = nil; polarity = [] }
 
     /// Redirects a command to its help counterpart when the utterance is a
     /// question about it — "how do i turn up the volume" must show help, not
     /// change the volume.
-    public struct HelpMarker: Decodable, Sendable {
-        public let markers: String
+    struct HelpMarker: Decodable, Sendable {
+        let markers: String
         /// classified intent → help intent to substitute.
-        public let pairs: [String: String]
+        let pairs: [String: String]
     }
 
-    public struct PolarityGuard: Decodable, Sendable {
-        public let intent: String
-        public let pattern: String
+    struct PolarityGuard: Decodable, Sendable {
+        let intent: String
+        let pattern: String
         /// Absent means suppress to the out-of-scope fallback.
-        public let redirect: String?
+        let redirect: String?
     }
 }
 
 // MARK: - keywords/<lang>.json
 
-public struct PackKeywords: Decodable, Sendable {
-    public let lang: String
-    public let rules: [Rule]
+struct PackKeywords: Decodable, Sendable {
+    let lang: String
+    let rules: [Rule]
 
     /// Tier 1 is an exact anchored match (`^mute$`), tier 2 a looser pattern.
     /// The flattened root shim drops the tier and 9 of these rules entirely.
-    public struct Rule: Decodable, Sendable {
-        public let intent: String
-        public let pattern: String
-        public let tier: Int
+    struct Rule: Decodable, Sendable {
+        let intent: String
+        let pattern: String
+        let tier: Int
         /// Patterns that VETO the match — the utterance looks like this intent
         /// but a guard word says otherwise.
-        public let guards: [String]
+        let guards: [String]
 
         enum CodingKeys: String, CodingKey { case intent, pattern, tier, guards }
 
-        public init(from decoder: Decoder) throws {
+        init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             intent = try c.decode(String.self, forKey: .intent)
             pattern = try c.decode(String.self, forKey: .pattern)
@@ -324,16 +324,16 @@ public struct PackKeywords: Decodable, Sendable {
 
 // MARK: - entities/shared/content.json
 
-public struct PackEntities: Decodable, Sendable {
-    public let entities: [String: EntityDefinition]
+struct PackEntities: Decodable, Sendable {
+    let entities: [String: EntityDefinition]
 }
 
 /// Values are LANGUAGE-KEYED (`{"en": [...]}`). In a per-language pack that map
 /// has exactly one key, but reading it by language rather than taking the first
 /// value is what keeps the code honest if that ever changes.
-public struct EntityDefinition: Decodable, Sendable {
-    public let type: String
-    public let fuzzy: Bool
+struct EntityDefinition: Decodable, Sendable {
+    let type: String
+    let fuzzy: Bool
     /// The value list is a hint, not a closed set — a free-text answer is
     /// acceptable and the runtime may derive one from the utterance.
     ///
@@ -341,18 +341,18 @@ public struct EntityDefinition: Decodable, Sendable {
     /// was dropped by the v3 projection, so `remind` looked closed and could not
     /// be filled from free text. `decodeIfPresent` because packs built before
     /// that fix do not carry it — absent means closed, which is the safe reading.
-    public let open: Bool
-    public let values: [String: [String: [String]]]
+    let open: Bool
+    let values: [String: [String: [String]]]
     /// `runtime.builtin.datetime`, `runtime.builtin.integer`, or the bare
     /// `runtime.builtin` from a pack built before VIK-019.
-    public let dynamicSource: String?
+    let dynamicSource: String?
 
     enum CodingKeys: String, CodingKey {
         case type, fuzzy, open, values
         case dynamicSource = "dynamic_source"
     }
 
-    public init(from decoder: Decoder) throws {
+    init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         type = try c.decode(String.self, forKey: .type)
         fuzzy = try c.decodeIfPresent(Bool.self, forKey: .fuzzy) ?? false
@@ -364,7 +364,7 @@ public struct EntityDefinition: Decodable, Sendable {
     /// Canonical value → synonyms, for one language. Throws nothing: an entity
     /// with no entry for this language yields an empty table, which the loader
     /// reports rather than silently accepting.
-    public func synonyms(language: String) -> [String: [String]] {
+    func synonyms(language: String) -> [String: [String]] {
         var out: [String: [String]] = [:]
         for (canonical, byLang) in values {
             if let syns = byLang[language] { out[canonical] = syns }
@@ -372,7 +372,7 @@ public struct EntityDefinition: Decodable, Sendable {
         return out
     }
 
-    public var isDynamic: Bool { type == "dynamic" }
+    var isDynamic: Bool { type == "dynamic" }
 }
 
 // MARK: - telemetry/schema.json
@@ -380,20 +380,20 @@ public struct EntityDefinition: Decodable, Sendable {
 /// Enums only — the pack publishes the closed vocabularies, not the event
 /// shape. Values are validated against these before emission so a client cannot
 /// invent a stage or outcome name the backend will reject.
-public struct PackTelemetrySchema: Decodable, Sendable {
-    public let telemetrySchemaVersion: Int
-    public let enums: Enums
+struct PackTelemetrySchema: Decodable, Sendable {
+    let telemetrySchemaVersion: Int
+    let enums: Enums
 
     enum CodingKeys: String, CodingKey {
         case telemetrySchemaVersion = "telemetry_schema_version"
         case enums
     }
 
-    public struct Enums: Decodable, Sendable {
-        public let lifecycle: [String]
-        public let outcome: [String]
-        public let routingReason: [String]
-        public let stages: [String]
+    struct Enums: Decodable, Sendable {
+        let lifecycle: [String]
+        let outcome: [String]
+        let routingReason: [String]
+        let stages: [String]
 
         enum CodingKeys: String, CodingKey {
             case lifecycle, outcome, stages

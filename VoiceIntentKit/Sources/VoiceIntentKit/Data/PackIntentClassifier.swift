@@ -26,27 +26,27 @@ import CoreML
 import Foundation
 import os.log
 
-public actor PackIntentClassifier {
+actor PackIntentClassifier {
 
     // MARK: - Result
 
-    public struct Prediction: Sendable, Equatable {
-        public let intent: String
+    struct Prediction: Sendable, Equatable {
+        let intent: String
         /// `softmax(logits / temperature)[argmax]` — the device confidence
         /// contract. Never CoreML's baked `classProbability`, which is softmax
         /// at T=1 and would discard the pack's calibration.
-        public let confidence: Double
+        let confidence: Double
         /// Gap to the runner-up. A confident-looking top score with a close
         /// second is a different situation from a clear win.
-        public let margin: Double
+        let margin: Double
         /// Whether this cleared both the confidence and the gap thresholds.
-        public let passesGate: Bool
+        let passesGate: Bool
         /// True when the utterance produced no features at all, so the scores
         /// are the model's priors rather than a reading of the input.
-        public let isVacuous: Bool
-        public let backend: Backend
+        let isVacuous: Bool
+        let backend: Backend
 
-        public enum Backend: String, Sendable { case coreML, pureSwift }
+        enum Backend: String, Sendable { case coreML, pureSwift }
     }
 
     // MARK: - State
@@ -69,7 +69,7 @@ public actor PackIntentClassifier {
 
     /// - Throws: `VoiceIntentError` when the weights cannot be read or the
     ///   vocabulary does not match the label space. Never traps.
-    public init(artifacts: ResolvedPack.ClassifierArtifacts) throws {
+    init(artifacts: ResolvedPack.ClassifierArtifacts) throws {
         self.artifacts = artifacts
         self.temperature = artifacts.temperature > 0 ? artifacts.temperature : 1.0
         self.confidenceThreshold = artifacts.confidenceThreshold
@@ -107,7 +107,7 @@ public actor PackIntentClassifier {
     /// Idempotent. Worth calling before the first utterance: the load itself is
     /// ~15 ms on `.cpuOnly` and the first prediction carries a small extra cost,
     /// which is latency the user would otherwise wait through.
-    public func warmUp() async {
+    func warmUp() async {
         guard model == nil, let artifact = artifacts.model else { return }
         do {
             model = try Self.loadModel(at: artifact, log: log)
@@ -124,14 +124,14 @@ public actor PackIntentClassifier {
     }
 
     /// Release the CoreML head. The next `warmUp()` reloads it.
-    public func unload() {
+    func unload() {
         model = nil
         coefficients = nil
     }
 
     // MARK: - Classification
 
-    public func classify(_ text: String) -> Prediction {
+    func classify(_ text: String) -> Prediction {
         let vector = vectorizer.vectorize(text)
 
         // No feature matched. Every logit is its intercept, so argmax is a fixed

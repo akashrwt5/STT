@@ -6,7 +6,7 @@
 import Foundation
 
 /// Lifecycle states for any `AudioInputProvider` implementation.
-public enum AudioInputState: Sendable {
+enum AudioInputState: Sendable {
     case idle
     case preparing
     case active
@@ -15,7 +15,7 @@ public enum AudioInputState: Sendable {
 }
 
 extension AudioInputState: Equatable {
-    public static func == (lhs: AudioInputState, rhs: AudioInputState) -> Bool {
+    static func == (lhs: AudioInputState, rhs: AudioInputState) -> Bool {
         switch (lhs, rhs) {
         case (.idle, .idle), (.preparing, .preparing), (.active, .active), (.stopped, .stopped):
             return true

@@ -40,6 +40,17 @@ public final class VoiceIntentSession {
         didSet { if state != oldValue { continuation.yield(.stateChanged(state)) } }
     }
 
+    /// The pack this session actually bound — nil until the engine is built, which
+    /// happens on the first `start()` or `classify(text:)`.
+    ///
+    /// Read it for telemetry: every session should be attributable to the exact bytes
+    /// that classified for it. Do NOT read it from `VoiceIntentClient.activePackVersion`
+    /// instead — that reports what is `Current` on DISK, and activation is
+    /// apply-on-next-build, so after an OTA install the two deliberately disagree until
+    /// the next session starts. When a user reports a misheard command, the pack that
+    /// misheard it is this one, not the one that has since replaced it.
+    public private(set) var loadedPack: PackIdentity?
+
     // MARK: - Private
 
     private let config: VoiceIntentConfiguration
@@ -77,14 +88,21 @@ public final class VoiceIntentSession {
         // Build the audio pipeline for the requested source. For `.appProvided` the
         // coordinator is told it does NOT own the AVAudioSession, and a push provider
         // is created for `provideAudio(_:)` to feed.
+        //
+        // The locale is handed over HERE, at construction. The coordinator used to
+        // build itself from a value persisted in the host's `UserDefaults` and get
+        // corrected a moment later by `switchLocale` in `prepare()` — so between the
+        // two there was a recogniser configured for whatever the last session used.
+        // One language is chosen, in one place, and it is the one in `configuration`.
+        let locale = Locale(identifier: configuration.language.localeIdentifier)
         switch configuration.audioSource {
         case .microphone:
             self.appAudio = nil
-            self.coordinator = TranscriptionCoordinator()
+            self.coordinator = TranscriptionCoordinator(locale: locale)
         case .appProvided(let sampleRate):
             let provider = AppAudioInputProvider(sampleRate: sampleRate)
             self.appAudio = provider
-            self.coordinator = TranscriptionCoordinator(appAudioProvider: provider)
+            self.coordinator = TranscriptionCoordinator(appAudioProvider: provider, locale: locale)
         }
 
         speaker.onFinish = { [weak self] in self?.handleSpeechFinished() }
@@ -150,10 +168,20 @@ public final class VoiceIntentSession {
         // Throws a `VoiceIntentError` if the pack is missing, unsigned, tampered
         // with, or for the wrong language — none of which may be answered by
         // quietly starting a session in a different language.
-        let engine = try await buildEngine()
+        // `engine` stays a non-optional LOCAL: `self.engine` is `(any ConversationEngine)?`,
+        // and the warm-up calls at the end of this function need the unwrapped value.
+        let built = try await buildEngine()
+        let engine = built.engine
         self.engine = engine
+        self.loadedPack = built.identity
 
-        try? await coordinator.switchLocale(to: config.language.localeIdentifier)
+        // NOT `try?`. This throws `TranscriptionError.localeNotSupported` when the
+        // device has no speech model for the requested locale, and swallowing it left
+        // the session running the pack's language through a recogniser listening in a
+        // different one — a Danish pack transcribed as English, with no error, no event
+        // and a plausible-looking wrong intent at the end of it. A host that asked for
+        // a language the device cannot hear needs to be told, not quietly downgraded.
+        try await coordinator.switchLocale(to: config.language.localeIdentifier)
 
         coordinator.delegate = self
         coordinator.silenceConfiguration = config.autoStopOnSilence
@@ -233,8 +261,10 @@ public final class VoiceIntentSession {
         if let existing = engine {
             active = existing
         } else {
-            active = try await buildEngine()
+            let built = try await buildEngine()
+            active = built.engine
             engine = active
+            loadedPack = built.identity
         }
         let response = await active.handle(text)
         return Self.turn(from: response)
@@ -249,7 +279,7 @@ public final class VoiceIntentSession {
     /// success for an English user, and wrong in the user's hands for everyone
     /// else. A caller that cannot get a pack needs to know, not to be handed a
     /// session that will confidently misunderstand.
-    private func buildEngine() async throws -> any ConversationEngine {
+    private func buildEngine() async throws -> (engine: any ConversationEngine, identity: PackIdentity) {
         let code = config.language.languageCode
         let url = try await config.packProvider.packURL(for: code)
         // These are OPTIONAL overrides. When nil (the normal case) `PackEngineFactory`
@@ -263,9 +293,13 @@ public final class VoiceIntentSession {
         // JSON decode and a CoreML load.
         return try await Task.detached(priority: .userInitiated) {
             let pack = try BundleDataLoader.load(packAt: url, language: code, trust: trust)
-            return try PackEngineFactory.makeEngine(
+            let engine = try PackEngineFactory.makeEngine(
                 pack: pack, stopwords: configStopwords, trailingFunctionWords: configTrailing
             )
+            // Identity is captured from the pack that was just VERIFIED and LOADED,
+            // inside the same closure. Reading `bundle.json` again afterwards would
+            // reintroduce the gap this property exists to close.
+            return (engine, PackIdentity(pack.manifest))
         }.value
     }
 
@@ -302,10 +336,10 @@ public final class VoiceIntentSession {
                 stages: Self.stages(from: bd))))
             announce(message)
 
-        case .fallback(let url, let confidence, let bd):
+        case .fallback(let intent, let confidence, let bd):
             awaitingAnswer = false
             continuation.yield(.turn(.notUnderstood(
-                fallbackURL: url, confidence: confidence,
+                intent: intent, confidence: confidence,
                 stages: Self.stages(from: bd))))
             // External TTS: the host may want to speak "didn't understand" — wait for it.
             if config.speaksPrompts { finishTurnIfNeeded() } else { awaitHostDelivery() }
@@ -324,8 +358,8 @@ public final class VoiceIntentSession {
         case .fulfill(let i, _, let p, let m, let c, let r, let bd):
             return .fulfilled(intent: i, slots: p, message: m, confidence: c,
                               viaSemanticRescue: r, stages: stages(from: bd))
-        case .fallback(let url, let c, let bd):
-            return .notUnderstood(fallbackURL: url, confidence: c, stages: stages(from: bd))
+        case .fallback(let intent, let c, let bd):
+            return .notUnderstood(intent: intent, confidence: c, stages: stages(from: bd))
         case .interrupted(let cancelled, _):           return .interrupted(cancelledIntent: cancelled)
         }
     }
@@ -433,14 +467,18 @@ public final class VoiceIntentSession {
 
 // MARK: - TranscriptionDelegate
 
+/// Conformance is INTERNAL — `TranscriptionDelegate`, `TranscriptionError` and
+/// `TranscriptionState` are implementation detail as of the public-surface pass, and a
+/// public member cannot expose an internal type. Nothing is lost: the host never called
+/// these; it observes the same information, in its own vocabulary, on `events`.
 extension VoiceIntentSession: TranscriptionDelegate {
 
-    public func didReceivePartialResult(_ text: String) {
+    func didReceivePartialResult(_ text: String) {
         guard state != .speaking else { return }
         continuation.yield(.partialTranscript(text))
     }
 
-    public func didReceiveFinalResult(_ text: String) {
+    func didReceiveFinalResult(_ text: String) {
         // Ignore audio captured while the assistant is speaking (our own TTS).
         guard state != .speaking else { return }
         continuation.yield(.finalTranscript(text))
@@ -452,21 +490,21 @@ extension VoiceIntentSession: TranscriptionDelegate {
         }
     }
 
-    public func didEncounterError(_ error: TranscriptionError) {
+    func didEncounterError(_ error: TranscriptionError) {
         continuation.yield(.error(message: String(describing: error)))
         state = .stopped
     }
 
-    public func didChangeState(_ state: TranscriptionState) {
+    func didChangeState(_ state: TranscriptionState) {
         // STT-internal state; surfaced only through our own higher-level state model.
     }
 
-    public func didReachEndOfSpeech() {
+    func didReachEndOfSpeech() {
         // Silence detection ended the live session; the final-result path handles
         // classification. Nothing to do here.
     }
 
-    public func didUpdateAudioLevel(_ powerDBFS: Float) {
+    func didUpdateAudioLevel(_ powerDBFS: Float) {
         // Level metering is available but not part of the minimal public surface.
     }
 }

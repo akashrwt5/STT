@@ -10,18 +10,18 @@ import os.log
 ///
 /// Supports m4a, wav, mp3, and caf. Format conversion to the analyzer's required
 /// format is handled downstream by `SpeechRecognitionService`.
-public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
+final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
 
     // MARK: - AudioInputProvider
 
-    public var audioFormat: AVAudioFormat {
+    var audioFormat: AVAudioFormat {
         get async throws { try resolveProcessingFormat() }
     }
 
-    public private(set) var state: AudioInputState = .idle
+    private(set) var state: AudioInputState = .idle
 
     /// Real frame-based progress (0.0...1.0), driven as the file is read.
-    public let progressStream: AsyncStream<Double>?
+    let progressStream: AsyncStream<Double>?
 
     // MARK: - Private
 
@@ -36,7 +36,7 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
     // MARK: - Init
 
     /// - Parameter fileURL: Path to the audio file to transcribe.
-    public init(fileURL: URL) {
+    init(fileURL: URL) {
         self.fileURL = fileURL
         let (stream, continuation) = AsyncStream<Double>.makeStream()
         self.progressStream = stream
@@ -46,7 +46,7 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
     // MARK: - AudioInputProvider
 
     /// Opens the file and begins streaming raw buffers.
-    public func start() -> AsyncStream<AVAudioPCMBuffer> {
+    func start() -> AsyncStream<AVAudioPCMBuffer> {
         cancelled.withLock { $0 = false }
         state = .preparing
         return AsyncStream<AVAudioPCMBuffer> { [weak self] continuation in
@@ -62,7 +62,7 @@ public final class FileCaptureService: AudioInputProvider, @unchecked Sendable {
     }
 
     /// Signals the file reader to stop yielding buffers.
-    public func stop() {
+    func stop() {
         cancelled.withLock { $0 = true }
         state = .stopped
         logger.info("FileCaptureService cancelled.")

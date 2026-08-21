@@ -13,7 +13,7 @@ import AVFoundation
 /// Providers emit **raw** `AVAudioPCMBuffer`s in their natural capture format.
 /// `SpeechRecognitionService` is responsible for converting them to the format the
 /// `SpeechAnalyzer` requires (it is the only component that knows that format).
-public protocol AudioInputProvider: Sendable {
+protocol AudioInputProvider: Sendable {
     /// The natural format this provider produces buffers in.
     ///
     /// - Throws: `TranscriptionError.audioSessionSetupFailed` or format-negotiation errors.
@@ -38,7 +38,7 @@ public protocol AudioInputProvider: Sendable {
     var progressStream: AsyncStream<Double>? { get }
 }
 
-public extension AudioInputProvider {
+extension AudioInputProvider {
     /// Default: no progress reporting (suitable for open-ended sources like the mic).
     var progressStream: AsyncStream<Double>? { nil }
 }

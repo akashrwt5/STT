@@ -6,7 +6,7 @@
 import Foundation
 
 /// Represents the current state of the transcription coordinator.
-public enum TranscriptionState: Sendable, Equatable {
+enum TranscriptionState: Sendable, Equatable {
     case idle
     case requestingPermissions
     case preparingAudio
@@ -15,7 +15,7 @@ public enum TranscriptionState: Sendable, Equatable {
     case stopping
     case failed(TranscriptionError)
 
-    public static func == (lhs: TranscriptionState, rhs: TranscriptionState) -> Bool {
+    static func == (lhs: TranscriptionState, rhs: TranscriptionState) -> Bool {
         switch (lhs, rhs) {
         case (.idle, .idle),
              (.requestingPermissions, .requestingPermissions),
@@ -33,7 +33,7 @@ public enum TranscriptionState: Sendable, Equatable {
     }
 
     /// Whether the coordinator is actively producing transcription output.
-    public var isActive: Bool {
+    var isActive: Bool {
         switch self {
         case .transcribing, .processingFile:
             return true

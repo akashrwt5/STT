@@ -7,10 +7,10 @@
 
 import Foundation
 
-public enum SlotFormatting {
+enum SlotFormatting {
 
     /// Human-readable label for a slot key.
-    public static func displayName(_ key: String) -> String {
+    static func displayName(_ key: String) -> String {
         switch key {
         case "date-time":  return "When"
         case "name":       return "What"
@@ -21,7 +21,7 @@ public enum SlotFormatting {
     }
 
     /// Display value for a slot — pretty-prints date-time slots, passes others through.
-    public static func displayValue(_ value: String, forKey key: String) -> String {
+    static func displayValue(_ value: String, forKey key: String) -> String {
         if key == "date-time", let pretty = prettyDate(value) { return pretty }
         return value
     }
@@ -44,7 +44,7 @@ public enum SlotFormatting {
 
     /// Formats an ISO date-time string relative to `now`:
     /// "Today, 9:00 AM" · "Tomorrow, 9:00 AM" · "Friday, 5:00 PM" · "Jun 14, 9:00 AM".
-    public static func prettyDate(_ iso: String, now: Date = Date()) -> String? {
+    static func prettyDate(_ iso: String, now: Date = Date()) -> String? {
         guard let date = isoParser.date(from: iso) else { return nil }
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = .current

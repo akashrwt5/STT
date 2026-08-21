@@ -7,12 +7,12 @@ import AVFoundation
 import os.log
 
 /// Describes the currently active audio input source.
-public struct AudioRoute: Sendable, Equatable {
-    public let name: String
-    public let portType: AVAudioSession.Port
-    public let isHearingAid: Bool
+struct AudioRoute: Sendable, Equatable {
+    let name: String
+    let portType: AVAudioSession.Port
+    let isHearingAid: Bool
 
-    public static let builtInMic = AudioRoute(
+    static let builtInMic = AudioRoute(
         name: "iPhone Mic",
         portType: .builtInMic,
         isHearingAid: false
@@ -21,7 +21,7 @@ public struct AudioRoute: Sendable, Equatable {
 
 /// Receives notifications about audio session lifecycle events.
 @MainActor
-public protocol AudioSessionManagerDelegate: AnyObject {
+protocol AudioSessionManagerDelegate: AnyObject {
     func audioSessionManager(_ manager: AudioSessionManager, routeDidChangeTo route: AudioRoute)
     func audioSessionManagerWasInterrupted(_ manager: AudioSessionManager)
     func audioSessionManagerInterruptionEnded(_ manager: AudioSessionManager, shouldResume: Bool)
@@ -31,12 +31,12 @@ public protocol AudioSessionManagerDelegate: AnyObject {
 ///
 /// This class does not own any audio capture — that is `AudioCaptureService`'s concern.
 @MainActor
-public final class AudioSessionManager {
+final class AudioSessionManager {
 
     // MARK: - Public
 
-    public private(set) var currentRoute: AudioRoute = .builtInMic
-    public weak var delegate: AudioSessionManagerDelegate?
+    private(set) var currentRoute: AudioRoute = .builtInMic
+    weak var delegate: AudioSessionManagerDelegate?
 
     // MARK: - Private
 
@@ -52,7 +52,7 @@ public final class AudioSessionManager {
     // MARK: - Init
 
     /// - Parameter session: Injectable for testability. Defaults to `AVAudioSession.sharedInstance()`.
-    public init(session: AVAudioSession = .sharedInstance()) {
+    init(session: AVAudioSession = .sharedInstance()) {
         self.session = session
     }
 
@@ -79,7 +79,7 @@ public final class AudioSessionManager {
     /// off the main thread — activating the audio session spins up the audio hardware
     /// and can block for hundreds of milliseconds, freezing the UI if done on the main
     /// actor. `AVAudioSession` is a thread-safe singleton, so this is safe.
-    public func configure() async throws {
+    func configure() async throws {
         // Already configured and never deactivated (the conversation flow keeps the
         // session up across recognizer↔TTS handoffs) — just refresh route state.
         if isConfigured {
@@ -115,7 +115,7 @@ public final class AudioSessionManager {
     }
 
     /// Deactivates the audio session and removes notification observers.
-    public func tearDown() {
+    func tearDown() {
         NotificationCenter.default.removeObserver(self)
         try? session.setActive(false, options: .notifyOthersOnDeactivation)
         isConfigured = false

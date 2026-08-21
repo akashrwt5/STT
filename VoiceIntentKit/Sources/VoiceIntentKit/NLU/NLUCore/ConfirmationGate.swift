@@ -18,7 +18,7 @@
 import Foundation
 
 /// Whether an intent confirms, and on what evidence.
-public enum ConfirmationGate: Sendable, Equatable {
+enum ConfirmationGate: Sendable, Equatable {
 
     /// Always ask. Also the default for an intent with no gate configured, which
     /// is what preserves the pre-pack behaviour: the old `nlu_schema.json`
@@ -41,7 +41,7 @@ public enum ConfirmationGate: Sendable, Equatable {
 
     /// Half-open on purpose: `uncertain_confirm_below` is named "below", so a
     /// confidence exactly at the ceiling is NOT ambiguous.
-    public func fires(confidence: Double) -> Bool {
+    func fires(confidence: Double) -> Bool {
         switch self {
         case .always:
             return true

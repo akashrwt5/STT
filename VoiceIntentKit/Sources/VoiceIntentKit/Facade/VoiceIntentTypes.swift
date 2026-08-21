@@ -216,9 +216,16 @@ public enum VoiceIntentTurn: Sendable {
     /// `stages` a per-stage breakdown for UI/debug display.
     case fulfilled(intent: String, slots: [String: String], message: String,
                    confidence: Double, viaSemanticRescue: Bool, stages: VoiceIntentStages?)
-    /// Below threshold / out of scope. `fallbackURL` is the GenAI hand-off URL.
-    /// `stages` carries whatever the classifier saw before falling back.
-    case notUnderstood(fallbackURL: URL, confidence: Double, stages: VoiceIntentStages?)
+    /// Below threshold, out of scope, or a slot flow abandoned after three
+    /// attempts. `intent` is the pack's fallback intent name — `Default Fallback
+    /// Intent` — so this dispatches through the host's existing intent table
+    /// rather than needing a branch of its own. `stages` carries whatever the
+    /// classifier saw before falling back.
+    ///
+    /// No URL. What happens to an unrecognised utterance next — a cloud
+    /// assistant, a reprompt, nothing — is the host's decision, and the address
+    /// is not something an unsigned pack should get to choose (VIK-031).
+    case notUnderstood(intent: String, confidence: Double, stages: VoiceIntentStages?)
     /// The user switched topics mid slot-filling; the named flow was abandoned.
     /// The new intent's outcome arrives as the next `.turn` event.
     case interrupted(cancelledIntent: String)

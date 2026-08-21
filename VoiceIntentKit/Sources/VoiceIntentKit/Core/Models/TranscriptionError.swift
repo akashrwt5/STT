@@ -6,7 +6,7 @@
 import Foundation
 
 /// All failure modes that can occur during transcription setup or runtime.
-public enum TranscriptionError: LocalizedError, Sendable {
+enum TranscriptionError: LocalizedError, Sendable {
     case microphonePermissionDenied
     case speechRecognitionPermissionDenied
     case localeNotSupported(String)
@@ -21,7 +21,7 @@ public enum TranscriptionError: LocalizedError, Sendable {
     /// would corrupt the shared recognition pipeline.
     case sessionAlreadyActive
 
-    public var errorDescription: String? {
+    var errorDescription: String? {
         switch self {
         case .microphonePermissionDenied:
             return "Microphone access is required. Enable it in Settings → Privacy → Microphone."

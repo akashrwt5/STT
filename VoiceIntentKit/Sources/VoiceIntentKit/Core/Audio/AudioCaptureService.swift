@@ -13,15 +13,15 @@ import os.log
 /// Conforms to `AudioInputProvider` — the recognition service does not know this
 /// is a live mic vs. any other audio source, and is responsible for converting the
 /// buffers to the analyzer's required format.
-public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable {
+final class AudioCaptureService: AudioInputProvider, @unchecked Sendable {
 
     // MARK: - AudioInputProvider
 
-    public var audioFormat: AVAudioFormat {
+    var audioFormat: AVAudioFormat {
         get async throws { await resolveFormat() }
     }
 
-    public private(set) var state: AudioInputState = .idle
+    private(set) var state: AudioInputState = .idle
 
     // MARK: - Private
 
@@ -42,7 +42,7 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
     // MARK: - Init
 
     /// - Parameter engine: Injectable for testability. Defaults to a new `AVAudioEngine`.
-    public init(engine: AVAudioEngine = AVAudioEngine()) {
+    init(engine: AVAudioEngine = AVAudioEngine()) {
         self.engine = engine
     }
 
@@ -52,7 +52,7 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
     ///
     /// - Returns: An `AsyncStream` of raw buffers (in the input node's native format)
     ///   that yields until `stop()` is called.
-    public func start() -> AsyncStream<AVAudioPCMBuffer> {
+    func start() -> AsyncStream<AVAudioPCMBuffer> {
         state = .preparing
         stopped.withLock { $0 = false }
         return AsyncStream<AVAudioPCMBuffer> { [weak self] continuation in
@@ -71,7 +71,7 @@ public final class AudioCaptureService: AudioInputProvider, @unchecked Sendable 
     }
 
     /// Stops the audio engine and finishes the buffer stream.
-    public func stop() {
+    func stop() {
         stopped.withLock { $0 = true }
         continuationLock.withLock {
             $0?.finish()

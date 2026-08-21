@@ -9,7 +9,7 @@ import os.log
 
 /// Callback interface for speech recognition events. Called on the main actor.
 @MainActor
-public protocol SpeechRecognitionServiceDelegate: AnyObject {
+protocol SpeechRecognitionServiceDelegate: AnyObject {
     func recognitionService(_ service: SpeechRecognitionService, didReceivePartialResult result: TranscriptionResult)
     func recognitionService(_ service: SpeechRecognitionService, didReceiveFinalResult result: TranscriptionResult)
     func recognitionService(_ service: SpeechRecognitionService, didFailWith error: TranscriptionError)
@@ -25,7 +25,7 @@ public protocol SpeechRecognitionServiceDelegate: AnyObject {
     func recognitionService(_ service: SpeechRecognitionService, didUpdateAudioLevel powerDBFS: Float)
 }
 
-public extension SpeechRecognitionServiceDelegate {
+extension SpeechRecognitionServiceDelegate {
     /// Default no-op so existing conformers need not implement level metering.
     func recognitionService(_ service: SpeechRecognitionService, didUpdateAudioLevel powerDBFS: Float) {}
 }
@@ -40,11 +40,11 @@ public extension SpeechRecognitionServiceDelegate {
 /// (buffer conversion, analyzer execution, result iteration) happens inside child
 /// tasks that suspend on `await`, so the main thread is never blocked.
 @MainActor
-public final class SpeechRecognitionService {
+final class SpeechRecognitionService {
 
     // MARK: - Public
 
-    public weak var delegate: SpeechRecognitionServiceDelegate?
+    weak var delegate: SpeechRecognitionServiceDelegate?
 
     // MARK: - Private
 
@@ -123,7 +123,7 @@ public final class SpeechRecognitionService {
 
     // MARK: - Init
 
-    public init(locale: Locale) {
+    init(locale: Locale) {
         self.currentLocale = locale
     }
 
@@ -135,7 +135,7 @@ public final class SpeechRecognitionService {
     /// stored task that `startTranscribing` awaits.
     ///
     /// Idempotent — a second call while a prewarm is in flight (or already done) no-ops.
-    public func prewarm() {
+    func prewarm() {
         guard prewarmTask == nil else { return }
         prewarmTask = Task { [weak self] in await self?.performPrewarm() }
     }
@@ -147,10 +147,12 @@ public final class SpeechRecognitionService {
         let probePrewarmStart = await Self.buildOffMain { MemoryProbe.snapshot(label: "prewarm START") }
         #endif
 
-        let savedOverride = UserDefaults.standard.string(forKey: "stt.userSelectedLocale")
-        guard let resolvedLocale = try? await resolveTranscriberLocale(
-            await SpeechRecognitionService.resolveLocale(userOverride: savedOverride)
-        ) else {
+        // Prewarm for the locale this service was BUILT with (or last switched to) —
+        // it is by definition the one the next session will use. This used to read
+        // `UserDefaults["stt.userSelectedLocale"]` and run the auto-detect chain over
+        // it, which meant the warmed model came from global state written by another
+        // object rather than from `currentLocale` sitting right here.
+        guard let resolvedLocale = try? await resolveTranscriberLocale(currentLocale) else {
             logger.warning("[Prewarm] Locale resolution failed — first tap will run full setup.")
             return
         }
@@ -225,7 +227,7 @@ public final class SpeechRecognitionService {
     ///     configurable period of silence. Defaults to `.disabled` (manual stop only).
     /// - Throws: `TranscriptionError.localeNotSupported` if the locale has no model.
     /// - Throws: `TranscriptionError.analyzerFailed` if the analyzer cannot start.
-    public func startTranscribing(
+    func startTranscribing(
         from provider: any AudioInputProvider,
         preset: SpeechTranscriber.Preset = .progressiveTranscription,
         silenceConfiguration: SilenceDetectionConfiguration = .disabled,
@@ -612,7 +614,7 @@ public final class SpeechRecognitionService {
     ///   conversation flow this overlaps the rebuild with the TTS prompt (~1–2s), so
     ///   the mic restart to capture the user's answer is near-instant instead of a
     ///   full cold start. `unload()` passes `false` — it wants everything released.
-    public func stopTranscribing(rearmPrewarm: Bool = true) async {
+    func stopTranscribing(rearmPrewarm: Bool = true) async {
         logger.info("stopTranscribing called.")
         // One cancellation point: the feed loop, analyzer run, and result iteration
         // are all children of this task's group, so they cancel and drain together.
@@ -771,7 +773,7 @@ public final class SpeechRecognitionService {
     /// Releases every speech-related ref held by this service. Pair with the
     /// MemoryProbe to verify whether the framework actually returns the dirty
     /// blocks to the OS when our handles drop.
-    public func unload() async {
+    func unload() async {
         logger.info("[Unload] Releasing speech state…")
         await stopTranscribing(rearmPrewarm: false)
         // Cancel any in-flight prewarm so it can't repopulate the pair after we clear it.
@@ -785,7 +787,7 @@ public final class SpeechRecognitionService {
 
     /// Kicks off a prewarm (if not already running) and awaits its completion.
     /// Used by the diagnostic Load button so probes can wrap a complete cycle.
-    public func awaitPrewarm() async {
+    func awaitPrewarm() async {
         prewarm()
         await prewarmTask?.value
     }
@@ -794,7 +796,7 @@ public final class SpeechRecognitionService {
     ///
     /// - Parameter identifier: BCP-47 locale identifier (e.g. "en-IN", "hi-IN").
     /// - Throws: `TranscriptionError.localeNotSupported` if no matching model exists.
-    public func switchLocale(to identifier: String) async throws {
+    func switchLocale(to identifier: String) async throws {
         logger.info("switchLocale called with identifier: \(identifier)")
         let newLocale = try await resolveTranscriberLocale(Locale(identifier: identifier))
         currentLocale = newLocale
@@ -967,7 +969,7 @@ extension SpeechRecognitionService {
     /// Resolves the best locale for the current device context.
     ///
     /// Priority: user override → device locale → device language → en-IN fallback.
-    public static func resolveLocale(userOverride: String? = nil) async -> Locale {
+    static func resolveLocale(userOverride: String? = nil) async -> Locale {
         let logger = Logger(subsystem: "com.voiceintentkit", category: "SpeechRecognitionService")
         logger.info("[resolveLocale] Starting. userOverride=\(userOverride ?? "nil"), device=\(Locale.current.identifier(.bcp47))")
 

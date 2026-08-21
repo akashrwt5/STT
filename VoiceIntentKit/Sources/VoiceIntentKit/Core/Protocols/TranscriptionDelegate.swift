@@ -6,7 +6,7 @@
 import Foundation
 
 /// Permission check result returned by `TranscriptionCoordinator.checkPermissions()`.
-public enum PermissionStatus: Sendable {
+enum PermissionStatus: Sendable {
     case granted
     case microphoneDenied
     case speechRecognitionDenied
@@ -17,7 +17,7 @@ public enum PermissionStatus: Sendable {
 ///
 /// All methods are called on the main actor.
 @MainActor
-public protocol TranscriptionDelegate: AnyObject {
+protocol TranscriptionDelegate: AnyObject {
     /// Called continuously as the recognizer produces in-progress text.
     func didReceivePartialResult(_ text: String)
 
@@ -41,7 +41,7 @@ public protocol TranscriptionDelegate: AnyObject {
     func didUpdateAudioLevel(_ powerDBFS: Float)
 }
 
-public extension TranscriptionDelegate {
+extension TranscriptionDelegate {
     /// Default no-op so existing conformers need not implement silence handling.
     func didReachEndOfSpeech() {}
 

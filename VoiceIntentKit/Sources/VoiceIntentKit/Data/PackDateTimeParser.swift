@@ -22,21 +22,21 @@
 
 import Foundation
 
-public struct PackDateTimeParser: Sendable {
+struct PackDateTimeParser: Sendable {
 
     // MARK: - Result
 
-    public struct Match: Sendable, Equatable {
+    struct Match: Sendable, Equatable {
         /// The resolved instant, in UTC.
-        public let date: Date
+        let date: Date
         /// The text that produced it.
-        public let span: String
+        let span: String
         /// True when the user actually said a time. False means only a day was
         /// given ("tomorrow") and the hour was defaulted — the dialog engine
         /// uses this to prompt for the missing time while keeping the day.
-        public let timeExplicit: Bool
+        let timeExplicit: Bool
         /// True when the user named a day (anchor, weekday or date).
-        public let dayExplicit: Bool
+        let dayExplicit: Bool
     }
 
     // MARK: - Precompiled grammar
@@ -108,7 +108,7 @@ public struct PackDateTimeParser: Sendable {
 
     // MARK: - Init
 
-    public init(grammar: DateTimeGrammar, timeZone: TimeZone = .current) {
+    init(grammar: DateTimeGrammar, timeZone: TimeZone = .current) {
         self.timeZone = timeZone
         self.anchorPhrases = grammar.dayAnchorPhrasesLongestFirst.filter { $0.value != "yesterday" }
         self.yesterdayPhrases = (grammar.dayAnchors["yesterday"] ?? []).map { $0.lowercased() }
@@ -208,7 +208,7 @@ public struct PackDateTimeParser: Sendable {
 
     /// Below this, a weekday synonym is treated as an abbreviation and is not
     /// stripped from a free-text topic. See `stripWeekdays`.
-    public static let weekdayStripMinimumLength = 4
+    static let weekdayStripMinimumLength = 4
 
     private static func longestFirstUnique(_ phrases: [String]) -> [String] {
         var seen = Set<String>()
@@ -225,7 +225,7 @@ public struct PackDateTimeParser: Sendable {
 
     // MARK: - Entry point
 
-    public func parse(_ text: String, now: Date = Date()) -> Match? {
+    func parse(_ text: String, now: Date = Date()) -> Match? {
         var t = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return nil }
 
@@ -672,7 +672,7 @@ public struct PackDateTimeParser: Sendable {
     /// Word boundaries are explicit lookarounds rather than `\b`: ICU's `\b`
     /// treats an accented letter as a non-word character, so `\bmardi\b` matches
     /// inside "démardi". Carried over from the lexicon path for that reason.
-    public func strippingDateTime(_ text: String) -> String {
+    func strippingDateTime(_ text: String) -> String {
         var t = text
 
         func strip(_ pattern: String) {

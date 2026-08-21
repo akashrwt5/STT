@@ -8,8 +8,14 @@
 import AVFoundation
 import os.log
 
+// Lifecycle tracing at `.debug`, which os_log does not emit unless someone turns it
+// on — so it costs a host nothing and still answers "did this actually deallocate?".
+// It was `print`, which a package has no business doing: it lands in the host app's
+// console, unfiltered, with no subsystem to filter it out by.
+private let lifecycleLog = Logger(subsystem: "com.voiceintentkit", category: "Lifecycle")
+
 @MainActor
-public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
+final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
 
     private let synthesizer = AVSpeechSynthesizer()
 
@@ -42,17 +48,17 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
 
     /// Called on the main actor when an utterance finishes *normally*. This is the
     /// signal to auto-resume listening for the user's answer.
-    public var onFinish: (() -> Void)?
+    var onFinish: (() -> Void)?
 
     /// Called on the main actor when speech is cancelled — either by an explicit `stop()`
     /// or by an external interruption (phone call, system audio). Does NOT auto-resume
     /// listening; it only lets the owner clear its own speaking state so input isn't
     /// dropped forever. Without this, an interrupted utterance leaves `isSpeaking` stuck.
-    public var onCancel: (() -> Void)?
+    var onCancel: (() -> Void)?
 
-    public private(set) var isSpeaking = false
+    private(set) var isSpeaking = false
 
-    public override init() {
+    override init() {
         super.init()
         synthesizer.delegate = self
     }
@@ -75,7 +81,7 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     ///
     /// - Parameter requestedAt: optional `CFAbsoluteTimeGetCurrent()` captured when
     ///   the triggering STT result arrived, used only to log end-to-end latency.
-    public func speak(_ text: String, locale: Locale, requestedAt: CFAbsoluteTime? = nil) async {
+    func speak(_ text: String, locale: Locale, requestedAt: CFAbsoluteTime? = nil) async {
         self.requestedAt = requestedAt
 
         speakGeneration &+= 1
@@ -132,19 +138,19 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     /// Stops any in-progress speech immediately (does not fire `onFinish`).
-    public func stop() {
+    func stop() {
         guard synthesizer.isSpeaking else { return }
         synthesizer.stopSpeaking(at: .immediate)
         isSpeaking = false
     }
 
     deinit {
-        print("[Deinit] ConversationSpeaker")
+        lifecycleLog.debug("[Deinit] ConversationSpeaker")
     }
 
     // MARK: - AVSpeechSynthesizerDelegate
 
-    public nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                               didStart utterance: AVSpeechUtterance) {
         Task { @MainActor in
             self.didStartCurrentUtterance = true
@@ -155,7 +161,7 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
-    public nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                               didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor in
             self.isSpeaking = false
@@ -163,7 +169,7 @@ public final class ConversationSpeaker: NSObject, AVSpeechSynthesizerDelegate {
         }
     }
 
-    public nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                               didCancel utterance: AVSpeechUtterance) {
         Task { @MainActor in
             self.isSpeaking = false

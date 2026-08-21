@@ -6,7 +6,7 @@
 
 import Foundation
 
-public indirect enum NLUResponse: Sendable {
+indirect enum NLUResponse: Sendable {
     /// A required slot is missing — ask `question` and keep listening.
     /// `intent` and `filled` carry the in-progress state for display.
     case prompt(intent: String, question: String, filled: [String: String])
@@ -18,8 +18,15 @@ public indirect enum NLUResponse: Sendable {
     /// `semanticRescue` is true when Stage 3 (MiniLM) classified this intent.
     case fulfill(intent: String, action: String?, parameters: [String: String], message: String, confidence: Double, semanticRescue: Bool = false, breakdown: ClassificationBreakdown? = nil)
 
-    /// Low confidence or out-of-scope — hand off to the GenAI fallback URL.
-    case fallback(url: URL, confidence: Double, breakdown: ClassificationBreakdown? = nil)
+    /// Low confidence or out-of-scope. `intent` is the pack's fallback intent
+    /// name — `Default Fallback Intent` — so the host dispatches this like any
+    /// other intent instead of special-casing a separate shape.
+    ///
+    /// It used to carry `url:`, a GenAI hand-off address built from a field in
+    /// the pack with the user's verbatim transcript in its query string. Nothing
+    /// ever opened it, and an unsigned pack could choose where it pointed. Where
+    /// an unrecognised utterance goes next is the host's decision (VIK-031).
+    case fallback(intent: String, confidence: Double, breakdown: ClassificationBreakdown? = nil)
 
     /// The user switched topics mid slot-filling. `cancelledIntent` is the
     /// abandoned flow; `result` is the outcome for the new intent (mirrors
@@ -27,7 +34,7 @@ public indirect enum NLUResponse: Sendable {
     case interrupted(cancelledIntent: String, result: NLUResponse)
 
     /// The prompt/question the UI should surface this turn, if any.
-    public var pendingQuestion: String? {
+    var pendingQuestion: String? {
         switch self {
         case .prompt(_, let q, _):   return q
         case .confirm(_, _, let q):  return q
@@ -37,7 +44,7 @@ public indirect enum NLUResponse: Sendable {
     }
 
     /// True when this turn finished a conversation (fulfilled or fell back).
-    public var isTerminal: Bool {
+    var isTerminal: Bool {
         switch self {
         case .fulfill, .fallback:    return true
         case .interrupted(_, let r): return r.isTerminal

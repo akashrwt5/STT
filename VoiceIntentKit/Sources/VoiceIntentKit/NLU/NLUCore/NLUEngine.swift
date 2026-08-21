@@ -17,8 +17,15 @@
 // off main for the duration of the call and back when it returns.
 
 import Foundation
+import os.log
 
-public actor NLUEngine: ConversationEngine {
+// Lifecycle tracing at `.debug`, which os_log does not emit unless someone turns it
+// on — so it costs a host nothing and still answers "did this actually deallocate?".
+// It was `print`, which a package has no business doing: it lands in the host app's
+// console, unfiltered, with no subsystem to filter it out by.
+private let lifecycleLog = Logger(subsystem: "com.voiceintentkit", category: "Lifecycle")
+
+actor NLUEngine: ConversationEngine {
 
     private let schema: NLUSchema
     // Depends on the abstraction, never a concrete classifier. `PackEngineFactory`
@@ -69,7 +76,7 @@ public actor NLUEngine: ConversationEngine {
     // cannot supply one cannot build an engine, which is the intended
     // difficulty.
 
-    public init(
+    init(
         schema: NLUSchema,
         classifier: any IntentClassifying,
         entities: any SlotResolving,
@@ -137,7 +144,7 @@ public actor NLUEngine: ConversationEngine {
 
     /// Processes one user utterance and returns the next conversational step.
     /// Async because Stage 3 (semantic rescue) runs CoreML inference.
-    public func handle(_ text: String) async -> NLUResponse {
+    func handle(_ text: String) async -> NLUResponse {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if let confirm = activeConfirmation() {
@@ -152,18 +159,18 @@ public actor NLUEngine: ConversationEngine {
     /// Abandons any in-progress conversation (slot filling / confirmation).
     /// `async` to satisfy `ConversationEngine` (callers on the main actor await
     /// every actor call uniformly); the body itself is synchronous.
-    public func reset() async {
+    func reset() async {
         session.resetAll()
     }
 
     /// True when the engine is mid-conversation and the next utterance is an answer.
-    public var isCollecting: Bool {
+    var isCollecting: Bool {
         session.pendingIntent != nil || activeConfirmation() != nil
     }
 
     /// Pre-warms the underlying classifier's CoreML graphs (ANE specialisation).
     /// Delegates to the classifier so callers have a single warm-up entry point.
-    public func warmUp() async {
+    func warmUp() async {
         await classifier.warmUp()
     }
 
@@ -249,7 +256,7 @@ public actor NLUEngine: ConversationEngine {
         // and handle the new intent immediately (mirrors Python _handle_slot_filling).
         let probe = await classifier.classifyAsync(text)
         let isNewIntent = probe.label != intent
-            && probe.label != "Default Fallback Intent"
+            && probe.label != schema.fallbackIntent
             && probe.label != "OUT_OF_SCOPE"
             && probe.confidence >= Self.interruptThreshold
             && schema.intents[probe.label] != nil
@@ -295,7 +302,7 @@ public actor NLUEngine: ConversationEngine {
                 session.slotAttempts += 1
                 if session.slotAttempts >= 3 {
                     session.resetSlotFilling()
-                    return .fallback(url: await classifier.genaiURL(for: text), confidence: 0)
+                    return .fallback(intent: schema.fallbackIntent, confidence: 0)
                 }
             }
         }
@@ -345,6 +352,27 @@ public actor NLUEngine: ConversationEngine {
             var slots: [String: String] = [:]
             extractAllSlots(cfg, text, into: &slots)
             fillOpenTopics(cfg, text, into: &slots)
+
+            // The confirmation gate applies HERE TOO, and its absence was VIK-021 in a
+            // second place. A keyword rule bypasses the CLASSIFIER; it has no business
+            // bypassing the POLICY. `pack-en` proves the difference matters: the only
+            // intent it gates is `Cmd.SendMessage` (`always`) and that intent ships four
+            // keyword rules — so "send a message to…" matched a rule, skipped the gate,
+            // and sent without asking, while the pack said always ask.
+            //
+            // Confidence 1.0, deliberately: a declarative pattern either matched or it
+            // did not, so there is no ambiguity to gate on. `always` fires (that is what
+            // always means), `when_ambiguous` does not (we are certain), `never` does
+            // not. The gate reads as its own name on this path.
+            if let fu = cfg.followup, gate(for: kwIntent).fires(confidence: 1.0) {
+                session.pendingIntent = cfg.slots.isEmpty ? nil : kwIntent
+                session.pendingSlots = slots
+                session.awaitingSlot = nil
+                session.pendingBreakdown = nil
+                session.setContext(fu.context, lifespan: fu.lifespan)
+                return .confirm(intent: kwIntent, action: cfg.action, question: fu.prompt)
+            }
+
             session.pendingIntent = kwIntent
             session.pendingSlots = slots
             session.awaitingSlot = nil
@@ -361,9 +389,15 @@ public actor NLUEngine: ConversationEngine {
         // Semantic rescue already passed its own 0.55 gate inside classifyAsync.
         // Do NOT re-apply Stage 2's 0.70 threshold to a semanticRescue result —
         // doing so would drop every rescue (rescue conf 0.55–0.69 → false fallback).
-        let outOfScope = intent == "OUT_OF_SCOPE" || intent == "Default Fallback Intent"
+        //
+        // The vacuous-prediction path (VIK-011) arrives here too: nothing in the
+        // utterance matched the vocabulary, so `PackClassifierAdapter` substitutes
+        // `pack.outOfScopeIntent`, which now resolves to the pack's real fallback
+        // label instead of "".
+        let outOfScope = intent == "OUT_OF_SCOPE" || intent == schema.fallbackIntent
         if !rescued && (outOfScope || conf < schema.confidenceThreshold) {
-            return .fallback(url: await classifier.genaiURL(for: text), confidence: conf, breakdown: breakdown)
+            return .fallback(intent: schema.fallbackIntent,
+                             confidence: conf, breakdown: breakdown)
         }
 
         guard let cfg = schema.intents[intent] else {
@@ -438,7 +472,7 @@ public actor NLUEngine: ConversationEngine {
     /// resolution rules in `handleSlotFilling`/`resolveDateTime` WITHOUT mutating
     /// session state — this runs speculatively, per stable transcript, while the
     /// user may still be mid-answer.
-    public func assessSlotAnswer(_ text: String) -> SlotAnswerAssessment {
+    func assessSlotAnswer(_ text: String) -> SlotAnswerAssessment {
         guard let intent = session.pendingIntent,
               let cfg = schema.intents[intent],
               let awaiting = session.awaitingSlot,
@@ -541,9 +575,25 @@ public actor NLUEngine: ConversationEngine {
     /// carriers → date/time → leading connector.
     ///
     /// For required "open" slots not yet filled, derive a free-text topic from the utterance.
+    /// Fills an OPEN required slot with the utterance's derived topic — and overrides
+    /// whatever the speculative gazetteer sweep put there first.
+    ///
+    /// The override is the fix. `extractAllSlots` runs before this and matches the whole
+    /// utterance against every entity table, including open ones; "set a reminder to
+    /// drink water" hit `remind`'s hint list and stored its CANONICAL form, so the
+    /// reminder was named "Drink Water" while the user said "drink water", and this
+    /// function then skipped the slot because it was no longer nil.
+    ///
+    /// An open entity's value list is a hint, not a vocabulary (VIK-017). When the slot
+    /// is the thing the user is naming, their words are the answer and the gazetteer's
+    /// title-case is a rewrite of them. The Python reference derives the topic here; the
+    /// parity fixtures are what caught the divergence.
+    ///
+    /// Only the opening-utterance paths call this, so the mid-flow opportunistic sweep
+    /// is untouched.
     private func fillOpenTopics(_ cfg: IntentDef, _ text: String, into slots: inout [String: String]) {
         for slot in cfg.slots {
-            guard slots[slot.name] == nil, slot.required, entities.isOpen(slot.entity) else { continue }
+            guard slot.required, entities.isOpen(slot.entity) else { continue }
             if let topic = deriveTopic(text), !topic.isEmpty {
                 slots[slot.name] = topic
             }
@@ -577,17 +627,17 @@ public actor NLUEngine: ConversationEngine {
 
     /// Loads MiniLM + SemanticHead and triggers ANE specialization.
     /// After this call, low-confidence Stage 2 results are rescued by Stage 3.
-    public func loadStage3() async {
+    func loadStage3() async {
         await classifier.loadStage3()
     }
 
     /// Releases Stage 3 refs. Stage 3 is skipped on future classifications.
-    public func releaseStage3() async {
+    func releaseStage3() async {
         await classifier.releaseStage3()
     }
 
     deinit {
-        print("[Deinit] NLUEngine")
+        lifecycleLog.debug("[Deinit] NLUEngine")
     }
 
     // MARK: - Misc

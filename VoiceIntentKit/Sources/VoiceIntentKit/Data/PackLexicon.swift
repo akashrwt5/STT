@@ -17,23 +17,23 @@
 
 import Foundation
 
-public struct PackLexicon: Decodable, Sendable {
+struct PackLexicon: Decodable, Sendable {
 
-    public let lang: String
-    public let affirmative: [String]
-    public let negative: [String]
-    public let negationCues: [String]
+    let lang: String
+    let affirmative: [String]
+    let negative: [String]
+    let negationCues: [String]
     /// Anchored regexes stripped to expose an open topic
     /// ("remind me to " → ""). Portable-subset patterns only.
-    public let carriers: [String]
-    public let leadingConnectors: [String]
+    let carriers: [String]
+    let leadingConnectors: [String]
     /// "don't" → "do not". 50 entries for English. The flattened root shim drops
     /// this table entirely.
-    public let contractions: [String: String]
-    public let datetime: DateTimeGrammar
+    let contractions: [String: String]
+    let datetime: DateTimeGrammar
     
-    public let fuzzyStopwords: [String]?
-    public let trailingFunctionWords: [String]?
+    let fuzzyStopwords: [String]?
+    let trailingFunctionWords: [String]?
 
     enum CodingKeys: String, CodingKey {
         case lang, affirmative, negative, carriers, contractions
@@ -44,7 +44,7 @@ public struct PackLexicon: Decodable, Sendable {
         case trailingFunctionWords
     }
 
-    public init(from decoder: Decoder) throws {
+    init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         lang = try c.decode(String.self, forKey: .lang)
         affirmative = try c.decode([String].self, forKey: .affirmative)
@@ -70,51 +70,51 @@ public struct PackLexicon: Decodable, Sendable {
 /// Dictionary KEYS are canonical English role names — `"Monday"`, `"January"`,
 /// `"25"`. They are identifiers, not vocabulary; the language's actual words are
 /// in the value arrays. Do not lowercase or localise the keys.
-public struct DateTimeGrammar: Decodable, Sendable {
+struct DateTimeGrammar: Decodable, Sendable {
 
     // -- day and period anchors -------------------------------------------
     /// Role → phrases. Roles: today, tonight, tomorrow, day_after_tomorrow,
     /// next_week, yesterday.
-    public let dayAnchors: [String: [String]]
+    let dayAnchors: [String: [String]]
     /// "morning" → (names, default hour).
-    public let timeOfDay: [String: TimeOfDay]
+    let timeOfDay: [String: TimeOfDay]
 
     // -- calendar vocabulary ----------------------------------------------
     /// "Monday" → ["monday", "mon"].
-    public let weekdays: [String: [String]]
+    let weekdays: [String: [String]]
     /// "January" → ["january", "jan"].
-    public let months: [String: [String]]
+    let months: [String: [String]]
     /// "21" → ["twenty one", "twenty-one"].
-    public let numbers: [String: [String]]
+    let numbers: [String: [String]]
     /// "25" → ["twenty fifth", "25th", "twenty-fifth"].
-    public let ordinals: [String: [String]]
+    let ordinals: [String: [String]]
     /// Words marking an ordinal as a day-of-month rather than a quantity —
     /// English the/of, French le/du/de. Without a date context a bare ordinal
     /// must NOT be rewritten to a digit: "wait a second" would become "wait a
     /// 2nd" and the clock parser would claim it.
-    public let ordinalContext: [String]
+    let ordinalContext: [String]
 
     // -- clock -------------------------------------------------------------
     /// "in"/"for"/"at" → phrases.
-    public let relativeMarkers: [String: [String]]
+    let relativeMarkers: [String: [String]]
     /// "minute" → ["minutes", "minute", "mins", "min"].
-    public let relativeUnits: [String: [String]]
+    let relativeUnits: [String: [String]]
     /// half_past, quarter_past, quarter_to, past, to, half_an_hour.
-    public let clockIdioms: [String: [String]]
+    let clockIdioms: [String: [String]]
     /// am/pm surface forms. Empty for 24-hour languages.
-    public let amPM: [String: [String]]
+    let amPM: [String: [String]]
     /// Spaced clock-hour suffixes ("18 h", "18 heures"). Deliberately separate
     /// from `relativeUnits.hour` so duration words (German "Stunden", Danish
     /// "timer") are never read as clock markers. Empty for English.
-    public let clockHourMarkers: [String]
+    let clockHourMarkers: [String]
     /// Articles ("a", "an") used by "in a minute".
-    public let articles: [String]
+    let articles: [String]
     /// "a few" → 3, "a couple" → 2.
-    public let quantifiers: [String: Quantifier]
+    let quantifiers: [String: Quantifier]
     /// Function words stripped when deriving a topic. Cosmetic only.
-    public let strip: [String: [String]]
+    let strip: [String: [String]]
     /// 12h/24h, hour-minute joiner, decimal-hour idioms.
-    public let grammar: Grammar
+    let grammar: Grammar
 
     enum CodingKeys: String, CodingKey {
         case weekdays, months, articles, quantifiers, strip, grammar
@@ -130,7 +130,7 @@ public struct DateTimeGrammar: Decodable, Sendable {
         case clockHourMarkers = "clock_hour_markers"
     }
 
-    public init(from decoder: Decoder) throws {
+    init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         // Required: without these there is no date parsing worth the name.
         dayAnchors = try c.decode([String: [String]].self, forKey: .dayAnchors)
@@ -155,24 +155,24 @@ public struct DateTimeGrammar: Decodable, Sendable {
 
     // MARK: Nested
 
-    public struct TimeOfDay: Decodable, Sendable {
-        public let names: [String]
-        public let hour: Int
+    struct TimeOfDay: Decodable, Sendable {
+        let names: [String]
+        let hour: Int
     }
 
-    public struct Quantifier: Decodable, Sendable {
-        public let phrases: [String]
-        public let n: Int
+    struct Quantifier: Decodable, Sendable {
+        let phrases: [String]
+        let n: Int
     }
 
-    public struct Grammar: Decodable, Sendable {
+    struct Grammar: Decodable, Sendable {
         /// "12h" or "24h" — disambiguates a bare hour.
-        public let timeFormat: String
+        let timeFormat: String
         /// Hour-minute joiner: German "Uhr", Danish "og".
-        public let conjunction: String?
+        let conjunction: String?
         /// German "halb" (−30), French "midi" (hour 12). Empty for English,
         /// which expresses these through `clockIdioms`.
-        public let decimalHourIdioms: [DecimalHourIdiom]
+        let decimalHourIdioms: [DecimalHourIdiom]
 
         enum CodingKeys: String, CodingKey {
             case timeFormat = "time_format"
@@ -180,9 +180,9 @@ public struct DateTimeGrammar: Decodable, Sendable {
             case decimalHourIdioms = "decimal_hour_idioms"
         }
 
-        public init() { timeFormat = "24h"; conjunction = nil; decimalHourIdioms = [] }
+        init() { timeFormat = "24h"; conjunction = nil; decimalHourIdioms = [] }
 
-        public init(from decoder: Decoder) throws {
+        init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             timeFormat = try c.decodeIfPresent(String.self, forKey: .timeFormat) ?? "24h"
             conjunction = try c.decodeIfPresent(String.self, forKey: .conjunction)
@@ -190,16 +190,16 @@ public struct DateTimeGrammar: Decodable, Sendable {
                                                       forKey: .decimalHourIdioms) ?? []
         }
 
-        public var is24Hour: Bool { timeFormat == "24h" }
+        var is24Hour: Bool { timeFormat == "24h" }
     }
 
     /// `hour != nil` → absolute ("midi" = 12). `minutes >= 0` → past the named
     /// hour ("et quart" = +15). `minutes < 0` → counting down to it
     /// ("halb"/"halv" = −30).
-    public struct DecimalHourIdiom: Decodable, Sendable {
-        public let phrase: String
-        public let minutes: Int?
-        public let hour: Int?
+    struct DecimalHourIdiom: Decodable, Sendable {
+        let phrase: String
+        let minutes: Int?
+        let hour: Int?
     }
 }
 
@@ -212,9 +212,9 @@ public struct DateTimeGrammar: Decodable, Sendable {
 /// ("unable to type-check this expression in reasonable time"). Every lookup
 /// below is therefore a plain loop with declared types — slower to read, but it
 /// compiles in milliseconds instead of failing.
-public struct PhraseMatch<Value: Sendable>: Sendable {
-    public let phrase: String
-    public let value: Value
+struct PhraseMatch<Value: Sendable>: Sendable {
+    let phrase: String
+    let value: Value
 }
 
 extension DateTimeGrammar {
@@ -224,17 +224,17 @@ extension DateTimeGrammar {
     // them once and hold them.
 
     /// synonym → 0…6, Monday-based.
-    public var weekdayIndex: [String: Int] {
+    var weekdayIndex: [String: Int] {
         Self.reverseIndex(weekdays, order: Self.weekdayOrder, offset: 0)
     }
 
     /// synonym → 1…12.
-    public var monthIndex: [String: Int] {
+    var monthIndex: [String: Int] {
         Self.reverseIndex(months, order: Self.monthOrder, offset: 1)
     }
 
     /// synonym → integer, cardinals and ordinals together.
-    public var numberIndex: [String: Int] {
+    var numberIndex: [String: Int] {
         var out: [String: Int] = [:]
         for (key, synonyms) in numbers {
             guard let n = Int(key) else { continue }
@@ -249,7 +249,7 @@ extension DateTimeGrammar {
 
     /// Ordinal synonyms, longest first so a compound wins over its parts
     /// ("twenty fifth" before "fifth").
-    public var ordinalPhrasesLongestFirst: [PhraseMatch<Int>] {
+    var ordinalPhrasesLongestFirst: [PhraseMatch<Int>] {
         var pairs: [PhraseMatch<Int>] = []
         for (key, synonyms) in ordinals {
             guard let n = Int(key) else { continue }
@@ -260,7 +260,7 @@ extension DateTimeGrammar {
 
     /// Day-anchor phrases with their canonical role, longest first so
     /// "day after tomorrow" cannot be shadowed by "tomorrow".
-    public var dayAnchorPhrasesLongestFirst: [PhraseMatch<String>] {
+    var dayAnchorPhrasesLongestFirst: [PhraseMatch<String>] {
         var pairs: [PhraseMatch<String>] = []
         for (role, phrases) in dayAnchors {
             for p in phrases { pairs.append(PhraseMatch(phrase: p.lowercased(), value: role)) }
@@ -269,7 +269,7 @@ extension DateTimeGrammar {
     }
 
     /// Ordinal-context markers, longest first.
-    public var ordinalContextLongestFirst: [String] {
+    var ordinalContextLongestFirst: [String] {
         ordinalContext.map { $0.lowercased() }
             .sorted { lhs, rhs in
                 lhs.count == rhs.count ? lhs < rhs : lhs.count > rhs.count
@@ -277,7 +277,7 @@ extension DateTimeGrammar {
     }
 
     /// synonym → canonical unit ("mins" → "minute").
-    public var unitIndex: [String: String] {
+    var unitIndex: [String: String] {
         var out: [String: String] = [:]
         for (canonical, synonyms) in relativeUnits {
             for s in synonyms { out[s.lowercased()] = canonical }

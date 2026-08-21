@@ -22,11 +22,9 @@ import Foundation
 /// and `MultilingualIntentClassifierService` were the bundle-loading pair it
 /// replaced. `NLUEngine` depends only on this protocol and never names a
 /// concrete classifier.
-public protocol IntentClassifying: Actor {
+protocol IntentClassifying: Actor {
     /// Full 3-stage async classification — stage, confidence, and breakdown.
     func classifyAsync(_ text: String) async -> ClassificationResult
-    /// GenAI fallback URL for an unrecognised query.
-    func genaiURL(for text: String) -> URL
     /// Pre-warms the CoreML graphs (ANE specialisation) in the background.
     func warmUp() async
     /// Loads Stage 3 (MiniLM embedder + semantic head) and triggers ANE compile.
@@ -43,7 +41,7 @@ public protocol IntentClassifying: Actor {
 /// `NLUEngine` directly, so the factory can return any conforming actor without
 /// the ViewModel changing. Existential (`any`) is correct here because the engine
 /// is a long-lived *stored* value, not a transient generic algorithm input.
-public protocol ConversationEngine: Actor {
+protocol ConversationEngine: Actor {
     /// Processes one user utterance and returns the next conversational step.
     func handle(_ text: String) async -> NLUResponse
     /// Abandons any in-progress conversation (slot filling / confirmation).
@@ -69,7 +67,7 @@ public protocol ConversationEngine: Actor {
 }
 
 /// Endpointing verdict for an in-progress slot answer.
-public enum SlotAnswerAssessment: Sendable {
+enum SlotAnswerAssessment: Sendable {
     /// Verified complete (e.g. a date-time with an explicit time, a matched enum
     /// value). Safe to endpoint at the fast window.
     case complete
@@ -81,7 +79,7 @@ public enum SlotAnswerAssessment: Sendable {
     case incomplete
 }
 
-public extension ConversationEngine {
+extension ConversationEngine {
     /// Default: treat every answer as complete (fixed-window endpointing).
     func assessSlotAnswer(_ text: String) async -> SlotAnswerAssessment { .complete }
 }

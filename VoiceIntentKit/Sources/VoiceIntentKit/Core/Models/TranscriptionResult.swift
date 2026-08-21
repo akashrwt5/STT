@@ -6,28 +6,28 @@
 import Foundation
 
 /// A single transcription output, which may be partial (in-progress) or final (committed).
-public struct TranscriptionResult: Identifiable, Sendable {
-    public let id: UUID
+struct TranscriptionResult: Identifiable, Sendable {
+    let id: UUID
     /// The transcribed text for this segment.
-    public let text: String
+    let text: String
     /// When false, this result may still change as the recognizer refines its output.
-    public let isFinal: Bool
+    let isFinal: Bool
     /// The locale used to produce this result.
-    public let locale: Locale
+    let locale: Locale
     /// Wall-clock time this result was produced.
-    public let timestamp: Date
+    let timestamp: Date
     /// Duration of the audio segment that produced this result, if known.
-    public let audioDuration: TimeInterval?
+    let audioDuration: TimeInterval?
     /// Confidence score in 0.0–1.0 range, if provided by the recognizer.
-    public let confidence: Float?
+    let confidence: Float?
     /// Intent classification result, populated after a final transcript is classified.
-    public var intentResult: IntentResult?
+    var intentResult: IntentResult?
     /// Extracted slot parameters when a multi-turn intent is fulfilled (e.g. REMINDER → name, date-time).
-    public var slots: [String: String]?
+    var slots: [String: String]?
     /// Per-stage debug breakdown for the eye-button detail panel.
-    public var classificationBreakdown: ClassificationBreakdown?
+    var classificationBreakdown: ClassificationBreakdown?
 
-    public init(
+    init(
         id: UUID = UUID(),
         text: String,
         isFinal: Bool,

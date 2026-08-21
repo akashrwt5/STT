@@ -5,19 +5,19 @@ import Foundation
 
 /// Per-stage debug breakdown produced by the 3-stage classification pipeline.
 /// Attached to cards so the eye button can show exactly which stage answered and why.
-public struct ClassificationBreakdown: Sendable {
-    public struct StageResult: Sendable {
+struct ClassificationBreakdown: Sendable {
+    struct StageResult: Sendable {
         /// 1 = keyword rule, 2 = TF-IDF CoreML, 3 = MiniLM semantic
-        public let stage: Int
-        public let intent: String
-        public let confidence: Double
+        let stage: Int
+        let intent: String
+        let confidence: Double
 
         // Written in the type body, NOT an extension. A memberwise initialiser
         // added in an extension does not suppress the synthesised one — it
         // collides with it. In the body it replaces it, which is also what makes
         // it `public`: the synthesised memberwise init of a public struct is
         // internal, so a consumer outside the module could never build one.
-        public init(stage: Int, intent: String, confidence: Double) {
+        init(stage: Int, intent: String, confidence: Double) {
             self.stage = stage
             self.intent = intent
             self.confidence = confidence
@@ -26,13 +26,13 @@ public struct ClassificationBreakdown: Sendable {
 
     /// Stage that produced the winning answer (1–3).
     /// `nil` when no stage met the confidence threshold → GENAI fallback.
-    public let winningStage: Int?
+    let winningStage: Int?
     /// Stage 2 (TF-IDF) result. `nil` only for pure keyword (stage 1) hits.
-    public let stage2: StageResult?
+    let stage2: StageResult?
     /// Stage 3 (MiniLM) result. `nil` if Stage 3 not loaded or not triggered.
-    public let stage3: StageResult?
+    let stage3: StageResult?
 
-    public init(winningStage: Int?, stage2: StageResult?, stage3: StageResult?) {
+    init(winningStage: Int?, stage2: StageResult?, stage3: StageResult?) {
         self.winningStage = winningStage
         self.stage2 = stage2
         self.stage3 = stage3
@@ -46,18 +46,18 @@ public struct ClassificationBreakdown: Sendable {
 /// are the shape of a classification, not the implementation of one, and
 /// `IntentClassifying` — the protocol every classifier satisfies — is written in
 /// terms of them.
-public struct ClassificationResult: Sendable {
-    public let label: String
-    public let confidence: Double
+struct ClassificationResult: Sendable {
+    let label: String
+    let confidence: Double
     /// True when the semantic stage produced this result.
     ///
     /// Always false under a pack that disables the semantic stage, which
     /// `pack-en` does — its report card was measured that way.
-    public let semanticRescue: Bool
+    let semanticRescue: Bool
     /// Per-stage detail, for the debug panel.
-    public let breakdown: ClassificationBreakdown
+    let breakdown: ClassificationBreakdown
 
-    public init(label: String,
+    init(label: String,
                 confidence: Double,
                 semanticRescue: Bool,
                 breakdown: ClassificationBreakdown) {
@@ -69,7 +69,7 @@ public struct ClassificationResult: Sendable {
 }
 
 /// The outcome of running intent classification on a transcription result.
-public enum IntentResult: Sendable {
+enum IntentResult: Sendable {
     /// A recognised intent with its label and model confidence (0–1).
     /// `semanticRescue` is true when Stage 3 (MiniLM) produced this result.
     case intent(label: String, confidence: Double, semanticRescue: Bool = false)
@@ -78,7 +78,7 @@ public enum IntentResult: Sendable {
     /// User switched topics mid slot-filling — shows the abandoned intent name.
     case interrupted(cancelledIntent: String)
 
-    public var confidence: Double {
+    var confidence: Double {
         switch self {
         case .intent(_, let c, _): return c
         case .genai(_, let c):     return c
@@ -87,7 +87,7 @@ public enum IntentResult: Sendable {
     }
 
     /// Human-readable display label.
-    public var displayLabel: String {
+    var displayLabel: String {
         switch self {
         case .intent(let label, _, _):          return Self.humanize(label)
         case .genai:                             return "Unknown"
@@ -96,7 +96,7 @@ public enum IntentResult: Sendable {
     }
 
     /// SF Symbol name for this intent.
-    public var systemImage: String {
+    var systemImage: String {
         switch self {
         case .genai:                  return "questionmark.circle"
         case .interrupted:            return "xmark.circle"

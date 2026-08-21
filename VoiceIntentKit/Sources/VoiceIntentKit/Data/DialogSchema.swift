@@ -24,18 +24,18 @@ import Foundation
 
 /// One slot to collect for an intent — `reminders.task.create` needs `name` and
 /// `date_time`.
-public struct SlotDef: Sendable {
-    public let name: String
+struct SlotDef: Sendable {
+    let name: String
     /// Entity id, verbatim from the pack. Never interpreted here: whether it is
     /// a gazetteer or a builtin is `SlotResolving`'s question, and matching it
     /// against a literal is how VIK-018 happened.
-    public let entity: String
-    public let required: Bool
+    let entity: String
+    let required: Bool
     /// Prompt text, already resolved from the pack's response catalog for this
     /// language.
-    public let prompt: String
+    let prompt: String
 
-    public init(name: String, entity: String, required: Bool, prompt: String) {
+    init(name: String, entity: String, required: Bool, prompt: String) {
         self.name = name
         self.entity = entity
         self.required = required
@@ -44,11 +44,11 @@ public struct SlotDef: Sendable {
 }
 
 /// A yes/no branch of a confirmation.
-public struct FollowupBranch: Sendable {
-    public let action: String
-    public let fulfillment: String
+struct FollowupBranch: Sendable {
+    let action: String
+    let fulfillment: String
 
-    public init(action: String, fulfillment: String) {
+    init(action: String, fulfillment: String) {
         self.action = action
         self.fulfillment = fulfillment
     }
@@ -61,14 +61,14 @@ public struct FollowupBranch: Sendable {
 /// `runtime/policies.json`, and reading the first as if it were the second is
 /// VIK-021: all 14 gated intents confirmed unconditionally, and the two with
 /// slots skipped collection entirely.
-public struct FollowupDef: Sendable {
-    public let context: String
-    public let lifespan: Int
-    public let prompt: String
-    public let yes: FollowupBranch
-    public let no: FollowupBranch
+struct FollowupDef: Sendable {
+    let context: String
+    let lifespan: Int
+    let prompt: String
+    let yes: FollowupBranch
+    let no: FollowupBranch
 
-    public init(context: String, lifespan: Int, prompt: String,
+    init(context: String, lifespan: Int, prompt: String,
                 yes: FollowupBranch, no: FollowupBranch) {
         self.context = context
         self.lifespan = lifespan
@@ -79,13 +79,13 @@ public struct FollowupDef: Sendable {
 }
 
 /// One intent: its slots, action, fulfillment text, optional confirmation.
-public struct IntentDef: Sendable {
-    public let slots: [SlotDef]
-    public let action: String?
-    public let fulfillment: String?
-    public let followup: FollowupDef?
+struct IntentDef: Sendable {
+    let slots: [SlotDef]
+    let action: String?
+    let fulfillment: String?
+    let followup: FollowupDef?
 
-    public init(slots: [SlotDef], action: String?, fulfillment: String?, followup: FollowupDef?) {
+    init(slots: [SlotDef], action: String?, fulfillment: String?, followup: FollowupDef?) {
         self.slots = slots
         self.action = action
         self.fulfillment = fulfillment
@@ -94,12 +94,12 @@ public struct IntentDef: Sendable {
 }
 
 /// A declarative regex rule that short-circuits classification (Stage 0).
-public struct KeywordTrigger: Sendable {
-    public let intent: String
-    public let regex: String?
-    public let notRegex: String?
+struct KeywordTrigger: Sendable {
+    let intent: String
+    let regex: String?
+    let notRegex: String?
 
-    public init(intent: String, regex: String?, notRegex: String?) {
+    init(intent: String, regex: String?, notRegex: String?) {
         self.intent = intent
         self.regex = regex
         self.notRegex = notRegex
@@ -113,23 +113,37 @@ public struct KeywordTrigger: Sendable {
 /// `loadFromBundle()` read `nlu_schema.json` out of `Bundle.module` and
 /// `fatalError`ed when it was absent, which made a missing resource a crash and
 /// a WRONG resource silent.
-public struct NLUSchema: Sendable {
-    public let version: Int
-    public let confidenceThreshold: Double
-    public let intents: [String: IntentDef]
-    public let affirmative: [String]
-    public let negative: [String]
-    /// Triggers evaluated before the classifier.
-    public let keywordTriggers: [KeywordTrigger]
+struct NLUSchema: Sendable {
 
-    public init(version: Int,
+    /// The label a pack uses when the utterance is not one of its intents.
+    ///
+    /// Kept as a constant rather than inlined because it is a CONTRACT, not a
+    /// string: the host dispatches on it, and it is the same name the app's
+    /// Dialogflow path has always returned for an unmatched query.
+    static let defaultFallbackIntent = "Default Fallback Intent"
+
+    let version: Int
+    let confidenceThreshold: Double
+    /// The intent name reported when nothing matched — the pack's own
+    /// out-of-scope label where it has one, `defaultFallbackIntent` otherwise.
+    /// The engine never invents a name; it reports this one.
+    let fallbackIntent: String
+    let intents: [String: IntentDef]
+    let affirmative: [String]
+    let negative: [String]
+    /// Triggers evaluated before the classifier.
+    let keywordTriggers: [KeywordTrigger]
+
+    init(version: Int,
                 confidenceThreshold: Double,
+                fallbackIntent: String = NLUSchema.defaultFallbackIntent,
                 intents: [String: IntentDef],
                 affirmative: [String],
                 negative: [String],
                 keywordTriggers: [KeywordTrigger]) {
         self.version = version
         self.confidenceThreshold = confidenceThreshold
+        self.fallbackIntent = fallbackIntent
         self.intents = intents
         self.affirmative = affirmative
         self.negative = negative

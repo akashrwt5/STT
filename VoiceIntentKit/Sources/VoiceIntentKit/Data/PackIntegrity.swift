@@ -94,7 +94,7 @@ public struct PackLoadPolicy: Sendable {
 
 // MARK: -
 
-public enum PackIntegrity {
+enum PackIntegrity {
 
     static let manifestPath = "integrity/manifest.sha256"
     static let signaturePath = "integrity/signature.sig"
@@ -104,13 +104,13 @@ public enum PackIntegrity {
     /// bytes of `bundle.json` that were covered by the signature. Callers decode
     /// the manifest from these bytes rather than re-reading the file, so what
     /// gets parsed is provably what got verified.
-    public struct Verified: Sendable {
-        public let digests: [String: String]
-        public let bundleJSONBytes: Data
+    struct Verified: Sendable {
+        let digests: [String: String]
+        let bundleJSONBytes: Data
     }
 
     /// Run the full chain. Throws on the first failure.
-    public static func verify(packRoot: URL,
+    static func verify(packRoot: URL,
                               trust: PackTrustPolicy,
                               policy: PackLoadPolicy = .default) throws -> Verified {
 

@@ -7,7 +7,12 @@ import AVFoundation
 import Speech
 import os.log
 
-private let localeDefaultsKey = "stt.userSelectedLocale"
+// Lifecycle tracing at `.debug`, which os_log does not emit unless someone turns it
+// on — so it costs a host nothing and still answers "did this actually deallocate?".
+// It was `print`, which a package has no business doing: it lands in the host app's
+// console, unfiltered, with no subsystem to filter it out by.
+private let lifecycleLog = Logger(subsystem: "com.voiceintentkit", category: "Lifecycle")
+
 
 /// The single public entry point for all transcription operations.
 ///
@@ -15,36 +20,36 @@ private let localeDefaultsKey = "stt.userSelectedLocale"
 /// and `SpeechRecognitionService`. The rest of the app only touches this class.
 @Observable
 @MainActor
-public final class TranscriptionCoordinator {
+final class TranscriptionCoordinator {
 
     // MARK: - Public State
 
-    public private(set) var state: TranscriptionState = .idle
-    public private(set) var currentTranscript: String = ""
-    public private(set) var currentRoute: AudioRoute = .builtInMic
+    private(set) var state: TranscriptionState = .idle
+    private(set) var currentTranscript: String = ""
+    private(set) var currentRoute: AudioRoute = .builtInMic
     /// Resolved asynchronously on first transcription or explicit locale switch.
-    public private(set) var currentLocale: Locale
+    private(set) var currentLocale: Locale
 
-    public var isTranscribing: Bool { state.isActive }
+    var isTranscribing: Bool { state.isActive }
 
     /// Controls automatic silence-based termination for *live* transcription.
     ///
     /// Defaults to `.disabled` (continuous captioning — runs until stopped manually).
     /// Set to `.singleUtterance` for command-style interactions that should end when
     /// the user stops speaking. Has no effect on file transcription.
-    public var silenceConfiguration: SilenceDetectionConfiguration = .disabled
+    var silenceConfiguration: SilenceDetectionConfiguration = .disabled
 
     /// Content-aware endpointing hook. Given the current stable transcript, assesses
     /// whether it's a finished answer to whatever the conversation is awaiting. The
     /// verdict selects the confirmation window (fast / medium / extended) so a
     /// thinking pause mid-answer doesn't split the turn. `nil` = fixed-window.
-    public var endpointArbiter: (@MainActor (String) async -> SlotAnswerAssessment)?
+    var endpointArbiter: (@MainActor (String) async -> SlotAnswerAssessment)?
 
-    public weak var delegate: TranscriptionDelegate?
+    weak var delegate: TranscriptionDelegate?
 
     // MARK: - AsyncSequence API
 
-    public let results: AsyncStream<TranscriptionResult>
+    let results: AsyncStream<TranscriptionResult>
     private var resultsContinuation: AsyncStream<TranscriptionResult>.Continuation?
 
     // MARK: - Available Locales
@@ -52,7 +57,7 @@ public final class TranscriptionCoordinator {
     /// Returns all locales the on-device recognizer supports.
     ///
     /// `async` because `SpeechTranscriber.supportedLocales` is async in iOS 26.
-    public var availableLocales: [Locale] {
+    var availableLocales: [Locale] {
         get async { await SpeechTranscriber.supportedLocales }
     }
 
@@ -97,13 +102,16 @@ public final class TranscriptionCoordinator {
     ///   - recognitionService: Manages `SpeechAnalyzer` + `SpeechTranscriber`.
     ///   - captureServiceFactory: Returns a fresh `AudioCaptureService` for live mic sessions.
     ///   - fileServiceFactory: Returns a fresh `FileCaptureService` for the given URL.
-    ///   - locale: Initial locale. Defaults to en-IN; resolved asynchronously on first use.
-    public init(
+    ///   - locale: The locale to transcribe in. REQUIRED, and with no default: the
+    ///     host chose a language when it built the session, and a coordinator that
+    ///     can invent its own locale is a coordinator that can disagree with the
+    ///     pack. There is no "resolve it later" path any more.
+    init(
         sessionManager: AudioSessionManager,
         recognitionService: SpeechRecognitionService,
         captureServiceFactory: @MainActor @escaping () -> any AudioInputProvider = { AudioCaptureService() },
         fileServiceFactory: @MainActor @escaping (URL) -> any AudioInputProvider = { FileCaptureService(fileURL: $0) },
-        locale: Locale? = nil,
+        locale: Locale,
         ownsAudioSession: Bool = true
     ) {
         let (stream, continuation) = AsyncStream<TranscriptionResult>.makeStream()
@@ -116,45 +124,36 @@ public final class TranscriptionCoordinator {
         self.fileServiceFactory = fileServiceFactory
         self.ownsAudioSession = ownsAudioSession
 
-        // Default to en-IN; will be resolved asynchronously in startLiveTranscription/transcribeFile
-        // if no explicit locale is provided.
-        let savedOverride = UserDefaults.standard.string(forKey: localeDefaultsKey)
-        self.currentLocale = locale ?? Locale(identifier: savedOverride ?? "en-IN")
+        self.currentLocale = locale
 
         sessionManager.delegate = self
         recognitionService.delegate = self
     }
 
     /// Convenience initializer with no external dependencies.
-    public convenience init() {
-        let savedOverride = UserDefaults.standard.string(forKey: localeDefaultsKey)
-        let defaultLocale = Locale(identifier: savedOverride ?? "en-IN")
-        let recognitionService = SpeechRecognitionService(locale: defaultLocale)
+    convenience init(locale: Locale) {
         self.init(
             sessionManager: AudioSessionManager(),
-            recognitionService: recognitionService,
-            locale: defaultLocale
+            recognitionService: SpeechRecognitionService(locale: locale),
+            locale: locale
         )
     }
 
     /// Convenience initializer for host-owned audio. The given `AppAudioInputProvider`
     /// is fed by the app via `provideAudio`; the coordinator does not open the mic or
     /// touch the `AVAudioSession` (`ownsAudioSession: false`).
-    public convenience init(appAudioProvider: AppAudioInputProvider) {
-        let savedOverride = UserDefaults.standard.string(forKey: localeDefaultsKey)
-        let defaultLocale = Locale(identifier: savedOverride ?? "en-IN")
-        let recognitionService = SpeechRecognitionService(locale: defaultLocale)
+    convenience init(appAudioProvider: AppAudioInputProvider, locale: Locale) {
         self.init(
             sessionManager: AudioSessionManager(),
-            recognitionService: recognitionService,
+            recognitionService: SpeechRecognitionService(locale: locale),
             captureServiceFactory: { appAudioProvider },
-            locale: defaultLocale,
+            locale: locale,
             ownsAudioSession: false
         )
     }
 
     deinit {
-        print("[Deinit] TranscriptionCoordinator")
+        lifecycleLog.debug("[Deinit] TranscriptionCoordinator")
     }
 
     // MARK: - Pre-warm
@@ -162,20 +161,20 @@ public final class TranscriptionCoordinator {
     /// Pre-loads the Apple speech model (locale resolve → install/reserve →
     /// SpeechTranscriber + SpeechAnalyzer creation) in the background so the first
     /// mic tap is instant. Returns immediately. Call from the view's `.onAppear`.
-    public func prewarm() {
+    func prewarm() {
         recognitionService.prewarm()
     }
 
     /// Awaitable Load — kicks off prewarm and returns when it's done. Used by
     /// the diagnostic Load button so the MemoryProbe brackets a finished cycle.
-    public func loadNow() async {
+    func loadNow() async {
         await recognitionService.awaitPrewarm()
     }
 
     /// Releases every speech-related ref held by the recognition service.
     /// Diagnostic — used by the Unload button to measure whether the speech
     /// framework returns its dirty memory when we drop our handles.
-    public func unload() async {
+    func unload() async {
         await recognitionService.unload()
     }
 
@@ -205,7 +204,7 @@ public final class TranscriptionCoordinator {
     // MARK: - Permission Check
 
     /// Checks both microphone and speech recognition permissions without requesting them.
-    public func checkPermissions() async -> PermissionStatus {
+    func checkPermissions() async -> PermissionStatus {
         let micGranted = AVAudioApplication.shared.recordPermission == .granted
         let speechGranted = SFSpeechRecognizer.authorizationStatus() == .authorized
         switch (micGranted, speechGranted) {
@@ -224,7 +223,7 @@ public final class TranscriptionCoordinator {
     /// - Throws: `TranscriptionError.speechRecognitionPermissionDenied` if STT access is denied.
     /// - Throws: `TranscriptionError.audioSessionSetupFailed` if the audio session cannot start.
     /// - Throws: `TranscriptionError.analyzerFailed` if the speech engine cannot start.
-    public func startLiveTranscription() async throws {
+    func startLiveTranscription() async throws {
         // Phase timing (logging only): the hang detector caught a one-time ~2.5s
         // main-thread stall inside the FIRST mic start — these marks attribute it
         // to a specific phase (permissions / locale / session / engine / analyzer).
@@ -294,7 +293,7 @@ public final class TranscriptionCoordinator {
     ///   immediately on the live session instead of waiting ~100ms for a
     ///   deactivate/re-activate round-trip. Both paths use the same `.playAndRecord`
     ///   category, so no reconfiguration is needed between them.
-    public func stopLiveTranscription(deactivateSession: Bool = true) {
+    func stopLiveTranscription(deactivateSession: Bool = true) {
         guard state != .idle, state != .stopping else { return }
         transition(to: .stopping)
         teardownTask = Task {
@@ -319,7 +318,7 @@ public final class TranscriptionCoordinator {
     /// Suspends until any in-progress live teardown has completed. Callers that need the
     /// audio session fully released before doing their own audio work (e.g. speaking a
     /// TTS prompt) should await this first.
-    public func waitForTeardown() async {
+    func waitForTeardown() async {
         await teardownTask?.value
     }
 
@@ -327,7 +326,7 @@ public final class TranscriptionCoordinator {
     /// flow deliberately keeps the session active across recognizer↔TTS handoffs (see
     /// `recognitionServiceDidDetectSilence`); the owning screen calls this on dismiss
     /// so the session doesn't outlive the conversation.
-    public func releaseAudioSession() {
+    func releaseAudioSession() {
         guard ownsAudioSession, state == .idle else { return }
         sessionManager.tearDown()
     }
@@ -341,7 +340,7 @@ public final class TranscriptionCoordinator {
     ///   - onProgress: Called on the main actor with real frame-based progress (0...1).
     /// - Returns: The complete transcribed text.
     /// - Throws: `TranscriptionError.fileNotFound` if the URL is inaccessible.
-    public func transcribeFile(
+    func transcribeFile(
         at url: URL,
         onProgress: @MainActor @escaping (Double) -> Void = { _ in }
     ) async throws -> String {
@@ -417,7 +416,7 @@ public final class TranscriptionCoordinator {
     }
 
     /// Cancels an in-progress file transcription and releases resources.
-    public func cancelFileTranscription() {
+    func cancelFileTranscription() {
         guard case .processingFile = state else { return }
         fileCompletionHandler?()
         activeProvider?.stop()
@@ -430,23 +429,25 @@ public final class TranscriptionCoordinator {
 
     // MARK: - Locale Switching
 
-    /// Switches the active transcription locale and persists it to `UserDefaults`.
+    /// Switches the active transcription locale for this coordinator.
+    ///
+    /// Persists nothing. It used to write the identifier into the HOST app's
+    /// `UserDefaults.standard` under `stt.userSelectedLocale`, with a rollback on
+    /// failure, because the recognition service's prewarm read the locale back out
+    /// of that same key. Both halves are gone: the service prewarms for the locale
+    /// it already holds, so there is nothing to hand across through global state.
+    ///
+    /// That persistence came from the app this code was copied out of, where a
+    /// user-facing language picker legitimately wanted the choice to survive a
+    /// relaunch. In a package it is the SDK writing an un-namespaced key into a
+    /// host's shared defaults, and — on the failure path — a stale value quietly
+    /// becoming the locale the recogniser ran in. Remembering a user's choice is
+    /// the host's job; it passes the result in as configuration.
     ///
     /// - Parameter identifier: BCP-47 locale string (e.g. "hi-IN", "en-US").
     /// - Throws: `TranscriptionError.localeNotSupported` if no model exists for this locale.
-    public func switchLocale(to identifier: String) async throws {
-        // Persist FIRST: the recognition service re-arms its prewarm inside
-        // switchLocale, and that prewarm resolves the locale from this key — writing
-        // it afterwards would make the fresh prewarm warm the *old* locale.
-        let previousOverride = UserDefaults.standard.string(forKey: localeDefaultsKey)
-        UserDefaults.standard.set(identifier, forKey: localeDefaultsKey)
-        do {
-            try await recognitionService.switchLocale(to: identifier)
-        } catch {
-            // Roll back so a failed switch doesn't poison the next launch/resolve.
-            UserDefaults.standard.set(previousOverride, forKey: localeDefaultsKey)
-            throw error
-        }
+    func switchLocale(to identifier: String) async throws {
+        try await recognitionService.switchLocale(to: identifier)
         // `supportedLocale(equivalentTo:)` is async in iOS 26.
         if let matched = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: identifier)) {
             currentLocale = matched
@@ -462,15 +463,23 @@ public final class TranscriptionCoordinator {
         delegate?.didChangeState(newState)
     }
 
-    /// Resolves `currentLocale` from the async SpeechTranscriber API if it hasn't been
-    /// set by an explicit `switchLocale` call. Only resolves once per coordinator —
-    /// enforced by the `localeResolved` flag (previously this comment claimed "once"
-    /// but the resolve re-ran, with its XPC calls, on every start).
+    /// Canonicalises `currentLocale` against the Speech framework's supported set —
+    /// "en-US" as the host spelled it becomes whatever `SpeechTranscriber` calls it.
+    /// Only runs once per coordinator, enforced by `localeResolved` (previously this
+    /// comment claimed "once" but the resolve re-ran, with its XPC calls, on every start).
+    ///
+    /// It used to run the full auto-detect chain from the persisted override —
+    /// override → device locale → device language → en-IN. Two things were wrong with
+    /// that: the value came from global state rather than from the caller, and the
+    /// chain's later steps substitute a DIFFERENT LANGUAGE, which is the one thing
+    /// this package refuses to do anywhere else. An unsupported locale is now left
+    /// alone so `startTranscribing` throws `localeNotSupported` for it, instead of
+    /// transcribing English for a session bound to a Danish pack.
     private func resolveCurrentLocaleIfNeeded() async {
         guard !localeResolved else { return }
-        let savedOverride = UserDefaults.standard.string(forKey: localeDefaultsKey)
-        let resolved = await SpeechRecognitionService.resolveLocale(userOverride: savedOverride)
-        currentLocale = resolved
+        if let matched = await SpeechTranscriber.supportedLocale(equivalentTo: currentLocale) {
+            currentLocale = matched
+        }
         localeResolved = true
     }
 
@@ -498,15 +507,15 @@ public final class TranscriptionCoordinator {
 // MARK: - AudioSessionManagerDelegate
 
 extension TranscriptionCoordinator: AudioSessionManagerDelegate {
-    public func audioSessionManager(_ manager: AudioSessionManager, routeDidChangeTo route: AudioRoute) {
+    func audioSessionManager(_ manager: AudioSessionManager, routeDidChangeTo route: AudioRoute) {
         currentRoute = route
     }
 
-    public func audioSessionManagerWasInterrupted(_ manager: AudioSessionManager) {
+    func audioSessionManagerWasInterrupted(_ manager: AudioSessionManager) {
         if state == .transcribing { stopLiveTranscription() }
     }
 
-    public func audioSessionManagerInterruptionEnded(_ manager: AudioSessionManager, shouldResume: Bool) {
+    func audioSessionManagerInterruptionEnded(_ manager: AudioSessionManager, shouldResume: Bool) {
         guard shouldResume else { return }
         // Surface resume failures instead of swallowing them with `try?` — a failed
         // resume previously left the mic silently dead with no signal to the UI.
@@ -525,21 +534,21 @@ extension TranscriptionCoordinator: AudioSessionManagerDelegate {
 // MARK: - SpeechRecognitionServiceDelegate
 
 extension TranscriptionCoordinator: SpeechRecognitionServiceDelegate {
-    public func recognitionService(_ service: SpeechRecognitionService, didReceivePartialResult result: TranscriptionResult) {
+    func recognitionService(_ service: SpeechRecognitionService, didReceivePartialResult result: TranscriptionResult) {
         currentTranscript = result.text
         logger.info("[Coordinator] Partial → forwarding to delegate (nil? \(self.delegate == nil)): '\(result.text)'")
         delegate?.didReceivePartialResult(result.text)
         resultsContinuation?.yield(result)
     }
 
-    public func recognitionService(_ service: SpeechRecognitionService, didReceiveFinalResult result: TranscriptionResult) {
+    func recognitionService(_ service: SpeechRecognitionService, didReceiveFinalResult result: TranscriptionResult) {
         currentTranscript = result.text
         logger.info("[Coordinator] Final → forwarding to delegate (nil? \(self.delegate == nil)): '\(result.text)'")
         delegate?.didReceiveFinalResult(result.text)
         resultsContinuation?.yield(result)
     }
 
-    public func recognitionService(_ service: SpeechRecognitionService, didFailWith error: TranscriptionError) {
+    func recognitionService(_ service: SpeechRecognitionService, didFailWith error: TranscriptionError) {
         transition(to: .failed(error))
         delegate?.didEncounterError(error)
         activeProvider?.stop()
@@ -547,16 +556,16 @@ extension TranscriptionCoordinator: SpeechRecognitionServiceDelegate {
         sessionManager.tearDown()
     }
 
-    public func recognitionServiceDidComplete(_ service: SpeechRecognitionService) {
+    func recognitionServiceDidComplete(_ service: SpeechRecognitionService) {
         // Used by file transcription to end its result-collection loop deterministically.
         fileCompletionHandler?()
     }
 
-    public func recognitionService(_ service: SpeechRecognitionService, didUpdateAudioLevel powerDBFS: Float) {
+    func recognitionService(_ service: SpeechRecognitionService, didUpdateAudioLevel powerDBFS: Float) {
         delegate?.didUpdateAudioLevel(powerDBFS)
     }
 
-    public func recognitionServiceDidDetectSilence(_ service: SpeechRecognitionService) {
+    func recognitionServiceDidDetectSilence(_ service: SpeechRecognitionService) {
         // Only relevant for live transcription. Stop the recognizer and mic but keep
         // the audio session ACTIVE: in a conversation the very next step is a TTS
         // prompt, and speaking onto a just-deactivated session is both slower

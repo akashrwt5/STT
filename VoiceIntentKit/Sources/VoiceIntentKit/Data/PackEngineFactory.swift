@@ -26,7 +26,7 @@
 import Foundation
 import os.log
 
-public enum PackEngineFactory {
+enum PackEngineFactory {
 
     private static let log = Logger(subsystem: "com.voiceintentkit", category: "PackEngineFactory")
 
@@ -56,7 +56,7 @@ public enum PackEngineFactory {
     /// and cannot be built from a pack; the engine now depends on
     /// `SlotResolving`, so the pack-driven implementation is built here where the
     /// pack is.
-    public static func makeEngine(pack: ResolvedPack,
+    static func makeEngine(pack: ResolvedPack,
                                   stopwords: Set<String>? = nil,
                                   trailingFunctionWords: Set<String>? = nil) throws -> any ConversationEngine {
         let classifier = try PackClassifierAdapter(pack: pack)
@@ -192,6 +192,7 @@ public enum PackEngineFactory {
         return NLUSchema(
             version: pack.policies.policySchema,
             confidenceThreshold: pack.policies.thresholds.confidence,
+            fallbackIntent: pack.outOfScopeIntent ?? NLUSchema.defaultFallbackIntent,
             intents: intents,
             affirmative: pack.lexicon.affirmative,
             negative: pack.lexicon.negative,
@@ -210,30 +211,26 @@ public enum PackEngineFactory {
 /// engine and view model depend on.
 ///
 /// A thin actor rather than making `PackIntentClassifier` conform directly: the
-/// protocol carries legacy surface (`genaiURL`, Stage-3 lifecycle) that the
-/// pack-driven classifier has no business knowing about. Keeping the adaptation
-/// here means the protocol can shrink later without touching the classifier.
-public actor PackClassifierAdapter: IntentClassifying {
+/// protocol carries legacy surface (Stage-3 lifecycle) that the pack-driven
+/// classifier has no business knowing about. Keeping the adaptation here means
+/// the protocol can shrink later without touching the classifier — `genaiURL`
+/// was the first thing to leave that way.
+actor PackClassifierAdapter: IntentClassifying {
 
     private let classifier: PackIntentClassifier
     private let outOfScopeIntent: String
-    private let genaiBaseURL: String
     /// The pack decides whether semantic rescue runs — not the host, and not
     /// this adapter. en packs ship it disabled and their report card was
     /// measured that way.
     private let semanticEnabled: Bool
 
-    public init(pack: ResolvedPack) throws {
+    init(pack: ResolvedPack) throws {
         self.classifier = try PackIntentClassifier(artifacts: pack.classifier)
         self.outOfScopeIntent = pack.outOfScopeIntent ?? ""
         self.semanticEnabled = pack.stageEnabled(.semantic)
-        // Read from the weights blob, where the trainer puts it.
-        let weights = (try? Data(contentsOf: pack.classifier.weightsURL))
-            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-        self.genaiBaseURL = (weights?["genai_base_url"] as? String) ?? ""
     }
 
-    public func classifyAsync(_ text: String) async -> ClassificationResult {
+    func classifyAsync(_ text: String) async -> ClassificationResult {
         let prediction = await classifier.classify(text)
 
         // A vacuous prediction is not a low-confidence one: nothing in the
@@ -260,20 +257,14 @@ public actor PackClassifierAdapter: IntentClassifying {
                 stage3: nil))
     }
 
-    public func genaiURL(for text: String) -> URL {
-        var components = URLComponents(string: genaiBaseURL)
-        components?.queryItems = [URLQueryItem(name: "q", value: text)]
-        return components?.url ?? URL(fileURLWithPath: "/")
-    }
-
-    public func warmUp() async { await classifier.warmUp() }
+    func warmUp() async { await classifier.warmUp() }
 
     /// Stage 3 is pack-gated. A host asking for it when the pack disables it is
     /// asking for behaviour the pack's accuracy numbers were not measured under,
     /// so the request is ignored rather than honoured.
-    public func loadStage3() async {
+    func loadStage3() async {
         guard semanticEnabled else { return }
     }
 
-    public func releaseStage3() async { await classifier.unload() }
+    func releaseStage3() async { await classifier.unload() }
 }

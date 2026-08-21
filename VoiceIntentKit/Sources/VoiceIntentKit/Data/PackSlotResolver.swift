@@ -32,22 +32,22 @@ import os.log
 /// parked day through this exact format. Handing it a `Date` would move that
 /// formatting into the engine, which is where it should NOT be — the parser owns
 /// the calendar and the time zone.
-public struct SlotDateTime: Sendable, Equatable {
+struct SlotDateTime: Sendable, Equatable {
 
     /// `yyyy-MM-dd'T'HH:mm` in the resolver's time zone.
-    public let iso: String
+    let iso: String
 
     /// True when the user actually said a time. False means only a day was
     /// given and the hour was defaulted — the engine parks the day and prompts
     /// for the hour rather than committing a time nobody asked for.
-    public let timeExplicit: Bool
+    let timeExplicit: Bool
 
     /// True when the user named a day. The engine must not anchor an answer that
     /// carries its own day onto a previously parked one, or the day advances
     /// twice.
-    public let explicitDay: Bool
+    let explicitDay: Bool
 
-    public init(iso: String, timeExplicit: Bool, explicitDay: Bool) {
+    init(iso: String, timeExplicit: Bool, explicitDay: Bool) {
         self.iso = iso
         self.timeExplicit = timeExplicit
         self.explicitDay = explicitDay
@@ -57,7 +57,7 @@ public struct SlotDateTime: Sendable, Equatable {
 // MARK: - Contract
 
 /// What `NLUEngine` needs to know about a slot's entity.
-public protocol SlotResolving: Sendable {
+protocol SlotResolving: Sendable {
 
     /// True when this entity is resolved by parsing a date-time rather than by
     /// looking a value up.
@@ -93,7 +93,7 @@ public protocol SlotResolving: Sendable {
 
 // MARK: - Pack-driven implementation
 
-public struct PackSlotResolver: SlotResolving {
+struct PackSlotResolver: SlotResolving {
 
     private let entities: PackEntityExtractor
     private let datetime: PackDateTimeParser
@@ -107,12 +107,12 @@ public struct PackSlotResolver: SlotResolving {
     /// runtime resolves it but not what to resolve it as — leaving the id as the
     /// only discriminator, and making a rename a silent breakage (VIK-019). It
     /// now qualifies the source, so dispatch is on what the pack SAYS.
-    public static let dateTimeSource = "runtime.builtin.datetime"
+    static let dateTimeSource = "runtime.builtin.datetime"
 
     /// Fallback for packs built before that fix, which qualify nothing. Matching
     /// on the id is wrong in principle and correct in practice for exactly these
     /// packs, so it is scoped to them rather than being the general rule.
-    public static let legacyDateTimeEntityIDs: Set<String> = ["sys.date_time", "sys.date-time"]
+    static let legacyDateTimeEntityIDs: Set<String> = ["sys.date_time", "sys.date-time"]
     static let unqualifiedBuiltinSource = "runtime.builtin"
 
     private static let log = Logger(subsystem: "com.voiceintentkit", category: "PackSlotResolver")
@@ -123,7 +123,7 @@ public struct PackSlotResolver: SlotResolving {
     ///     declares. Normally empty — the pack is the source of truth now that
     ///     the compiler emits `open`. Kept only so a host can work around a pack
     ///     that is missing the flag without waiting for a rebuild.
-    public init(pack: ResolvedPack,
+    init(pack: ResolvedPack,
                 timeZone: TimeZone = .current,
                 stopwords: Set<String>? = nil,
                 openEntities: Set<String> = []) {
@@ -191,22 +191,22 @@ public struct PackSlotResolver: SlotResolving {
 
     // MARK: SlotResolving
 
-    public func isDateTime(_ entity: String) -> Bool { dateTimeEntities.contains(entity) }
+    func isDateTime(_ entity: String) -> Bool { dateTimeEntities.contains(entity) }
 
-    public func isOpen(_ entity: String) -> Bool { entities.isOpen(entity) }
+    func isOpen(_ entity: String) -> Bool { entities.isOpen(entity) }
 
-    public func extract(_ entity: String, from text: String, isDirectAnswer: Bool) -> String? {
+    func extract(_ entity: String, from text: String, isDirectAnswer: Bool) -> String? {
         entities.extract(entity, from: text, allowFuzzy: isDirectAnswer)?.value
     }
 
-    public func dateTime(in text: String, now: Date) -> SlotDateTime? {
+    func dateTime(in text: String, now: Date) -> SlotDateTime? {
         guard let match = datetime.parse(text, now: now) else { return nil }
         return SlotDateTime(iso: localISO(match.date),
                             timeExplicit: match.timeExplicit,
                             explicitDay: match.dayExplicit)
     }
 
-    public func strippingDateTime(_ text: String) -> String {
+    func strippingDateTime(_ text: String) -> String {
         datetime.strippingDateTime(text)
     }
 

@@ -25,18 +25,18 @@
 import Foundation
 import os.log
 
-public struct PackEntityExtractor: Sendable {
+struct PackEntityExtractor: Sendable {
 
     // MARK: - Result
 
-    public struct Match: Sendable, Equatable {
+    struct Match: Sendable, Equatable {
         /// The canonical value, not the surface form that matched.
-        public let value: String
+        let value: String
         /// The text that matched, for highlighting and telemetry.
-        public let span: String
+        let span: String
         /// 1.00 exact/canonical · 0.95 synonym · 0.60–0.90 fuzzy.
-        public let confidence: Double
-        public let isFuzzy: Bool
+        let confidence: Double
+        let isFuzzy: Bool
     }
 
     // MARK: - Reference constants
@@ -48,13 +48,13 @@ public struct PackEntityExtractor: Sendable {
     /// (Car, Gym, Pub, Mute, one…) sit within one edit of common words, so
     /// fuzzy-matching them selects the wrong memory. Exact matching still works
     /// for them — only the approximate path is length-gated.
-    public static let fuzzyMinimumLength = 5
+    static let fuzzyMinimumLength = 5
 
     /// Allowed edits, as a fraction of the synonym's length.
-    public static let fuzzyDistanceRatio = 0.3
+    static let fuzzyDistanceRatio = 0.3
 
-    public static let fuzzyConfidenceFloor = 0.60
-    public static let fuzzyConfidenceCeiling = 0.90
+    static let fuzzyConfidenceFloor = 0.60
+    static let fuzzyConfidenceCeiling = 0.90
 
     /// Function words that are never treated as typos.
     ///
@@ -69,7 +69,7 @@ public struct PackEntityExtractor: Sendable {
     /// entity id → whether approximate matching is permitted.
     private let fuzzyEnabled: [String: Bool]
     /// Entities the host must resolve (`sys.date_time`, `sys.number_integer`).
-    public let dynamicEntities: Set<String>
+    let dynamicEntities: Set<String>
     /// Entities whose gazetteer is a hint rather than a closed set, so a free-text
     /// answer is acceptable. **Not in the v3 surface** — see `openEntities` on the
     /// initialiser and VIK-017.
@@ -80,18 +80,23 @@ public struct PackEntityExtractor: Sendable {
     // MARK: - Init
 
     /// - Parameter stopwords: words excluded as typo candidates. Defaults to the
-    ///   reference's English set. **A non-English pack must supply its own** —
-    ///   otherwise English function words are excluded while the language's real
-    ///   ones ("le", "der", "den") stay eligible and can fuzzy-match an enum
-    ///   value. The pack cannot carry these yet, which is why this is a
-    ///   parameter and not read from `pack`.
+    ///   PACK's own `lexicon.fuzzyStopwords`, so each language ships its own list
+    ///   and a non-English pack needs no code change. Pass a value only to
+    ///   override the pack.
+    ///
+    ///   It used to default to EMPTY, and that was a trap. The list is what stops
+    ///   "the" fuzzy-matching the memory "three" (VIK-007); an empty default meant
+    ///   every caller that did not think to pass one silently lost the guard, and
+    ///   the only symptom is a wrong slot filled with confidence 0.60. Production
+    ///   passed one through `PackEngineFactory`; the test suite did not, and spent
+    ///   the difference proving the guard was broken when it was not.
     /// - Parameter openEntities: entities whose value list is a hint, not a
     ///   closed set. Comes from `ResolvedPack.openEntities`, which the compiler
     ///   now emits (VIK-017) — callers should not be assembling this by hand.
     ///   Absent it, an entity like `remind` looks closed, a slot answer outside
     ///   the gazetteer is rejected, and "remind me to buy milk" cannot fill its
     ///   own name slot; the symptom is a re-prompt, never an error.
-    public init(pack: ResolvedPack,
+    init(pack: ResolvedPack,
                 stopwords: Set<String>? = nil,
                 openEntities: Set<String> = []) {
         var tables: [String: [String: String]] = [:]
@@ -113,14 +118,14 @@ public struct PackEntityExtractor: Sendable {
         self.fuzzyEnabled = fuzzy
         self.dynamicEntities = pack.dynamicEntities
         self.openEntities = openEntities
-        self.stopwords = stopwords ?? []
+        self.stopwords = stopwords ?? Set(pack.lexicon.fuzzyStopwords ?? [])
         self.log = Logger(subsystem: "com.voiceintentkit", category: "EntityExtractor")
     }
 
     /// Designated initialiser for callers that know an entity's fuzzy flag —
     /// the loader strips `EntityDefinition` down to synonyms, so the flag has to
     /// be threaded in separately.
-    public init(tables: [String: [String: String]],
+    init(tables: [String: [String: String]],
                 fuzzyEnabled: [String: Bool],
                 dynamicEntities: Set<String>,
                 stopwords: Set<String>,
@@ -141,7 +146,7 @@ public struct PackEntityExtractor: Sendable {
     ///   speculatively. A stray fuzzy hit on a common word is a wrong-action
     ///   risk; approximate matching is for answers to an explicit slot prompt,
     ///   where the user is already talking about that slot.
-    public func extract(_ entity: String, from text: String, allowFuzzy: Bool = true) -> Match? {
+    func extract(_ entity: String, from text: String, allowFuzzy: Bool = true) -> Match? {
         guard let table = tables[entity], !table.isEmpty else { return nil }
         let haystack = text.lowercased()
 
@@ -165,7 +170,7 @@ public struct PackEntityExtractor: Sendable {
 
     /// True when the entity is resolved by the host at match time rather than
     /// from a gazetteer.
-    public func isDynamic(_ entity: String) -> Bool { dynamicEntities.contains(entity) }
+    func isDynamic(_ entity: String) -> Bool { dynamicEntities.contains(entity) }
 
     /// Entities whose value list is open-ended, so a free-text answer is
     /// acceptable.
@@ -176,7 +181,7 @@ public struct PackEntityExtractor: Sendable {
     /// ("buy milk") straight into the date-time slot, satisfying it with a
     /// string that is not a date. The doc comment said "and not dynamic"; the
     /// code did not. Order matters here, not just the predicate.
-    public func isOpen(_ entity: String) -> Bool {
+    func isOpen(_ entity: String) -> Bool {
         if dynamicEntities.contains(entity) { return false }
         if openEntities.contains(entity) { return true }
         return tables[entity]?.isEmpty ?? true

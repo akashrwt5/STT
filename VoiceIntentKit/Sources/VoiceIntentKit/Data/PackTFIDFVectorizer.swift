@@ -36,20 +36,20 @@ import Foundation
 
 /// scikit-learn `TfidfVectorizer(ngram_range=(1,2), sublinear_tf=True)` +
 /// `LogisticRegression`, reproduced for the device.
-public struct PackTFIDFVectorizer: Sendable {
+struct PackTFIDFVectorizer: Sendable {
 
     /// term → column index in the coefficient matrix.
-    public let vocabulary: [String: Int]
+    let vocabulary: [String: Int]
     /// Inverse document frequency, one per column.
-    public let idf: [Double]
+    let idf: [Double]
 
-    public init(vocabulary: [String: Int], idf: [Double]) {
+    init(vocabulary: [String: Int], idf: [Double]) {
         self.vocabulary = vocabulary
         self.idf = idf
     }
 
     /// Feature width the head expects.
-    public var dimension: Int { idf.count }
+    var dimension: Int { idf.count }
 
     // MARK: - Tokenisation
 
@@ -64,7 +64,7 @@ public struct PackTFIDFVectorizer: Sendable {
     /// underscore — matched here with `isLetter || isNumber || == "_"` rather
     /// than `CharacterSet.alphanumerics`, which is not the same set for
     /// non-Latin scripts and would diverge for a future language pack.
-    public func tokenize(_ text: String) -> [String] {
+    func tokenize(_ text: String) -> [String] {
         var tokens: [String] = []
         var current = ""
         for ch in text.lowercased() {
@@ -80,7 +80,7 @@ public struct PackTFIDFVectorizer: Sendable {
     }
 
     /// Unigrams plus adjacent bigrams — `ngram_range=(1, 2)`.
-    public func features(_ text: String) -> [String] {
+    func features(_ text: String) -> [String] {
         let tokens = tokenize(text)
         guard tokens.count > 1 else { return tokens }
         var out = tokens
@@ -99,7 +99,7 @@ public struct PackTFIDFVectorizer: Sendable {
     /// Returned sparse: at ~0.1% density a dense 4718-wide array would be
     /// mostly zeros, and the caller needs the dense buffer only when it is
     /// about to hand one to CoreML.
-    public func vectorize(_ text: String) -> [Int: Double] {
+    func vectorize(_ text: String) -> [Int: Double] {
         var counts: [Int: Int] = [:]
         for feature in features(text) {
             if let column = vocabulary[feature] { counts[column, default: 0] += 1 }
@@ -117,7 +117,7 @@ public struct PackTFIDFVectorizer: Sendable {
     }
 
     /// Dense form, for handing to CoreML.
-    public func denseVector(_ text: String) -> [Float] {
+    func denseVector(_ text: String) -> [Float] {
         var dense = [Float](repeating: 0, count: dimension)
         for (column, value) in vectorize(text) where column < dense.count {
             dense[column] = Float(value)
@@ -132,7 +132,7 @@ public struct PackTFIDFVectorizer: Sendable {
     /// confidence that can clear the 0.70 gate while meaning nothing. Measured
     /// at 5 of 1470 holdout rows (0.34%). A caller must route these to the
     /// out-of-scope intent rather than trusting the score.
-    public func producesNoFeatures(_ text: String) -> Bool {
+    func producesNoFeatures(_ text: String) -> Bool {
         vectorize(text).isEmpty
     }
 }

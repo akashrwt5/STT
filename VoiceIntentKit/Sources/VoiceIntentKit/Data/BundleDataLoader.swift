@@ -20,14 +20,14 @@
 import Foundation
 import os.log
 
-public enum BundleDataLoader {
+enum BundleDataLoader {
 
     private static let log = Logger(subsystem: "com.voiceintentkit", category: "BundleDataLoader")
 
     /// Runtime features this build implements. A pack requiring anything absent
     /// from this set is refused — fail closed, because an unrecognised feature
     /// may be the one its accuracy numbers depend on.
-    public static let supportedRuntimeFeatures: Set<String> = []
+    static let supportedRuntimeFeatures: Set<String> = []
 
     /// Load a pack.
     ///
@@ -44,11 +44,19 @@ public enum BundleDataLoader {
     ///     packs before 1.0.29 do not carry it, and asking for it there throws
     ///     `declaredArtifactMissing` at load rather than failing at the first
     ///     inference with a shape mismatch.
-    public static func load(packAt url: URL,
-                            language: String? = nil,
-                            variant: ClassifierVariant = .full,
-                            trust: PackTrustPolicy,
-                            policy: PackLoadPolicy = .default) throws -> ResolvedPack {
+    /// Steps 1-5 of `load`: existence, trust chain, decode from the VERIFIED bytes,
+    /// runtime compatibility, trust policy + report-card gates, language selection.
+    /// Everything up to — and not including — reading the pack's content.
+    ///
+    /// Split out so `VoiceIntentPack.verify` runs exactly these checks rather than a
+    /// cheaper approximation of them. A host pre-checking a pack before it serves it is
+    /// asking "would this load?", and answering that with a bare sha256 walk would let
+    /// an incompatible, dev-signed or gate-failing pack through a check that reads,
+    /// from the call site, like it caught everything.
+    static func verifiedManifest(packAt url: URL,
+                                 language: String?,
+                                 trust: PackTrustPolicy,
+                                 policy: PackLoadPolicy) throws -> (manifest: NLUBundle, language: String) {
 
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
@@ -83,6 +91,19 @@ public enum BundleDataLoader {
 
         // 5 — language.
         let lang = try selectLanguage(requested: language, manifest: manifest)
+
+        return (manifest, lang)
+    }
+
+    static func load(packAt url: URL,
+                            language: String? = nil,
+                            variant: ClassifierVariant = .full,
+                            trust: PackTrustPolicy,
+                            policy: PackLoadPolicy = .default) throws -> ResolvedPack {
+
+        // 1-5 — trust chain, manifest, compatibility, policy, language.
+        let (manifest, lang) = try verifiedManifest(
+            packAt: url, language: language, trust: trust, policy: policy)
 
         // 6 — sections.
         let sections = try loadSections(root: url, language: lang, manifest: manifest, policy: policy)

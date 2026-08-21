@@ -31,10 +31,18 @@ let package = Package(
         // The library ships ZERO data.
         //
         // No `resources:` block, and that absence is the acceptance test for the
-        // whole work package — `Bundle.module` appears nowhere in this target,
-        // so there is no bundled schema, lexicon, entity table or model for a
-        // failure to quietly fall back on. Everything comes from a verified pack
-        // the host supplies at runtime (`PackProvider`).
+        // whole work package — `Bundle.module` is not even synthesised for this
+        // target, so there is no bundled schema, lexicon, entity table or model
+        // for a failure to quietly fall back on. Everything comes from a verified
+        // pack the host supplies at runtime (`PackProvider`).
+        //
+        // A `PrivacyInfo.xcprivacy` briefly lived here, for the `UserDefaults`
+        // required-reason API (CA92.1) the locale override used. That override is
+        // gone, the target now touches no required-reason API, collects nothing,
+        // and is not on Apple's list of commonly used third-party SDKs — the three
+        // things that would make a manifest mandatory. So the manifest went too,
+        // and with it the one resource that forced `Bundle.module` into existence.
+        // `PackageResourceInvariantTests` keeps the guarantee honest either way.
         //
         // What used to be here: 4 `.mlpackage` models, 5 JSON/vocab files and
         // `Resources/LanguagePacks/` — about 29 MB, and the reason a language
