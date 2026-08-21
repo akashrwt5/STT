@@ -1,156 +1,286 @@
-# Integrating VoiceIntentKit into the STT app
+# Integrating VoiceIntentKit into a host app
 
-This wires a third **"Package"** option onto the first screen, alongside *English* and *Multilingual*. When selected, the session runs entirely through `VoiceIntentKit` instead of the app's in-project pipeline. Your existing code is left untouched — only additive changes.
+Two halves, and they are independent. **Part 1** gets a session running against a bundled pack —
+that is the whole feature, and it needs no server. **Part 2** adds OTA so packs can be updated
+without an App Store release.
 
-> **One step I could not do for you.** Adding a local Swift package to an Xcode project edits `project.pbxproj`. Hand-editing that file blind risks corrupting the project, so — per your "don't do it wrong" instruction — I left it to you. It's a 30-second GUI step (Step 1 below). Everything else is provided as ready-to-paste code.
+Do Part 1 first and ship it if you like. Part 2 changes where the pack comes from, not what the
+session does with it.
 
 ---
 
-## Step 1 — Add the local package (Xcode GUI)
+## Part 1 — a working session
 
-1. In Xcode: **File → Add Package Dependencies…**
-2. Click **Add Local…**, choose the `VoiceIntentKit` folder (next to `STT.xcodeproj`).
-3. When prompted, add the **VoiceIntentKit** library product to the **STT** app target.
+### 1. Link the package
 
-Verify: the STT target → *General → Frameworks, Libraries, and Embedded Content* now lists `VoiceIntentKit`.
+**File → Add Package Dependencies… → Add Local…**, choose the `VoiceIntentKit` folder.
 
-## Step 2 — Add the demo view (new file, additive)
+Add **both** products to your app target:
 
-Create `STT/Views/PackageVoiceView.swift` and paste this. It uses only the package's public API:
+- `VoiceIntentKit` — the engine
+- `VoiceIntentSeedPackEN` — the English pack, ~7 MB
+
+Skip the seed only if your app downloads every language before first use. Without it there is no
+offline floor: a fresh install cannot classify anything until its first successful download.
+
+Verify under *Target → General → Frameworks, Libraries, and Embedded Content*.
+
+### 2. Info.plist and capabilities
+
+```
+NSMicrophoneUsageDescription        — why you need the microphone
+NSSpeechRecognitionUsageDescription — required even when YOU own the microphone
+```
+
+Capabilities: Speech Recognition. Add Background Modes → Audio if sessions run in the background.
+
+Deployment target must be **iOS 26.0** or later.
+
+### 3. Tell the SDK where the pack is
 
 ```swift
-// PackageVoiceView.swift — session driven entirely by VoiceIntentKit.
-import SwiftUI
 import VoiceIntentKit
+import VoiceIntentSeedPackEN
 
-struct PackageVoiceView: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var session = VoiceIntentSession(configuration: .init(
-        language: .english,
-        packProvider: PackProviderForApp(),       // see STT/Views/PackageVoiceView.swift
-        trust: .unverifiedForTesting))            // production builds pin their own key
-    @State private var transcript = ""
-    @State private var status = "Idle"
-    @State private var lastTurn = ""
-    @State private var listening = false
+struct AppPackProvider: PackProvider {
+    func packURL(for language: String) async throws -> URL {
+        guard language == VoiceIntentSeedPackEN.language,
+              let seed = VoiceIntentSeedPackEN.url else {
+            throw VoiceIntentError.languageUnavailable(
+                requested: language,
+                available: [VoiceIntentSeedPackEN.language])
+        }
+        return seed
+    }
+}
+```
 
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 24) {
-                Text(status).font(.footnote).foregroundStyle(.secondary)
-                Text(transcript.isEmpty ? "Say something…" : transcript)
-                    .font(.title3).multilineTextAlignment(.center)
-                if !lastTurn.isEmpty {
-                    Text(lastTurn).font(.callout)
-                        .padding().background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                }
-                Spacer()
-                Button(listening ? "Stop" : "Start (via Package)") {
-                    Task {
-                        if listening { session.stop(); listening = false }
-                        else { listening = true; try? await session.start() }
-                    }
-                }
-                .buttonStyle(.borderedProminent)
+`VoiceIntentSeedPackEN.url` is nil when the library is linked but its resource bundle did not
+make it into the app. Those are two different failures — "we don't ship that language" and "the
+build dropped it" — and collapsing them turns a missing-in-Xcode pack into a misleading "no pack
+for 'en'".
+
+For a single language, `StaticPackProvider(language: "en", url: seed)` does the same thing.
+
+### 4. Choose a trust policy
+
+```swift
+#if DEBUG
+let trust = PackTrustPolicy.unverifiedForTesting
+#else
+let trust = PackTrustPolicy(
+    publicKeys: ["starkey-prod-2026": productionPublicKey],
+    refusesDevelopmentPacks: true,
+    skipsSignatureVerification: false)
+#endif
+```
+
+`.unverifiedForTesting` skips signature verification entirely. It is for tests and local pack
+authoring. **A release build that reaches it will load any pack anyone can put on disk** —
+enforce the split structurally, not by code review.
+
+### 5. Run a session
+
+The shape below is for a host that already owns its audio and its text-to-speech, which is the
+usual case for an app with its own recorder. For the simpler case, drop `audioSource`, set
+`speaksPrompts: true`, and ignore `provideAudio` and `hostDidFinishSpeaking`.
+
+```swift
+let session = VoiceIntentSession(configuration: .init(
+    language: .english,
+    packProvider: AppPackProvider(),
+    trust: trust,
+    speaksPrompts: false,                          // your TTS, not ours
+    autoStopOnSilence: true,
+    audioSource: .appProvided(sampleRate: 16_000)  // your microphone
+))
+
+Task {
+    for await event in session.events {
+        switch event {
+        case .stateChanged(let state):
+            // Push audio ONLY while listening. Anything else is dropped, which is what
+            // stops trailing audio from one turn bleeding into the next.
+            state == .listening ? startFeedingAudio() : stopFeedingAudio()
+
+        case .partialTranscript(let text): showCaption(text)
+        case .finalTranscript(let text):   commitCaption(text)
+
+        case .turn(let turn):
+            switch turn {
+            case .followUp(let question, _), .confirmation(let question):
+                await speak(question)
+                session.hostDidFinishSpeaking()
+
+            case .fulfilled(let intent, let slots, let message, _, _, _):
+                dispatch(intent: intent, slots: slots)
+                await speak(message)
+                session.hostDidFinishSpeaking()
+
+            case .notUnderstood(let intent, _, _):
+                dispatch(intent: intent, slots: [:])   // "Default Fallback Intent"
+                session.hostDidFinishSpeaking()
+
+            case .interrupted(let cancelled):
+                dismissUI(for: cancelled)
             }
-            .padding()
-            .navigationTitle("Package PVA")
-            .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Close") { session.stop(); dismiss() } } }
-        }
-        .task {
-            for await event in session.events {
-                switch event {
-                case .partialTranscript(let t), .finalTranscript(let t): transcript = t
-                case .stateChanged(let s): status = "\(s)"; if s == .stopped { listening = false }
-                case .error(let m): lastTurn = "Error: \(m)"; listening = false
-                case .turn(let turn): lastTurn = describe(turn)
-                }
-            }
-        }
-    }
 
-    private func describe(_ t: VoiceIntentTurn) -> String {
-        switch t {
-        case .followUp(let q, _):                   return "❓ \(q)"
-        case .confirmation(let q):                  return "✅? \(q)"
-        case .fulfilled(let i, let s, _, let c, _): return "🎯 \(i) \(s.isEmpty ? "" : "\(s)") (\(String(format: "%.2f", c)))"
-        case .notUnderstood(_, let c):              return "🤷 not understood (\(String(format: "%.2f", c)))"
-        case .interrupted(let cancelled):           return "↩︎ cancelled \(cancelled)"
+        case .error(let message):
+            logger.error("\(message)")
         }
     }
 }
+
+try await session.start()
 ```
 
-## Step 3 — Add the third picker option (small edit to `STTTestView.swift`)
-
-`NLUVariant` intentionally stays untouched (adding a case there would ripple into the factory's exhaustive `switch`). Instead, use a tiny local selector in the first screen. Apply this minimal diff to `STTTestView`:
-
-```diff
- struct STTTestView: View {
-     @State private var pvaViewModel: PVAViewModel?
-+    /// Set when the user picks "Package" — presents the VoiceIntentKit-backed screen.
-+    @State private var showPackageSession = false
-     @AppStorage("selectedNLUVariant") private var variant: NLUVariant = .english
-+    /// First-screen selection including the package path. English/Multilingual map to
-+    /// the existing NLUVariant flow; Package routes to VoiceIntentKit.
-+    @State private var pipeline: PipelineChoice = .english
-
-+    enum PipelineChoice: String, CaseIterable, Identifiable {
-+        case english, multilingual, package
-+        var id: String { rawValue }
-+        var title: String {
-+            switch self { case .english: "English"; case .multilingual: "Multilingual"; case .package: "Package" }
-+        }
-+    }
-```
-
-Replace the existing variant `Picker` with:
+Then feed the microphone — **Int16, mono, interleaved**, at the sample rate you declared:
 
 ```swift
-Picker("Pipeline", selection: $pipeline) {
-    ForEach(PipelineChoice.allCases) { Text($0.title).tag($0) }
-}
-.pickerStyle(.segmented)
-.padding(.horizontal, 32)
-.onChange(of: pipeline) { _, new in
-    if new != .package, pvaViewModel != nil { pvaViewModel?.teardown(); pvaViewModel = nil }
-    if new == .english { variant = .english }
-    if new == .multilingual { variant = .multilingual }
+session.provideAudio(pcmData)   // safe to call from a real-time audio thread
+```
+
+**`hostDidFinishSpeaking()` is not optional in this mode.** The session stays in `.speaking`
+until you call it, deliberately: that is what keeps the microphone shut while your prompt is
+still playing, so your own voice is never transcribed as the user's answer. Forget it and the
+turn stalls until a 30-second watchdog releases it.
+
+### 6. Record which pack answered
+
+```swift
+if let pack = session.loadedPack {
+    analytics.log(session: id,
+                  modelBundleVersion: pack.version,
+                  modelChecksum: pack.checksumRoot,
+                  channel: pack.channel)
 }
 ```
 
-And update the CTA action to branch:
+Read it from the **session**, not from `VoiceIntentClient.activePackVersion()`. That method
+reports what is `Current` on disk, and activation is apply-on-next-build — after an OTA install
+the two disagree until the next session starts. When a user reports a misheard command, the pack
+that misheard it is the session's.
+
+### 7. Text without a microphone
 
 ```swift
-Button {
-    PVALaunchClock.tapped()
-    if pipeline == .package {
-        showPackageSession = true                      // VoiceIntentKit path
-    } else {
-        pvaViewModel = PVAViewModel(variant: variant)  // existing in-app path
-    }
-} label: { /* unchanged */ }
+let turn = try await session.classify(text: "turn up the volume in my left ear")
 ```
 
-Finally add the sheet:
-
-```swift
-.sheet(isPresented: $showPackageSession) {
-    PackageVoiceView().preferredColorScheme(.dark)
-}
-```
-
-That's it — running the app now shows **English · Multilingual · Package**, and "Package" drives the whole session through `VoiceIntentKit`.
+Same pipeline, no audio. Useful for a keyboard, a test harness, or a shortcut.
 
 ---
 
-## Phase-2 migration — make the package the single source of truth
+## Part 2 — OTA updates
 
-You now have two copies of the NLU/STT logic: the app's in `STT/STT/…`, and the package's. That's intentional for this phase (your constraint was "don't change existing code"), but two copies drift. When you're ready to consolidate:
+The SDK verifies, stages, smoke-tests, activates and rolls back. **It does not download.** You
+own the network conversation, because you own the auth, the CDN, the pinning, the retry policy,
+and — since a background `URLSession` needs `handleEventsForBackgroundURLSession` on the app
+delegate — the background transfer too.
 
-1. **Verify parity.** Run the existing test suite (`ExtractDateTimeMultilingualTests`, `IntentClassifierCoreMLParityTests`, `KeywordMatcherTests`, `LocalizationLoaderTests`, `NLUEngineFactoryTests`) against the package sources by adding a package test target that imports them. Green = behavioural equivalence.
-2. **Flip the app onto the package.** Change `PVAViewModel` / `LiveTranscriptionViewModel` to build the package's `VoiceIntentSession` (or expose the package's `NLUEngineFactoryProvider`) instead of the in-project types.
-3. **Delete the duplicates.** Remove `STT/STT/Services/`, `STT/STT/Services/NLU/`, and the resource copies from the app target; keep them only in the package. Move the STT `Core/` files similarly if you want the package to own STT too.
-4. **Single resource home.** Resources now live only in the package (`Bundle.module`); delete the app-bundle copies to shrink the app and remove the second maintenance point.
+### 1. Implement three protocols
 
-After Phase 2, the package is the canonical implementation and the app is a thin consumer — the production-maintainable end state.
+```swift
+protocol PackExtractor: Sendable {
+    func extract(from source: URL, to destination: URL) throws
+}
+
+protocol NLUEngineProvider: Sendable {
+    func smokeTest(packRoot: URL, language: String) async throws
+    func load(modelPath: URL, vocabularyPath: URL) throws
+    var isIdle: Bool { get }
+}
+```
+
+`PackExtractor` unzips. **It must not modify anything it extracts.** `PackValidator` extracts
+first and verifies second, and the Ed25519 signature covers `bundle.json`, which is deliberately
+excluded from the checksum table — so a "helpful" edit to that file is a pack whose signature can
+no longer verify. This is not hypothetical: a `version`-injecting hotfix in exactly that spot
+would have failed every OTA install the day production signing was switched on.
+
+Hoisting a single top-level directory is fine — it moves files, it does not edit them.
+
+`NLUEngineProvider.smokeTest` should be one call:
+
+```swift
+func smokeTest(packRoot: URL, language: String) async throws {
+    _ = try await VoiceIntentPack.smokeTest(packRoot: packRoot, language: language, trust: trust)
+}
+```
+
+Pass the **same trust policy the session uses**. A different one here makes the activation gate
+check something other than what will actually run, while reading as correct.
+
+`isIdle` gates activation so a pack is never swapped mid-inference. If your app serves through
+`VoiceIntentSession` — which loads the freshest pack when it next builds — nothing else holds a
+live engine, and `true` is honest.
+
+### 2. Build the client once, at launch
+
+```swift
+let storageBase = FileManager.default
+    .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+
+let storage   = try PackStorageController(baseStorageURL: storageBase)
+let validator = PackValidator(extractor: AppPackExtractor(), trust: trust)
+
+let client = VoiceIntentClient(
+    storage: storage,
+    validator: validator,
+    engineProvider: AppEngineProvider(),
+    seedPackURL: VoiceIntentSeedPackEN.url!)
+```
+
+`PackStorageController` appends its own `VoiceIntentKit/Packs` beneath the base you give it.
+**Resolve that base in exactly one place** and use it from both the writer here and the
+`PackProvider` that reads packs back — computing it twice is how downloaded packs end up
+activated somewhere nothing ever looks.
+
+### 3. Download, then hand over
+
+```swift
+let temp = try await downloadPack(from: url)          // yours
+let manifest = try await client.installer.preparePack(from: temp, language: "en")
+
+while !client.isEngineIdle { try await Task.sleep(for: .seconds(1)) }
+try await client.installer.activatePreparedPack(language: "en")
+```
+
+`preparePack` extracts, verifies the full trust chain, and stages. `activatePreparedPack` runs
+your smoke test and swaps atomically. Either throwing means the previous pack stays `Current` and
+the user keeps a working assistant.
+
+### 4. Serve the activated pack
+
+Point your `PackProvider` at the same storage the installer writes to, and fall back to the seed:
+
+```swift
+func packURL(for language: String) async throws -> URL {
+    if let current = storage.currentPack(for: language),
+       (try? VoiceIntentPack.verify(at: current, language: language, trust: trust)) != nil {
+        return current
+    }
+    return try seedURL(for: language)
+}
+```
+
+`verify` runs the same checks a real load runs, so a corrupt or wrong-language `Current` falls
+through to the seed instead of reaching a session that would throw. It is cheap — no content is
+read.
+
+Because `VoiceIntentSession` calls the provider every time it builds, **an activation is picked
+up by the very next session.** No app restart, no live hot-swap.
+
+---
+
+## Checklist
+
+- [ ] Both products linked; deployment target iOS 26.0+
+- [ ] Both usage-description keys present
+- [ ] `PackProvider` implemented; seed pack reachable offline
+- [ ] Release builds cannot construct `.unverifiedForTesting`
+- [ ] `.appProvided`: audio pushed only while `.listening`, `hostDidFinishSpeaking()` on every turn
+- [ ] `session.loadedPack` logged once per session
+- [ ] Extractor does not modify anything it extracts
+- [ ] Storage base resolved in one place, shared by writer and reader
+- [ ] Smoke test uses the session's trust policy
