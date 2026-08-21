@@ -18,7 +18,7 @@ session does with it.
 Add **both** products to your app target:
 
 - `VoiceAIKit` — the engine
-- `VoiceIntentSeedPackEN` — the English pack, ~7 MB
+- `VoiceAISeedPackEN` — the English pack, ~7 MB
 
 Skip the seed only if your app downloads every language before first use. Without it there is no
 offline floor: a fresh install cannot classify anything until its first successful download.
@@ -40,22 +40,22 @@ Deployment target must be **iOS 26.0** or later.
 
 ```swift
 import VoiceAIKit
-import VoiceIntentSeedPackEN
+import VoiceAISeedPackEN
 
 struct AppPackProvider: PackProvider {
     func packURL(for language: String) async throws -> URL {
-        guard language == VoiceIntentSeedPackEN.language,
-              let seed = VoiceIntentSeedPackEN.url else {
+        guard language == VoiceAISeedPackEN.language,
+              let seed = VoiceAISeedPackEN.url else {
             throw VoiceIntentError.languageUnavailable(
                 requested: language,
-                available: [VoiceIntentSeedPackEN.language])
+                available: [VoiceAISeedPackEN.language])
         }
         return seed
     }
 }
 ```
 
-`VoiceIntentSeedPackEN.url` is nil when the library is linked but its resource bundle did not
+`VoiceAISeedPackEN.url` is nil when the library is linked but its resource bundle did not
 make it into the app. Those are two different failures — "we don't ship that language" and "the
 build dropped it" — and collapsing them turns a missing-in-Xcode pack into a misleading "no pack
 for 'en'".
@@ -228,7 +228,7 @@ let client = VoiceIntentClient(
     storage: storage,
     validator: validator,
     engineProvider: AppEngineProvider(),
-    seedPackURL: VoiceIntentSeedPackEN.url!)
+    seedPackURL: VoiceAISeedPackEN.url!)
 ```
 
 `PackStorageController` appends its own `VoiceAIKit/Packs` beneath the base you give it.

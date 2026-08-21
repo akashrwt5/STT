@@ -18,5 +18,5 @@ Package.resolved
 
 # Packs unpacked at runtime (the app writes these to Application Support;
 # nothing here should ever be committed). The SEED pack under
-# Sources/VoiceIntentSeedPackEN/ IS committed — it ships in the app.
+# Sources/VoiceAISeedPackEN/ IS committed — it ships in the app.
 /UnpackedPacks/

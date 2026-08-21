@@ -50,7 +50,7 @@ STT gets away with it (`IPHONEOS_DEPLOYMENT_TARGET = 26.2`). Engage will not.
 
 The hygiene items stand regardless:
 - `VoiceAIKit/.build/workspace-state.json` is **tracked in git** despite `.gitignore`.
-- Six `.DS_Store` files live under `Sources/VoiceIntentSeedPackEN/packs`, which is `.copy`'d verbatim — they ship inside the client app's bundle. (`PackLoadPolicy.ignoredFileNames` tolerates them at load; that is not a reason to ship them.)
+- Six `.DS_Store` files live under `Sources/VoiceAISeedPackEN/packs`, which is `.copy`'d verbatim — they ship inside the client app's bundle. (`PackLoadPolicy.ignoredFileNames` tolerates them at load; that is not a reason to ship them.)
 
 ### ~~B4 — No privacy manifest~~ — **DONE**
 
@@ -96,7 +96,7 @@ Also note the pva-integration set is dated 31 July, before the August pack/OTA r
 
 **H7 · VIK-027: the facade turn state-machine is untested** — and it is exactly the seam Engage depends on (external-TTS handoff, `hostDidFinishSpeaking()`, re-listen vs idle). A host that forgets to call it gets a silent 30 s stall, which in the field reads as "the assistant froze". Needs a mockable engine/coordinator seam and tests before a second host relies on it.
 
-**H9 · The pack test suite has been silently skipping.** *(found 21 Aug, fixed)* `PackTestSupport.packRoot()` walked to `Sources/VoiceIntentSeedPackEN/` and looked for a child with the `pack-` prefix. The seed target now declares `.copy("packs")`, so the packs moved one level down and that directory's children are `SeedPack.swift` and `packs` — neither matches `pack-`. Every one of the ten call sites therefore hit `XCTSkip("No pack-* directory …")`, which XCTest reports as *not failing*. So the loading, entity, classifier, slot-resolver and Python-parity tests — the entire evidence base for "the Swift runtime reproduces the reference" — were green without loading a pack at all. One-line fix applied (`.appendingPathComponent("packs")`); **re-run the suite and treat the first green run as a new baseline**, because nobody knows what it has been hiding since the seed layout changed. A skip that means "this test could not run" should be a failure in CI.
+**H9 · The pack test suite has been silently skipping.** *(found 21 Aug, fixed)* `PackTestSupport.packRoot()` walked to `Sources/VoiceAISeedPackEN/` and looked for a child with the `pack-` prefix. The seed target now declares `.copy("packs")`, so the packs moved one level down and that directory's children are `SeedPack.swift` and `packs` — neither matches `pack-`. Every one of the ten call sites therefore hit `XCTSkip("No pack-* directory …")`, which XCTest reports as *not failing*. So the loading, entity, classifier, slot-resolver and Python-parity tests — the entire evidence base for "the Swift runtime reproduces the reference" — were green without loading a pack at all. One-line fix applied (`.appendingPathComponent("packs")`); **re-run the suite and treat the first green run as a new baseline**, because nobody knows what it has been hiding since the seed layout changed. A skip that means "this test could not run" should be a failure in CI.
 
 **H8 · README and INTEGRATION.md are stale and will not compile.** README still describes `Resources/` in the package and shows `VoiceIntentConfiguration(language:speaksPrompts:autoStopOnSilence:loadsSemanticRescue:)` with no `packProvider` and no `trust` — both now required with no defaults, deliberately. INTEGRATION.md still documents the pre-OTA Bundle.module world and the STT picker. This is the first thing the Engage team will read.
 
@@ -140,4 +140,4 @@ Worth stating, because it is not the usual state of a first packaging pass:
 
 **Phase 3 — GA gate.** Compiler publishes golden fixtures and vectorizer parameters in every pack; adapter asserts them at install (VIK-013, VIK-008).
 
-**Answering the literal question:** a client app must link **both** products — `VoiceAIKit` *and* `VoiceIntentSeedPackEN` — or it ships with no offline floor and cannot classify anything until its first successful OTA download.
+**Answering the literal question:** a client app must link **both** products — `VoiceAIKit` *and* `VoiceAISeedPackEN` — or it ships with no offline floor and cannot classify anything until its first successful OTA download.

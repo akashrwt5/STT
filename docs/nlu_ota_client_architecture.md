@@ -67,7 +67,7 @@ While `preparePack()` can happen at any time in the background, **activation mus
 
 ## Package Format & Metadata
 
-The `.nlu` file is a ZIP archive that matches the structure of the existing `VoiceIntentSeedPackEN`.
+The `.nlu` file is a ZIP archive that matches the structure of the existing `VoiceAISeedPackEN`.
 
 **Expected `.nlu` Package Format:**
 ```text

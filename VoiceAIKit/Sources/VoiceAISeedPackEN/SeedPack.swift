@@ -1,5 +1,5 @@
 // SeedPack.swift
-// VoiceIntentSeedPackEN
+// VoiceAISeedPackEN
 //
 // The English pack, shipped as an SPM resource, so an app gets it by linking a
 // library instead of dragging a folder into Xcode.
@@ -35,7 +35,7 @@
 
 import Foundation
 
-public enum VoiceIntentSeedPackEN {
+public enum VoiceAISeedPackEN {
 
     /// The seed pack's directory inside the host app's bundle, or nil if the
     /// resource did not make it in.

@@ -29,9 +29,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "VoiceIntentSeedPackEN"
-               BuildableName = "VoiceIntentSeedPackEN"
-               BlueprintName = "VoiceIntentSeedPackEN"
+               BlueprintIdentifier = "VoiceAISeedPackEN"
+               BuildableName = "VoiceAISeedPackEN"
+               BlueprintName = "VoiceAISeedPackEN"
                ReferencedContainer = "container:">
             </BuildableReference>
          </BuildActionEntry>

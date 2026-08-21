@@ -15,7 +15,7 @@ import SwiftUI
 
 #if canImport(VoiceAIKit)
 import VoiceAIKit
-import VoiceIntentSeedPackEN
+import VoiceAISeedPackEN
 
 /// Finds the pack for a language: the OTA-activated pack if one exists and verifies,
 /// otherwise the bundled seed.
@@ -40,11 +40,11 @@ struct PackProviderForApp: PackProvider {
 
     /// Seed packs linked into this app, by language.
     ///
-    /// One entry per `VoiceIntentSeedPack*` library the target links. Nothing is
+    /// One entry per `VoiceAISeedPack*` library the target links. Nothing is
     /// dragged into Xcode: SwiftPM copies the pack into a resource bundle and
     /// Xcode embeds it in the `.app`. Ticking the library IS the integration.
     private static let seeds: [String: () -> URL?] = [
-        VoiceIntentSeedPackEN.language: { VoiceIntentSeedPackEN.url },
+        VoiceAISeedPackEN.language: { VoiceAISeedPackEN.url },
     ]
 
     /// The trust policy used to gate an OTA pack before serving it. Must match the policy the
@@ -78,10 +78,10 @@ struct PackProviderForApp: PackProvider {
         if let seed = Self.seeds[language] {
             guard let url = seed() else {
                 throw VoiceIntentError.unreadableFile(
-                    path: "VoiceIntentSeedPack\(language.uppercased())",
+                    path: "VoiceAISeedPack\(language.uppercased())",
                     reason: """
                         the seed library is linked but its resource bundle has no pack. \
-                        Check that the STT target links the VoiceIntentSeedPack\
+                        Check that the STT target links the VoiceAISeedPack\
                         \(language.uppercased()) library (Target → General → Frameworks, \
                         Libraries, and Embedded Content)
                         """)

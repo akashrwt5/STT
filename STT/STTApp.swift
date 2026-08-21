@@ -6,8 +6,8 @@ import SwiftUI
 import BackgroundTasks
 import VoiceAIKit
 import ZIPFoundation
-#if canImport(VoiceIntentSeedPackEN)
-import VoiceIntentSeedPackEN
+#if canImport(VoiceAISeedPackEN)
+import VoiceAISeedPackEN
 #endif
 
 /// Single source of truth for where OTA packs live on disk.
@@ -121,8 +121,8 @@ struct STTApp: App {
     
     init() {
         // Find the bundled seed pack from the SPM module
-#if canImport(VoiceIntentSeedPackEN)
-        let seedURL = VoiceIntentSeedPackEN.url ?? URL(fileURLWithPath: "/dev/null")
+#if canImport(VoiceAISeedPackEN)
+        let seedURL = VoiceAISeedPackEN.url ?? URL(fileURLWithPath: "/dev/null")
 #else
         let seedURL = Bundle.main.url(forResource: "en", withExtension: "nlu") ?? URL(fileURLWithPath: "/dev/null")
 #endif

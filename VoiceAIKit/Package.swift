@@ -25,7 +25,7 @@ let package = Package(
         // every language links only `VoiceAIKit` and carries 0 MB instead of
         // 8.8 MB. With one library every app pays for English, including the
         // ones that will never speak it.
-        .library(name: "VoiceIntentSeedPackEN", targets: ["VoiceIntentSeedPackEN"]),
+        .library(name: "VoiceAISeedPackEN", targets: ["VoiceAISeedPackEN"]),
     ],
     targets: [
         // The library ships ZERO data.
@@ -62,8 +62,8 @@ let package = Package(
         // `IntentClassifier.mlpackage`. Flattening breaks all three, and a
         // flattened pack fails its own signature check.
         .target(
-            name: "VoiceIntentSeedPackEN",
-            path: "Sources/VoiceIntentSeedPackEN",
+            name: "VoiceAISeedPackEN",
+            path: "Sources/VoiceAISeedPackEN",
             resources: [.copy("packs")]
         ),
 

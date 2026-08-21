@@ -12,7 +12,7 @@ enum PackTestSupport {
 
     /// The pack these tests run against — the SAME bytes the app ships.
     ///
-    /// Read from `Sources/VoiceIntentSeedPackEN/`, the seed target's resource
+    /// Read from `Sources/VoiceAISeedPackEN/`, the seed target's resource
     /// directory, rather than a separate fixture copy. Two copies would drift,
     /// and the failure mode is the worst kind: a green suite proving something
     /// about a pack no device ever sees.
@@ -28,7 +28,7 @@ enum PackTestSupport {
             .deletingLastPathComponent()   // Tests
             .deletingLastPathComponent()   // VoiceAIKit
             .appendingPathComponent("Sources")
-            .appendingPathComponent("VoiceIntentSeedPackEN")
+            .appendingPathComponent("VoiceAISeedPackEN")
             // The packs live one level down, under `packs/`, because the seed
             // target declares `.copy("packs")` — a single resource whose
             // directory tree is preserved verbatim. Pointing at the target root
@@ -43,7 +43,7 @@ enum PackTestSupport {
             .filter { $0.lastPathComponent.hasPrefix("pack-") }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         guard let newest = packs.last else {
-            throw XCTSkip("No pack-* directory under Sources/VoiceIntentSeedPackEN/ — vendor one to run these tests")
+            throw XCTSkip("No pack-* directory under Sources/VoiceAISeedPackEN/ — vendor one to run these tests")
         }
         return newest
     }

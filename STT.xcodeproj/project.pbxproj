@@ -8,7 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		C83FD9BD2FFE22F000EEE84F /* VoiceAIKit in Frameworks */ = {isa = PBXBuildFile; productRef = C83FD9BC2FFE22F000EEE84F /* VoiceAIKit */; };
-		C8FEACF3302206C7009BADD9 /* VoiceIntentSeedPackEN in Frameworks */ = {isa = PBXBuildFile; productRef = C8FEACF2302206C7009BADD9 /* VoiceIntentSeedPackEN */; };
+		C8FEACF3302206C7009BADD9 /* VoiceAISeedPackEN in Frameworks */ = {isa = PBXBuildFile; productRef = C8FEACF2302206C7009BADD9 /* VoiceAISeedPackEN */; };
 		C8FEBFBD302C560E009BADD9 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = C8FEBFBC302C560E009BADD9 /* ZIPFoundation */; };
 /* End PBXBuildFile section */
 
@@ -58,7 +58,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C8FEACF3302206C7009BADD9 /* VoiceIntentSeedPackEN in Frameworks */,
+				C8FEACF3302206C7009BADD9 /* VoiceAISeedPackEN in Frameworks */,
 				C83FD9BD2FFE22F000EEE84F /* VoiceAIKit in Frameworks */,
 				C8FEBFBD302C560E009BADD9 /* ZIPFoundation in Frameworks */,
 			);
@@ -130,7 +130,7 @@
 			name = STT;
 			packageProductDependencies = (
 				C83FD9BC2FFE22F000EEE84F /* VoiceAIKit */,
-				C8FEACF2302206C7009BADD9 /* VoiceIntentSeedPackEN */,
+				C8FEACF2302206C7009BADD9 /* VoiceAISeedPackEN */,
 				C8FEBFBC302C560E009BADD9 /* ZIPFoundation */,
 			);
 			productName = STT;
@@ -667,10 +667,10 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = VoiceAIKit;
 		};
-		C8FEACF2302206C7009BADD9 /* VoiceIntentSeedPackEN */ = {
+		C8FEACF2302206C7009BADD9 /* VoiceAISeedPackEN */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = C83FD9BB2FFE22F000EEE84F /* XCLocalSwiftPackageReference "VoiceAIKit" */;
-			productName = VoiceIntentSeedPackEN;
+			productName = VoiceAISeedPackEN;
 		};
 		C8FEBFBC302C560E009BADD9 /* ZIPFoundation */ = {
 			isa = XCSwiftPackageProductDependency;

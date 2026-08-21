@@ -29,7 +29,7 @@ Two products:
 | Product | What it is |
 |---|---|
 | `VoiceAIKit` | The engine. Zero data. Link this always. |
-| `VoiceIntentSeedPackEN` | The English pack, ~7 MB, as a resource. Link it only if you want a working first launch with no network. An app that downloads every language links only the kit and carries 0 MB. |
+| `VoiceAISeedPackEN` | The English pack, ~7 MB, as a resource. Link it only if you want a working first launch with no network. An app that downloads every language links only the kit and carries 0 MB. |
 
 ## Requirements
 
