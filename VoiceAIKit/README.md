@@ -40,9 +40,15 @@ Two products:
 - Background Modes → Audio, if you run sessions in the background.
 
 `swift test` does not work from a Mac: SwiftPM builds for the host platform, and `AVAudioSession`
-and `SpeechAnalyzer` do not exist there. Run the tests against an **iOS Simulator** destination —
-open `Package.swift` in Xcode and press Cmd+U, or `xcodebuild test -scheme VoiceAIKit-Package
--destination "id=<simulator udid>"` — note `-Package`: it is the only scheme with a test action..
+and `SpeechAnalyzer` do not exist there. Run the tests against an **iOS Simulator** destination:
+
+```bash
+xcodebuild test -scheme VoiceAIKit -destination "id=<simulator udid>"
+```
+
+or open `Package.swift` in Xcode and press Cmd+U. The `VoiceAIKit` scheme runs `VoiceAIKitTests`
+through the checked-in `.swiftpm/VoiceAIKit.xctestplan`; the test target itself belongs to no
+product, because SwiftPM does not allow test targets in `products:`..
 
 ## The whole public API
 
