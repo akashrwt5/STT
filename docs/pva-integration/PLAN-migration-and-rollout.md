@@ -187,7 +187,7 @@ flowchart LR
 | Timeout semantics drift during rewiring | 2 | Timing assertions in the adapter suite; manual timeout UX check |
 | A handler silently mis-reads a migrated parameter | 3 | Per-handler unit tests with golden fixtures |
 | P2T yes/no captured by the provider's confirmation flow | 4 | P2T regression suite; SPEC §6.3 arbitration test |
-| `fallbackURL` treated as terminal, bypassing CMS/GenAI/Wolfram | 4 | Dedicated conformance test; adapter forbidden from linking URL APIs |
+| ~~`fallbackURL` treated as terminal, bypassing CMS/GenAI/Wolfram~~ — retired 21 Aug 2026: VIK-031 removed the URL from the kit, so there is nothing to treat as terminal | — | Adapter still forbidden from linking URL-opening or networking APIs (CF-12) |
 | Stage 3 memory pushes Engage over budget on older devices | 4 | Device profiling in 4.5; `loadSemanticRescue` remote lever |
 | On-device enabled for an unsupported locale | 4/5 | Capability gate + downgrade telemetry |
 | Analytics events change shape, breaking dashboards | 2 | Event-schema snapshot test |

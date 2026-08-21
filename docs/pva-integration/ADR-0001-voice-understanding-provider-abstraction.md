@@ -99,6 +99,16 @@ So the contract is defined at the **dialogue-outcome** altitude: every provider 
 
 *Consequence:* this is the highest-risk mapping in the whole integration and the easiest to get silently wrong. It gets its own conformance test.
 
+*Amendment, 21 Aug 2026 (VIK-031).* The rationale above is left as written — it records why the
+decision was taken, and it was right. What changed is the thing it was defending against: the kit
+no longer produces a URL at all. `NLUResponse.fallback` now carries the pack's out-of-scope intent
+name instead. The URL was removed for a reason the ADR did not anticipate — it was assembled from
+unsigned pack data with the user's verbatim transcript appended as a query parameter, making it the
+only path in an offline SDK that reached the network, and an attacker-authored pack would have
+chosen the destination. D5 is unaffected and now holds structurally rather than by discipline:
+there is nothing for an adapter to discard, and the conformance test (CF-12) asserts the boundary —
+that the adapter links no URL-opening or networking API — rather than the absence of a value.
+
 ### D6 — Push-to-Talk dialogue is always the app's
 
 *Decision:* the `Cmd.SendMessage` / `yes` / `no` / `Cmd.ListenMessage` family is declared in `ProviderCapabilities.appOwnedIntentFamilies`. Providers **MUST** return these as terminal `resolved` outcomes and **MUST NOT** open a slot-filling or confirmation flow for them.
