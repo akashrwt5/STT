@@ -58,27 +58,43 @@ public final class VoiceIntentClient: Sendable {
     }
     
     /// Retrieves the version of the currently active pack (OTA or Seed) for the given language.
+    ///
+    /// This answers "what is on disk", which is NOT the same question as "what is running":
+    /// activation is apply-on-next-build, so a session keeps the pack it bound at `start()` while
+    /// a newer one sits `Current`. A host that wants to know what produced a given turn should
+    /// read `VoiceIntentSession.loadedPack` instead.
     public func activePackVersion(for language: String) -> String? {
-        if let currentURL = storage.currentPack(for: language) {
-            let bundleURL = currentURL.appendingPathComponent("bundle.json")
-            if let data = try? Data(contentsOf: bundleURL),
-               let manifest = try? JSONDecoder().decode(NLUPackManifest.self, from: data) {
-                return manifest.version
-            }
-        }
-        
-        let seedBundleURL = seedPackURL.appendingPathComponent("bundle.json")
-        if let data = try? Data(contentsOf: seedBundleURL),
-           let manifest = try? JSONDecoder().decode(NLUPackManifest.self, from: data) {
+        if let currentURL = storage.currentPack(for: language),
+           let manifest = Self.decodeManifest(at: currentURL) {
             return manifest.version
         }
-        
-        return nil
+        return Self.decodeManifest(at: seedPackURL)?.version
+    }
+
+    /// Decodes a pack's `bundle.json` from disk.
+    ///
+    /// Unverified by design — this reads a pack that was already verified when it was installed,
+    /// or one shipped inside the signed app bundle. Admission against the trust policy happens in
+    /// `PackValidator` (install) and `BundleDataLoader` (session load); this is reporting, not
+    /// admission.
+    private static func decodeManifest(at packRoot: URL) -> NLUBundle? {
+        guard let data = try? Data(contentsOf: packRoot.appendingPathComponent("bundle.json"))
+        else { return nil }
+        return try? JSONDecoder().decode(NLUBundle.self, from: data)
     }
     
     /// Starts the SDK for the specified language.
     /// This resolves the best available model (OTA or Seed) and loads it into the engine.
     /// It automatically handles rollback if the active OTA package is corrupted.
+    ///
+    /// Note that "corrupted" is now judged by `NLUBundle`, which decodes STRICTLY — a pack missing
+    /// `channel`, `compiler_version`, `required_runtime_features` or `telemetry_schema_version`
+    /// fails here and is rolled back. The model this replaced declared none of those and would
+    /// have loaded such a pack happily, only for `BundleDataLoader` to refuse it at the next
+    /// session load. That is the divergence VIK-034 was about: this path deciding a pack is fine
+    /// when the path that has to run it disagrees. All four fields are `required` in
+    /// `bundle.schema.json`, so a pack that fails here could not have been produced by a compliant
+    /// compiler.
     public func start(for language: String) async throws {
         var didLoadActive = false
         
@@ -116,7 +132,7 @@ public final class VoiceIntentClient: Sendable {
 
         do {
             let data = try Data(contentsOf: bundleURL)
-            let manifest = try JSONDecoder().decode(NLUPackManifest.self, from: data)
+            let manifest = try JSONDecoder().decode(NLUBundle.self, from: data)
             let resolution = try manifest.resolveModelPaths(for: language, relativeTo: currentURL)
 
             // Load the model into the live engine
@@ -139,7 +155,7 @@ public final class VoiceIntentClient: Sendable {
         
         do {
             let data = try Data(contentsOf: bundleURL)
-            let manifest = try JSONDecoder().decode(NLUPackManifest.self, from: data)
+            let manifest = try JSONDecoder().decode(NLUBundle.self, from: data)
             let resolution = try manifest.resolveModelPaths(for: language, relativeTo: seedPackURL)
             
             // Load the seed model into the live engine

@@ -67,14 +67,26 @@ enum ClassifierVariant: String, Sendable, CaseIterable {
     }
 }
 
+/// The ONE model of `bundle.json`.
+///
+/// There were two. `NLUPackManifest` decoded the same file on the OTA path and read a
+/// smaller subset of it — no `channel`, no `compiler_version`, no
+/// `required_runtime_features`, no `telemetry_schema_version` — so the installer and the
+/// session held different beliefs about one file, and the installer's belief was the one
+/// missing the field `PackTrustPolicy.refusesDevelopmentPacks` is decided from (VIK-034).
+///
+/// Everything that reads `bundle.json` now decodes this: `BundleDataLoader` (session load,
+/// from verified bytes), `PackValidator` (OTA install, from verified bytes),
+/// `NLUPackInstaller` (the C8 token guard) and `VoiceIntentClient` (path resolution).
+/// Hosts see `PackIdentity`, never this.
 struct NLUBundle: Decodable, Sendable, Equatable {
 
     let bundleID: String
     /// The pack's semantic version, as the compiler wrote it.
     ///
-    /// Required, matching `NLUPackManifest` — which decodes this same `bundle.json`
-    /// on the OTA path and has always required it. One file should not have two
-    /// models that disagree about whether a field exists.
+    /// Required. `bundle.schema.json` lists it in `required`, and the OTA path
+    /// depended on it long before this model did — the installer names its staging
+    /// and active directories from it.
     ///
     /// `nlu_compiler` emits it from the same variable that builds `bundle_id`
     /// (`content_bundle.py`: `"bundle_id": f"pack-{lang}-v{version}"` / `"version": version`),
