@@ -1,8 +1,8 @@
-# VoiceIntentKit — readiness to link into a client app other than STT
+# VoiceAIKit — readiness to link into a client app other than STT
 
 **Question asked:** can we add the package to the ClientApp (Engage / PVA), not just STT?
 **Assessed:** 21 Aug 2026, branch `fix/ota-unification-and-concurrency`, pack `pack-en-v1.0.36-ios`.
-**Method:** static read of `VoiceIntentKit/`, the STT host wiring, and `docs/pva-integration/*` (the normative SPEC). No build — this environment has no Xcode, so nothing here is compile- or device-verified.
+**Method:** static read of `VoiceAIKit/`, the STT host wiring, and `docs/pva-integration/*` (the normative SPEC). No build — this environment has no Xcode, so nothing here is compile- or device-verified.
 
 ---
 
@@ -26,11 +26,11 @@ What is not ready is everything around the code: the platform floor, the signing
 
 *Original finding:*
 
-`Package.swift` declares `platforms: [.iOS("26.0")]`, and there is **not one `@available` annotation in the entire `Sources/VoiceIntentKit` tree** (grep: 0 hits). So the NLU half — pack loading, TF-IDF/CoreML classifier, entity extraction, dialog manager, none of which needs anything newer than CoreML — is dragged to iOS 26 by `SpeechAnalyzer`/`SpeechTranscriber` in `Core/Recognition`. Any app that *links* the product must raise its deployment target to 26.0; SwiftPM refuses otherwise. Remote-config provider selection cannot save you here, because linking happens before any runtime check.
+`Package.swift` declares `platforms: [.iOS("26.0")]`, and there is **not one `@available` annotation in the entire `Sources/VoiceAIKit` tree** (grep: 0 hits). So the NLU half — pack loading, TF-IDF/CoreML classifier, entity extraction, dialog manager, none of which needs anything newer than CoreML — is dragged to iOS 26 by `SpeechAnalyzer`/`SpeechTranscriber` in `Core/Recognition`. Any app that *links* the product must raise its deployment target to 26.0; SwiftPM refuses otherwise. Remote-config provider selection cannot save you here, because linking happens before any runtime check.
 
 STT gets away with it (`IPHONEOS_DEPLOYMENT_TARGET = 26.2`). Engage will not.
 
-**Fix:** split the targets — `VoiceIntentNLU` (pack + classifier + dialog + `classify(text:)`, iOS 17-ish floor) and `VoiceIntentSpeech` (iOS 26, depends on NLU), with `VoiceIntentKit` as the umbrella. Then Engage links at its real floor, the Dialogflow provider serves everyone, and the on-device ASR provider activates only on iOS 26+ hardware. Second-best: `@available(iOS 26, *)` on the Speech types and drop the platform floor — cheaper, but leaves a package whose public surface is half-unavailable.
+**Fix:** split the targets — `VoiceIntentNLU` (pack + classifier + dialog + `classify(text:)`, iOS 17-ish floor) and `VoiceIntentSpeech` (iOS 26, depends on NLU), with `VoiceAIKit` as the umbrella. Then Engage links at its real floor, the Dialogflow provider serves everyone, and the on-device ASR provider activates only on iOS 26+ hardware. Second-best: `@available(iOS 26, *)` on the Speech types and drop the platform floor — cheaper, but leaves a package whose public surface is half-unavailable.
 
 ### B2 — No production trust policy exists anywhere
 
@@ -42,23 +42,23 @@ STT gets away with it (`IPHONEOS_DEPLOYMENT_TARGET = 26.2`). Engage will not.
 
 `.unverifiedForTesting` sets `skipsSignatureVerification: true, refusesDevelopmentPacks: false`. Ship that into a client app and a compromised CDN or a MITM on the BFF puts an attacker-authored pack in front of a hearing-aid command path. The size check and sha256 manifest do not help: the manifest is inside the pack.
 
-`VoiceIntentKit/TODO.md` already carries this as the top security item. Needed before any client-app link: an Ed25519 production keypair with a `key_id`, the compiler signing with it, a rotation story, and a release policy of `refusesDevelopmentPacks: true` with `skipsSignatureVerification: false` — enforced by something other than a code review (a `#if !DEBUG` assertion in the host, or a policy factory that cannot construct the dev policy in a release build).
+`VoiceAIKit/TODO.md` already carries this as the top security item. Needed before any client-app link: an Ed25519 production keypair with a `key_id`, the compiler signing with it, a rotation story, and a release policy of `refusesDevelopmentPacks: true` with `skipsSignatureVerification: false` — enforced by something other than a code review (a `#if !DEBUG` assertion in the host, or a policy factory that cannot construct the dev policy in a release build).
 
 ### ~~B3 — No distribution story~~ — **DECIDED: shared as a local package**
 
 **Resolution:** the client app takes it as a local package, same as STT. That removes the repo/tagging question and keeps the source in one place. Two consequences to accept deliberately: there is no version pin, so a package change lands in both hosts the moment it is checked out — the CI surface guard in `PUBLIC_API_PLAN.md` §7 becomes the substitute for semver; and both hosts must build from the same checkout, so the copy the client app links needs a defined sync mechanism (submodule, subtree, or a shared parent directory) rather than a manual copy, which drifts silently.
 
 The hygiene items stand regardless:
-- `VoiceIntentKit/.build/workspace-state.json` is **tracked in git** despite `.gitignore`.
+- `VoiceAIKit/.build/workspace-state.json` is **tracked in git** despite `.gitignore`.
 - Six `.DS_Store` files live under `Sources/VoiceIntentSeedPackEN/packs`, which is `.copy`'d verbatim — they ship inside the client app's bundle. (`PackLoadPolicy.ignoredFileNames` tolerates them at load; that is not a reason to ship them.)
 
 ### ~~B4 — No privacy manifest~~ — **DONE**
 
-`Sources/VoiceIntentKit/PrivacyInfo.xcprivacy` added and declared as the target's only resource. Contents: no tracking, no tracking domains, no collected data types, and one required-reason API — `UserDefaults`, category **CA92.1** (information stored by this app only). Nothing else in the package touches a required-reason API: no file-timestamp reads (the two `resourceValues` calls ask for `isDirectory` / `isRegularFile`), no disk-space query, no boot time. `MemoryProbe`'s `task_vm_info` is not in Apple's list.
+`Sources/VoiceAIKit/PrivacyInfo.xcprivacy` added and declared as the target's only resource. Contents: no tracking, no tracking domains, no collected data types, and one required-reason API — `UserDefaults`, category **CA92.1** (information stored by this app only). Nothing else in the package touches a required-reason API: no file-timestamp reads (the two `resourceValues` calls ask for `isDirectory` / `isRegularFile`), no disk-space query, no boot time. `MemoryProbe`'s `task_vm_info` is not in Apple's list.
 
 Two follow-ons:
 
-- Declaring a resource makes SwiftPM synthesise `Bundle.module` for the target, which spends the old structural guarantee ("no `resources:` block at all"). Replaced by `Tests/VoiceIntentKitTests/PackageResourceInvariantTests.swift`, which fails if any file other than the manifest appears under `Sources/VoiceIntentKit/`. The `Package.swift` comment was updated to say so.
+- Declaring a resource makes SwiftPM synthesise `Bundle.module` for the target, which spends the old structural guarantee ("no `resources:` block at all"). Replaced by `Tests/VoiceAIKitTests/PackageResourceInvariantTests.swift`, which fails if any file other than the manifest appears under `Sources/VoiceAIKit/`. The `Package.swift` comment was updated to say so.
 - The `UserDefaults` entry exists only because of H2. When the locale override moves into `VoiceIntentConfiguration`, delete the whole `NSPrivacyAccessedAPITypes` array rather than editing it.
 
 ---
@@ -82,7 +82,7 @@ Also note the pva-integration set is dated 31 July, before the August pack/OTA r
 
 ## SDK hygiene — fix before a second team links this
 
-**H1 · 758 `public` declarations.** The README says the surface is `init / events / start() / stop() / reset() / classify(text:)`. Reality: `TranscriptionCoordinator`, `SpeechRecognitionService`, `AudioSessionManager`, `AudioCaptureService`, every `Pack*` type and `ResolvedPack`'s whole field list are public. The moment Engage links this, all of it is de-facto API and every rename is a breaking change. Make `Core/`, `NLU/`, `Data/` internal; keep public the facade types, `PackProvider`/`StaticPackProvider`, `PackTrustPolicy`/`PackLoadPolicy`, `VoiceIntentError`, the OTA types, and — instead of exporting `BundleDataLoader` + `PackEngineFactory` so the host can smoke-test — a single `VoiceIntentKit.smokeTest(packRoot:language:trust:)`.
+**H1 · 758 `public` declarations.** The README says the surface is `init / events / start() / stop() / reset() / classify(text:)`. Reality: `TranscriptionCoordinator`, `SpeechRecognitionService`, `AudioSessionManager`, `AudioCaptureService`, every `Pack*` type and `ResolvedPack`'s whole field list are public. The moment Engage links this, all of it is de-facto API and every rename is a breaking change. Make `Core/`, `NLU/`, `Data/` internal; keep public the facade types, `PackProvider`/`StaticPackProvider`, `PackTrustPolicy`/`PackLoadPolicy`, `VoiceIntentError`, the OTA types, and — instead of exporting `BundleDataLoader` + `PackEngineFactory` so the host can smoke-test — a single `VoiceAIKit.smokeTest(packRoot:language:trust:)`.
 
 **H2 · Hidden global state in the host's `UserDefaults`.** `TranscriptionCoordinator` reads and writes `UserDefaults.standard["stt.userSelectedLocale"]` (lines 121, 130, 144, 441, 471) and `SpeechRecognitionService.performPrewarm` reads it again (line 150), with a hardcoded `"en-IN"` default. An SDK writing an un-namespaced `stt.*` key into the host's standard defaults is bad manners; a *stale persisted value deciding the recogniser locale before `switchLocale` runs* is a correctness bug waiting for a multi-language rollout. Locale should come from configuration, per session, and persist nowhere.
 
@@ -90,7 +90,7 @@ Also note the pva-integration set is dated 31 July, before the August pack/OTA r
 
 **H4 · `.allowBluetooth` in `AudioSessionManager.swift:99`** — deprecated on iOS 26 in favour of `.allowBluetoothHFP`, and `.playAndRecord + .duckOthers + .defaultToSpeaker` is precisely the policy Engage must own for a hearing-aid route. Non-issue on the `.appProvided` path Engage will use (D1), but the mic path still ships in the binary. Either compile it out behind a trait or document it as unsupported in host-audio mode.
 
-**H5 · The host must supply ZIP extraction.** `PackExtractor` is host-implemented, and STT satisfies it with ZIPFoundation — so every consumer inherits a third-party dependency to open the SDK's own payload format. The no-networking boundary is correct and well argued; ZIP extraction is not the same kind of decision. Consider an optional `VoiceIntentKitZIP` target, or `AppleArchive`.
+**H5 · The host must supply ZIP extraction.** `PackExtractor` is host-implemented, and STT satisfies it with ZIPFoundation — so every consumer inherits a third-party dependency to open the SDK's own payload format. The no-networking boundary is correct and well argued; ZIP extraction is not the same kind of decision. Consider an optional `VoiceAIKitZIP` target, or `AppleArchive`.
 
 **H6 · The host-side OTA layer exists only as STT app code.** `NLUOTAManager.swift` (~270 lines), `STTPackExtractor`, `STTNLUEngineProvider`, `OTAStorageLocator`, the BGTask registration — roughly 400 lines a client app must re-derive from reading STT. Extract it into a documented reference adapter, or ship it as an optional module. `docs/BackgroundOTAIntegration.md` + `ExampleOTAManager.swift` are a start; they need to become the supported path.
 
@@ -132,7 +132,7 @@ Worth stating, because it is not the usual state of a first packaging pass:
 
 ## Recommended sequencing
 
-**Phase 0 — package, ~3–4 days.** ~~Target split (B1)~~ accepted · ~~privacy manifest (B4)~~ **done** · re-run the pack suite against the H9 fix and set a real baseline · prune the public surface (H1 — plan in [`VoiceIntentKit/PUBLIC_API_PLAN.md`](../VoiceIntentKit/PUBLIC_API_PLAN.md), Phases 1–2 are the ones that must land before the client app links) · add `PackIdentity` (C1) and a capabilities accessor (C2) · remove the `UserDefaults` locale state (H2) · logging cleanup (H3) · untrack `.build`, drop `.DS_Store` (B3 hygiene) · rewrite README/INTEGRATION (H8).
+**Phase 0 — package, ~3–4 days.** ~~Target split (B1)~~ accepted · ~~privacy manifest (B4)~~ **done** · re-run the pack suite against the H9 fix and set a real baseline · prune the public surface (H1 — plan in [`VoiceAIKit/PUBLIC_API_PLAN.md`](../VoiceAIKit/PUBLIC_API_PLAN.md), Phases 1–2 are the ones that must land before the client app links) · add `PackIdentity` (C1) and a capabilities accessor (C2) · remove the `UserDefaults` locale state (H2) · logging cleanup (H3) · untrack `.build`, drop `.DS_Store` (B3 hygiene) · rewrite README/INTEGRATION (H8).
 
 **Phase 1 — security, in parallel.** Production Ed25519 keypair and `key_id`, compiler signs with it, release policy `refusesDevelopmentPacks: true` enforced structurally, cert pinning on the BFF (B2).
 
@@ -140,4 +140,4 @@ Worth stating, because it is not the usual state of a first packaging pass:
 
 **Phase 3 — GA gate.** Compiler publishes golden fixtures and vectorizer parameters in every pack; adapter asserts them at install (VIK-013, VIK-008).
 
-**Answering the literal question:** a client app must link **both** products — `VoiceIntentKit` *and* `VoiceIntentSeedPackEN` — or it ships with no offline floor and cannot classify anything until its first successful OTA download.
+**Answering the literal question:** a client app must link **both** products — `VoiceAIKit` *and* `VoiceIntentSeedPackEN` — or it ships with no offline floor and cannot classify anything until its first successful OTA download.

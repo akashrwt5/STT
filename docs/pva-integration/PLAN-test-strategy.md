@@ -131,7 +131,7 @@ IT-13 is not a formality. It is the evidence behind the privacy claim in the ADR
 | Full existing suite (`bundle exec fastlane test`) | merge | all |
 | Conformance suite, both adapters | merge | from 1 |
 | Behavioural Equivalence Suite — §4.1 divergence == 0 | merge | from 4 |
-| Lint: no protobuf / VoiceIntentKit symbol outside `Adapters/` | merge | from 3 |
+| Lint: no protobuf / VoiceAIKit symbol outside `Adapters/` | merge | from 3 |
 | Core ML ↔ Python parity (`ios-coreml-parity.yml`) | merge on model repo | from 4 |
 | Holdout accuracy ≥ 89.4% for the shipped bundle | model release | from 4 |
 | Analytics event-schema snapshot unchanged | merge | from 2 |

@@ -1,6 +1,6 @@
 # Python Backend Tasks (OTA Bundler)
 
-This document tracks required updates for the Python team responsible for compiling the `.nlu` OTA zip packages for `VoiceIntentKit`.
+This document tracks required updates for the Python team responsible for compiling the `.nlu` OTA zip packages for `VoiceAIKit`.
 
 ## 1. Explicit Version Field in `bundle.json` — ✅ DONE (`bd3c5bf`, branch `feature/removeing_confirmation_code_APIVersion`)
 - **Status:** `content_bundle.py::compile_manifest` now emits `"version": version` from the same
@@ -14,7 +14,7 @@ This document tracks required updates for the Python team responsible for compil
   Rebuild and re-vendor it; that also removes the hand-edited `1.0.35`.
 - **Original context:** Currently, the iOS SDK relies on `bundle_id` (e.g., `"pack-en-v1.0.36"`) to name the on-disk storage directories. This tightly couples the package identifier with the storage versioning, which is an anti-pattern.
 - **Action Item:** Add a dedicated `"version"` field at the root level of `bundle.json` (e.g., `"version": "1.0.36"`).
-- **iOS Impact:** The `VoiceIntentKit` SDK has already been updated to parse this field (`manifest.version`) and will use it to create clean directories like `Packs/en/1.0.36/`.
+- **iOS Impact:** The `VoiceAIKit` SDK has already been updated to parse this field (`manifest.version`) and will use it to create clean directories like `Packs/en/1.0.36/`.
 
 ## 2. Explicit Vocabulary Artifact (Optional but Recommended)
 - **Context:** The iOS SDK needs to know where the vocabulary/lexicon file is located to run the NLU engine.

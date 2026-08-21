@@ -1,17 +1,17 @@
-# VoiceIntentKit OTA Subsystem — Architecture Review
+# VoiceAIKit OTA Subsystem — Architecture Review
 
 **Reviewer perspective:** Principal Architect (on-device NLU / voice assistant platforms — Siri / Alexa class)
-**Scope:** OTA update path for the on-device NLU packs — SDK (`VoiceIntentKit`) and host orchestration (`STT`)
+**Scope:** OTA update path for the on-device NLU packs — SDK (`VoiceAIKit`) and host orchestration (`STT`)
 **Date:** 2026-08-12
 
 **Files reviewed**
 
 - `STT/Services/NLUOTAManager.swift` — host-side orchestrator (`actor`)
-- `VoiceIntentKit/OTA/Installer/NLUPackInstaller.swift`
-- `VoiceIntentKit/OTA/Validation/PackValidator.swift`
-- `VoiceIntentKit/OTA/Storage/PackStorageController.swift`
-- `VoiceIntentKit/OTA/Models/{NLUPackManifest,PackState}.swift`
-- `VoiceIntentKit/VoiceIntentClient.swift`, `Facade/PackProvider.swift`
+- `VoiceAIKit/OTA/Installer/NLUPackInstaller.swift`
+- `VoiceAIKit/OTA/Validation/PackValidator.swift`
+- `VoiceAIKit/OTA/Storage/PackStorageController.swift`
+- `VoiceAIKit/OTA/Models/{NLUPackManifest,PackState}.swift`
+- `VoiceAIKit/VoiceIntentClient.swift`, `Facade/PackProvider.swift`
 - `docs/nlu_ota_client_architecture.md`, `docs/BackgroundOTAIntegration.md`, `docs/ExampleOTAManager.swift`
 
 ---

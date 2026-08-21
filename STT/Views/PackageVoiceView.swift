@@ -3,25 +3,25 @@
 //
 // The third landing-screen option. When the user picks "Package" on
 // STTTestView, this sheet drives the entire session through
-// VoiceIntentKit's public facade (VoiceIntentSession) — no app-side NLU
+// VoiceAIKit's public facade (VoiceIntentSession) — no app-side NLU
 // wiring. English and Multilingual stay on the in-project pipeline.
 //
 // #if canImport keeps this file compiling before the local package is
 // added to the STT target (that's a one-time Xcode GUI step, per
-// VoiceIntentKit/INTEGRATION.md — Step 1). After adding the package
+// VoiceAIKit/INTEGRATION.md — Step 1). After adding the package
 // dependency, this view activates automatically.
 
 import SwiftUI
 
-#if canImport(VoiceIntentKit)
-import VoiceIntentKit
+#if canImport(VoiceAIKit)
+import VoiceAIKit
 import VoiceIntentSeedPackEN
 
 /// Finds the pack for a language: the OTA-activated pack if one exists and verifies,
 /// otherwise the bundled seed.
 ///
 /// This is the host half of the contract, and it is where the OTA subsystem and the live
-/// `VoiceIntentSession` finally meet. VoiceIntentKit ships no data and does no networking; the
+/// `VoiceIntentSession` finally meet. VoiceAIKit ships no data and does no networking; the
 /// `NLUOTAManager` downloads, verifies and atomically publishes a pack to
 /// `PackStorageController`'s `Current` symlink, and this provider reads that same location back.
 /// Two places to look, in order:
@@ -157,12 +157,12 @@ private struct PackageVoiceSessionView: View {
         NavigationStack {
             VStack(spacing: 24) {
                 // Visible origin badge: this screen is served by the
-                // VoiceIntentKit package (log subsystem `com.voiceintentkit`).
+                // VoiceAIKit package (log subsystem `com.voiceaikit`).
                 // Filter Console.app by that subsystem to see only these logs
                 // — the app's English/Multilingual paths use a different one.
                 HStack(spacing: 6) {
                     Image(systemName: "shippingbox.fill").font(.caption2)
-                    Text("via VoiceIntentKit · logs: com.voiceintentkit")
+                    Text("via VoiceAIKit · logs: com.voiceaikit")
                         .font(.caption2)
                 }
                 .foregroundStyle(.secondary)
@@ -284,17 +284,17 @@ private struct PackageVoiceSessionView: View {
     private func pct(_ v: Double) -> String { String(format: "%.0f%%", v * 100) }
 }
 #else
-/// Placeholder shown until the VoiceIntentKit local package is added to the
+/// Placeholder shown until the VoiceAIKit local package is added to the
 /// STT target (Xcode → File → Add Package Dependencies… → Add Local… → point
-/// at ./VoiceIntentKit). See VoiceIntentKit/INTEGRATION.md.
+/// at ./VoiceAIKit). See VoiceAIKit/INTEGRATION.md.
 struct PackageVoiceView: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
                 Image(systemName: "shippingbox").font(.largeTitle).foregroundStyle(.secondary)
-                Text("VoiceIntentKit not linked").font(.headline)
-                Text("Add the local VoiceIntentKit package to the STT target — see VoiceIntentKit/INTEGRATION.md.")
+                Text("VoiceAIKit not linked").font(.headline)
+                Text("Add the local VoiceAIKit package to the STT target — see VoiceAIKit/INTEGRATION.md.")
                     .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             .padding()

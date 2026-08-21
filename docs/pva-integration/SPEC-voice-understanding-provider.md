@@ -14,7 +14,7 @@ Two providers are in scope at v0.1: `DialogflowVoiceUnderstandingAdapter` and `O
 
 ## 2. Type surface
 
-All types **MUST** be `Sendable`. All types **MUST** be free of provider-specific vocabulary: no protobuf types, no `VoiceIntentKit` types, no URLs pointing at a specific backend.
+All types **MUST** be `Sendable`. All types **MUST** be free of provider-specific vocabulary: no protobuf types, no `VoiceAIKit` types, no URLs pointing at a specific backend.
 
 ### 2.1 Protocol
 

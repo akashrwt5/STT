@@ -14,7 +14,7 @@
 ## 2. Ground rules
 
 1. **Zero modification of existing logic.** The only permitted edits to existing files are two *purely additive* insertions (§6). Everything else is new files.
-2. **All FM code physically isolated** in one new folder: `STT/Services/FoundationModelNLU/` (app target, not VoiceIntentKit — keeps the package clean and the sample disposable). Every new type prefixed `FM` so ownership is unambiguous.
+2. **All FM code physically isolated** in one new folder: `STT/Services/FoundationModelNLU/` (app target, not VoiceAIKit — keeps the package clean and the sample disposable). Every new type prefixed `FM` so ownership is unambiguous.
 3. **Compile-safety on older SDKs:** all FM files wrapped in `#if canImport(FoundationModels)` + `@available(iOS 26, *)`; the app must still build and run exactly as today if the framework is absent.
 
 ## 3. Architecture — the one big decision

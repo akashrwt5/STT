@@ -1,6 +1,6 @@
 import XCTest
 @testable import STT
-import VoiceIntentKit
+import VoiceAIKit
 
 /// A mock URLProtocol to intercept URLSession requests for testing NLUOTAManager without hitting the real network.
 class MockURLProtocol: URLProtocol {

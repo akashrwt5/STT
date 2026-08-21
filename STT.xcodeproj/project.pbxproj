@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		C83FD9BD2FFE22F000EEE84F /* VoiceIntentKit in Frameworks */ = {isa = PBXBuildFile; productRef = C83FD9BC2FFE22F000EEE84F /* VoiceIntentKit */; };
+		C83FD9BD2FFE22F000EEE84F /* VoiceAIKit in Frameworks */ = {isa = PBXBuildFile; productRef = C83FD9BC2FFE22F000EEE84F /* VoiceAIKit */; };
 		C8FEACF3302206C7009BADD9 /* VoiceIntentSeedPackEN in Frameworks */ = {isa = PBXBuildFile; productRef = C8FEACF2302206C7009BADD9 /* VoiceIntentSeedPackEN */; };
 		C8FEBFBD302C560E009BADD9 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = C8FEBFBC302C560E009BADD9 /* ZIPFoundation */; };
 /* End PBXBuildFile section */
@@ -59,7 +59,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C8FEACF3302206C7009BADD9 /* VoiceIntentSeedPackEN in Frameworks */,
-				C83FD9BD2FFE22F000EEE84F /* VoiceIntentKit in Frameworks */,
+				C83FD9BD2FFE22F000EEE84F /* VoiceAIKit in Frameworks */,
 				C8FEBFBD302C560E009BADD9 /* ZIPFoundation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -129,7 +129,7 @@
 			);
 			name = STT;
 			packageProductDependencies = (
-				C83FD9BC2FFE22F000EEE84F /* VoiceIntentKit */,
+				C83FD9BC2FFE22F000EEE84F /* VoiceAIKit */,
 				C8FEACF2302206C7009BADD9 /* VoiceIntentSeedPackEN */,
 				C8FEBFBC302C560E009BADD9 /* ZIPFoundation */,
 			);
@@ -216,7 +216,7 @@
 			mainGroup = C8CD15FD2FD17F76003B4792;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				C83FD9BB2FFE22F000EEE84F /* XCLocalSwiftPackageReference "VoiceIntentKit" */,
+				C83FD9BB2FFE22F000EEE84F /* XCLocalSwiftPackageReference "VoiceAIKit" */,
 				C8FEBFBB302C560E009BADD9 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -645,9 +645,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		C83FD9BB2FFE22F000EEE84F /* XCLocalSwiftPackageReference "VoiceIntentKit" */ = {
+		C83FD9BB2FFE22F000EEE84F /* XCLocalSwiftPackageReference "VoiceAIKit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = VoiceIntentKit;
+			relativePath = VoiceAIKit;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -663,13 +663,13 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		C83FD9BC2FFE22F000EEE84F /* VoiceIntentKit */ = {
+		C83FD9BC2FFE22F000EEE84F /* VoiceAIKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			productName = VoiceIntentKit;
+			productName = VoiceAIKit;
 		};
 		C8FEACF2302206C7009BADD9 /* VoiceIntentSeedPackEN */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = C83FD9BB2FFE22F000EEE84F /* XCLocalSwiftPackageReference "VoiceIntentKit" */;
+			package = C83FD9BB2FFE22F000EEE84F /* XCLocalSwiftPackageReference "VoiceAIKit" */;
 			productName = VoiceIntentSeedPackEN;
 		};
 		C8FEBFBC302C560E009BADD9 /* ZIPFoundation */ = {

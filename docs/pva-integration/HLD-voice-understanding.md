@@ -11,7 +11,7 @@
 |---|---|
 | PVA module: `Engage/Engage/Services/PersonalVoiceAssistant` | Dialogflow agent content and training |
 | Composition root: `Containers/AppDependencyContainer.swift` | GenAI / Wolfram / CMS service internals |
-| VoiceIntentKit package integration and the facade change it requires | Android integration (parallel effort, same contract) |
+| VoiceAIKit package integration and the facade change it requires | Android integration (parallel effort, same contract) |
 | Model supply chain from Python training to device bundle (§8) | Hearing-aid firmware and BLE transport |
 | Remote-config-driven provider selection | New intents or new product capability |
 
@@ -133,7 +133,7 @@ flowchart TB
     DFA["DialogflowVoiceUnderstandingAdapter"]
     ODA["OnDeviceVoiceUnderstandingAdapter"]
     PX["PvaProxyServiceImpl<br/>+ protobuf (quarantined)"]
-    VIK["VoiceIntentKit<br/>VoiceIntentSession"]
+    VIK["VoiceAIKit<br/>VoiceIntentSession"]
     DFA --> PX
     ODA --> VIK
   end
@@ -163,7 +163,7 @@ flowchart TB
   style BOUNDARY stroke:#22c55e,stroke-width:2px
 ```
 
-**Invariant:** protobuf types exist only inside `DialogflowVoiceUnderstandingAdapter` and below. `VoiceIntentKit` types exist only inside `OnDeviceVoiceUnderstandingAdapter` and below. Neither appears anywhere else in the app. This is enforceable by a lint/CI grep — see [Test Strategy](./PLAN-test-strategy.md) §7.
+**Invariant:** protobuf types exist only inside `DialogflowVoiceUnderstandingAdapter` and below. `VoiceAIKit` types exist only inside `OnDeviceVoiceUnderstandingAdapter` and below. Neither appears anywhere else in the app. This is enforceable by a lint/CI grep — see [Test Strategy](./PLAN-test-strategy.md) §7.
 
 ## 5. Responsibility allocation
 
@@ -373,7 +373,7 @@ flowchart LR
   end
 
   subgraph Ship["Mobile"]
-    PK["VoiceIntentKit<br/>Sources/Resources"]
+    PK["VoiceAIKit<br/>Sources/Resources"]
     APP["Engage app bundle"]
     PK --> APP
   end
@@ -412,7 +412,7 @@ Selection is read once, in `AppDependencyContainer`. Nothing downstream re-reads
 
 | Risk | L | I | Mitigation |
 |---|---|---|---|
-| VoiceIntentKit facade change slips | M | H | Schedule first, before any app-side phase; it is the critical path (ADR §6) |
+| VoiceAIKit facade change slips | M | H | Schedule first, before any app-side phase; it is the critical path (ADR §6) |
 | Dialogue divergence between providers surfaces as user-visible inconsistency | M | M | Behavioural Equivalence Suite defines permitted divergence explicitly |
 | `fallbackURL` mistakenly treated as terminal, bypassing CMS/GenAI/Wolfram | M | **H** | Dedicated conformance test; adapter is forbidden from importing URL-opening APIs |
 | Yes/no captured by kit confirmation instead of P2T | M | **H** | `resetDialogue()` after every app-owned-family resolution; P2T regression suite |

@@ -4,7 +4,7 @@
 
 import SwiftUI
 import BackgroundTasks
-import VoiceIntentKit
+import VoiceAIKit
 import ZIPFoundation
 #if canImport(VoiceIntentSeedPackEN)
 import VoiceIntentSeedPackEN
@@ -19,13 +19,13 @@ import VoiceIntentSeedPackEN
 /// ever computed the location independently they would silently drift — which is exactly the bug
 /// that left downloaded packs unused.
 enum OTAStorageLocator {
-    /// Application Support. `PackStorageController` appends `VoiceIntentKit/Packs` under it.
+    /// Application Support. `PackStorageController` appends `VoiceAIKit/Packs` under it.
     static var baseStorageURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     }
 }
 
-/// Bridges STT to VoiceIntentKit's OTA engine hooks.
+/// Bridges STT to VoiceAIKit's OTA engine hooks.
 ///
 /// `smokeTest` is a real dress rehearsal: it loads the staged pack through the SAME path a live
 /// `VoiceIntentSession` uses (`VoiceIntentPack.smokeTest`) and runs one classification.
@@ -51,7 +51,7 @@ final class STTNLUEngineProvider: NLUEngineProvider, Sendable {
         // aborts activation before the pack becomes `Current`.
         //
         // One SDK call, not three app-side steps. The load + build + classify sequence now lives
-        // inside VoiceIntentKit, so this app and the next one cannot rehearse activation slightly
+        // inside VoiceAIKit, so this app and the next one cannot rehearse activation slightly
         // differently — passing a different trust policy here than the session loads with would
         // have made the whole idle-gate check meaningless while still reading as correct.
         _ = try await VoiceIntentPack.smokeTest(packRoot: packRoot, language: language, trust: trust)
@@ -130,9 +130,9 @@ struct STTApp: App {
         // Initialize dependencies.
         //
         // The base is Application Support itself. PackStorageController appends its own
-        // `VoiceIntentKit/Packs` under it, so packs live at
-        // `…/Application Support/VoiceIntentKit/Packs/{lang}/…`. Passing an already-`VoiceIntentKit`
-        // suffixed URL here (as before) produced a doubled `VoiceIntentKit/VoiceIntentKit/Packs`
+        // `VoiceAIKit/Packs` under it, so packs live at
+        // `…/Application Support/VoiceAIKit/Packs/{lang}/…`. Passing an already-`VoiceAIKit`
+        // suffixed URL here (as before) produced a doubled `VoiceAIKit/VoiceAIKit/Packs`
         // path — and, critically, a path NOTHING on the read side ever looked at.
         //
         // OTAStorageLocator.baseStorageURL is the single source of truth for this location so the
@@ -143,7 +143,7 @@ struct STTApp: App {
         do {
             storage = try PackStorageController(baseStorageURL: storageBase, fileManager: .default)
         } catch {
-            fatalError("[STT] Critical: Failed to initialize VoiceIntentKit storage at \(storageBase.path). Error: \(error.localizedDescription)")
+            fatalError("[STT] Critical: Failed to initialize VoiceAIKit storage at \(storageBase.path). Error: \(error.localizedDescription)")
         }
 
         let extractor = STTPackExtractor()

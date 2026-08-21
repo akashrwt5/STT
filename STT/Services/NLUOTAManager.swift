@@ -1,6 +1,6 @@
 import Foundation
 import OSLog
-import VoiceIntentKit
+import VoiceAIKit
 
 // Define the response from the BFF API
 fileprivate struct NLUUpdateResponse: Codable {
@@ -150,7 +150,7 @@ struct BFFUpdateClient {
 /// Implemented as an `actor` to guarantee idempotency and prevent concurrent downloads.
 ///
 /// It coordinates but does not implement the individual steps: `BFFUpdateClient` does the network,
-/// `VoiceIntentKit`'s installer does validation/activation. This file's only job is sequencing and
+/// `VoiceAIKit`'s installer does validation/activation. This file's only job is sequencing and
 /// idempotency.
 public actor NLUOTAManager {
 
@@ -232,7 +232,7 @@ public actor NLUOTAManager {
             let tempZipURL = try await bff.download(from: downloadURL, expectedSize: sizeBytes)
             tempZipURLToClean = tempZipURL
 
-            // 3. Handoff to VoiceIntentKit — extract, verify (Ed25519 + sha256), stage.
+            // 3. Handoff to VoiceAIKit — extract, verify (Ed25519 + sha256), stage.
             let manifest = try await voiceClient.installer.preparePack(from: tempZipURL, language: language)
             logger.info("Package validation completed. Prepared version: \(manifest.version)")
 

@@ -12,7 +12,7 @@ Four rules govern sequencing. Everything below follows from them.
 1. **Behaviour changes in exactly one phase.** Phases 0–3 are refactors with zero intended behavioural change; Phase 4 is the only one where a user could notice anything. If a Phase 0–3 change alters behaviour, that is a defect, and the equivalence suite should catch it.
 2. **Dialogflow stays the default until the last possible moment.** The on-device provider is dark-shipped, then cohort-enabled.
 3. **Every phase is independently releasable.** No phase leaves `main` in a state that cannot ship. Long-lived integration branches are prohibited.
-4. **The package change lands first.** Phase 2 cannot start until VoiceIntentKit accepts injected audio (ADR §6). It is the critical path and the only work with an external dependency.
+4. **The package change lands first.** Phase 2 cannot start until VoiceAIKit accepts injected audio (ADR §6). It is the critical path and the only work with an external dependency.
 
 ## 2. Phase overview
 
@@ -23,7 +23,7 @@ gantt
     axisFormat W%s
 
     section Package
-    P0 · VoiceIntentKit audio injection      :p0, 0, 3
+    P0 · VoiceAIKit audio injection      :p0, 0, 3
     section App refactor (no behaviour change)
     P1 · Neutral contract + Dialogflow adapter :p1, 1, 3
     P2 · Orchestration migration              :p2, after p1, 2
@@ -38,9 +38,9 @@ P0 and P1 run in parallel — different codebases, different people.
 
 ---
 
-## 3. Phase 0 — VoiceIntentKit accepts injected audio
+## 3. Phase 0 — VoiceAIKit accepts injected audio
 
-**Repository:** VoiceIntentKit · **Behaviour change:** none (default-preserving) · **Est.** 2–3 days
+**Repository:** VoiceAIKit · **Behaviour change:** none (default-preserving) · **Est.** 2–3 days
 
 | # | Change | Notes |
 |---|---|---|
@@ -119,7 +119,7 @@ Mechanical and highly parallelisable. **One handler per pull request.**
 | 3.3 | Migrate the nine handlers, one PR each, tests before merge |
 | 3.4 | **Delete `RequiredParamsIntentHandler`** — absorbed by the adapter in Phase 1 |
 | 3.5 | Delete the Phase 2 back-conversion shim |
-| 3.6 | Add the CI lint: no protobuf or VoiceIntentKit symbol outside `Adapters/` |
+| 3.6 | Add the CI lint: no protobuf or VoiceAIKit symbol outside `Adapters/` |
 
 Migration order — least to most coupled, so the pattern is established on easy cases first:
 
@@ -137,7 +137,7 @@ Migration order — least to most coupled, so the pattern is established on easy
 
 | # | Change |
 |---|---|
-| 4.1 | Add VoiceIntentKit as a package dependency at the tagged version |
+| 4.1 | Add VoiceAIKit as a package dependency at the tagged version |
 | 4.2 | Implement `OnDeviceVoiceUnderstandingAdapter` per SPEC §6.2 |
 | 4.3 | Implement the capability gate in `AppDependencyContainer` (HLD §6.1), including downgrade telemetry |
 | 4.4 | Wire config keys (HLD §9); default `pva.intentProvider = dialogflow` |

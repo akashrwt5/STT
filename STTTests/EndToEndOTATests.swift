@@ -1,6 +1,6 @@
 import XCTest
 @testable import STT
-import VoiceIntentKit
+import VoiceAIKit
 
 final class EndToEndOTATests: XCTestCase {
     
