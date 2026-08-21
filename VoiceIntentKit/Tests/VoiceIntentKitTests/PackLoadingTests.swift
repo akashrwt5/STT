@@ -72,7 +72,7 @@ final class PackLoadingTests: XCTestCase {
     }
 
     /// Sections added after the first packs shipped.
-    func testGuardsAndConfirmBandArePresent() throws {
+    func testGuardsArePresentAndTheConfirmBandIsConsistent() throws {
         let pack = try PackTestSupport.loadPack()
 
         let helpMarker = try XCTUnwrap(pack.guards.helpMarker,
@@ -83,9 +83,23 @@ final class PackLoadingTests: XCTestCase {
             XCTAssertTrue(pack.intentIDs.contains(to), "guard target \(to) not in the pack")
         }
 
-        let band = try XCTUnwrap(pack.uncertainConfirmBand,
-                                 "no confirmation band — a runtime can only confirm always or never")
-        XCTAssertLessThan(band.floor, band.ceiling)
+        // The band is GONE from pack-en, and deliberately: the compiler moved to one
+        // fire threshold with no confidence-driven confirmation. So the assertion is
+        // the consistency rule rather than the field's presence — a pack may omit the
+        // band only while no intent asks for `when_ambiguous`, because a runtime that
+        // meets one without the other can only degrade it to `never`, and the intent
+        // then acts without confirming.
+        let ambiguous = pack.intents.keys
+            .filter { pack.confirmationPolicy(for: $0) == .whenAmbiguous }
+            .sorted()
+        if let band = pack.uncertainConfirmBand {
+            XCTAssertLessThan(band.floor, band.ceiling, "an inverted band gates nothing")
+        } else {
+            XCTAssertTrue(ambiguous.isEmpty, """
+                No uncertain_confirm_below/_floor, but \(ambiguous) request when_ambiguous — \
+                those intents will act without confirming.
+                """)
+        }
     }
 
     /// The variant triple: head, vocabulary and temperature must agree.

@@ -32,10 +32,13 @@ final class TopicDerivationParityTests: XCTestCase {
 
     private var pack: ResolvedPack!
     private var expectations: Expectations!
+    /// The pack's slot-bearing intent, resolved rather than written down.
+    private var reminderIntent: String!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
         pack = try PackTestSupport.loadPack()
+        reminderIntent = try PackTestSupport.intent(requiringSlots: ["name", "date_time"], in: pack)
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .appendingPathComponent("Fixtures/topic_expectations.json")
@@ -115,7 +118,7 @@ final class TopicDerivationParityTests: XCTestCase {
     private func makeEngine() -> NLUEngine {
         NLUEngine(
             schema: PackEngineFactory.schema(from: pack),
-            classifier: TopicStubClassifier(),
+            classifier: TopicStubClassifier(label: reminderIntent),
             entities: PackSlotResolver(pack: pack),
             uncertain: [],
             noIdioms: [],
@@ -136,12 +139,22 @@ final class TopicDerivationParityTests: XCTestCase {
     }
 }
 
-/// Always `reminders.task.create` at a confidence above the pack's confirmation
-/// band, so every case exercises the topic path rather than the gate.
+/// Always the pack's slot-bearing intent, at a confidence above any gate, so every
+/// case exercises the topic path rather than the confirmation.
+///
+/// The label is INJECTED, not written down. It was `reminders.task.create`; after the
+/// compiler's `Cmd.*` rename the pack calls it `reminders.add`, and a stub returning a
+/// label the schema does not know sends the engine down its "recognised but
+/// unconfigured" branch — which fills no slots. Six of these cases then reported `nil`
+/// topics and read like a topic-derivation regression, when derivation was never
+/// reached.
 private actor TopicStubClassifier: IntentClassifying {
 
+    private let label: String
+    init(label: String) { self.label = label }
+
     func classifyAsync(_ text: String) async -> ClassificationResult {
-        ClassificationResult(label: "reminders.task.create",
+        ClassificationResult(label: label,
                              confidence: 0.97,
                              semanticRescue: false,
                              breakdown: ClassificationBreakdown(winningStage: 2,
@@ -149,7 +162,6 @@ private actor TopicStubClassifier: IntentClassifying {
                                                                 stage3: nil))
     }
 
-    func genaiURL(for text: String) -> URL { URL(string: "https://example.invalid/q")! }
     func warmUp() async {}
     func loadStage3() async {}
     func releaseStage3() async {}

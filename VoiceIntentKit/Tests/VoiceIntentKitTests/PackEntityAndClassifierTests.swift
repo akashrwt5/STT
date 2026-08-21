@@ -117,13 +117,20 @@ final class PackIntentClassifierTests: XCTestCase {
         classifier = try PackIntentClassifier(artifacts: pack.classifier)
     }
 
+    /// The labels are the ones the model actually trains on, checked against the
+    /// pack's own label set first. They moved once already — `device.volume.increase`
+    /// became `Cmd.VolumeIncrease` in the compiler's `Cmd.*` rename — and because
+    /// this suite was silently skipping, the rename surfaced as four flat mismatches
+    /// that read like an accuracy regression. It was not: the model classified all
+    /// four utterances correctly under the new names.
     func testConfidentCommandsClassifyAndClearTheGate() async throws {
         let cases: [(String, String)] = [
-            ("turn up the volume", "device.volume.increase"),
-            ("what is my battery level", "device.status.battery"),
-            ("remind me to call mom at 6 pm", "reminders.task.create"),
-            ("find my phone", "find.phone.locate"),
+            ("turn up the volume", "Cmd.VolumeIncrease"),
+            ("what is my battery level", "Cmd.BatteryLevel"),
+            ("remind me to call mom at 6 pm", "reminders.add"),
+            ("find my phone", "Cmd.FindMyPhone"),
         ]
+        PackTestSupport.assertLabelsExist(cases.map(\.1), in: pack)
         for (utterance, expected) in cases {
             let prediction = await classifier.classify(utterance)
             XCTAssertEqual(prediction.intent, expected, utterance)
@@ -137,7 +144,7 @@ final class PackIntentClassifierTests: XCTestCase {
     /// must not fire the command.
     func testHelpPhrasedUtteranceDoesNotFireTheCommand() async throws {
         let prediction = await classifier.classify("how do i turn up the volume")
-        XCTAssertNotEqual(prediction.intent, "device.volume.increase",
+        XCTAssertNotEqual(prediction.intent, "Cmd.VolumeIncrease",
                           "asking how to change the volume must not change the volume")
     }
 
@@ -176,6 +183,6 @@ final class PackIntentClassifierTests: XCTestCase {
         await classifier.warmUp()
         await classifier.warmUp()
         let prediction = await classifier.classify("turn up the volume")
-        XCTAssertEqual(prediction.intent, "device.volume.increase")
+        XCTAssertEqual(prediction.intent, "Cmd.VolumeIncrease")
     }
 }

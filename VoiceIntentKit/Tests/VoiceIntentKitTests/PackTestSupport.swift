@@ -29,6 +29,13 @@ enum PackTestSupport {
             .deletingLastPathComponent()   // VoiceIntentKit
             .appendingPathComponent("Sources")
             .appendingPathComponent("VoiceIntentSeedPackEN")
+            // The packs live one level down, under `packs/`, because the seed
+            // target declares `.copy("packs")` — a single resource whose
+            // directory tree is preserved verbatim. Pointing at the target root
+            // instead found `SeedPack.swift` and `packs`, neither of which has
+            // the `pack-` prefix, so every test that calls this XCTSkipped and
+            // the suite went green without loading a pack at all.
+            .appendingPathComponent("packs")
 
         let contents = try FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: nil)
@@ -53,7 +60,68 @@ enum PackTestSupport {
                                   policy: .default)
     }
 
+    // MARK: - Taxonomy, resolved FROM the pack
+
+    /// The pack's intent whose required slots are exactly the ones named.
+    ///
+    /// DERIVED, not written down. The id was `reminders.task.create`; the compiler's
+    /// `Cmd.*` rename made it `reminders.add`, and because these tests had been
+    /// silently skipping, the change surfaced as eight assertions reading
+    /// "reminders.add is not equal to reminders.task.create" — the symptom, not the
+    /// cause. Selecting on the SHAPE a test needs survives the next rename too.
+    ///
+    /// Matching on "has any required slot" is not enough and was a bug in the first
+    /// version of this helper: `pack-en` has two such intents — `Cmd.MemoryChange`
+    /// (`memory_name`) and `reminders.add` (`name`, `date_time`) — and taking the
+    /// first sorted one silently returned `Cmd.MemoryChange`, because uppercase sorts
+    /// before lowercase. Every caller then tested the wrong flow, confidently.
+    ///
+    /// Ambiguity is therefore an ERROR, never a pick. A helper that guesses is how
+    /// the thing it was written to prevent happens again.
+    static func intent(requiringSlots required: Set<String>,
+                       in pack: ResolvedPack) throws -> String {
+        let matches = pack.intents.filter { _, workflow in
+            let names = Set(workflow.slots.filter(\.required).map(\.name))
+            return required.isSubset(of: names)
+        }.keys.sorted()
+
+        if matches.count > 1 {
+            throw AmbiguousIntent(required: required, matches: matches)
+        }
+        guard let only = matches.first else {
+            throw XCTSkip("""
+                No intent in this pack requires \(required.sorted()) — there is no such \
+                flow to exercise. Not a failure: a pack shape these tests cannot describe.
+                """)
+        }
+        return only
+    }
+
+    struct AmbiguousIntent: Error, CustomStringConvertible {
+        let required: Set<String>
+        let matches: [String]
+        var description: String {
+            """
+            \(matches) all require \(required.sorted()); the test cannot know which flow \
+            it means. Narrow the slot set rather than letting the helper choose.
+            """
+        }
+    }
+
+    /// Fails with a message about the TAXONOMY when a hardcoded label is no longer
+    /// one the model emits, instead of letting four unrelated assertions mismatch.
+    static func assertLabelsExist(_ labels: [String], in pack: ResolvedPack,
+                                  file: StaticString = #filePath, line: UInt = #line) {
+        let known = Set(pack.classifier.labels)
+        let missing = labels.filter { !known.contains($0) }
+        XCTAssertTrue(missing.isEmpty, """
+            \(missing) are not labels this pack emits — the intent taxonomy moved. \
+            The pack trains: \(known.sorted().prefix(8).joined(separator: ", "))…
+            """, file: file, line: line)
+    }
+
     // MARK: - Reference expectations
+
 
     struct Reference: Decodable {
         let now: String

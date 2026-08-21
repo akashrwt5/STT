@@ -33,8 +33,12 @@ final class SilenceDetectionConfigurationTests: XCTestCase {
         let c = SilenceDetectionConfiguration(isEnabled: true)
         XCTAssertEqual(c.thresholdDBFS, -45, accuracy: 0.0001)
         XCTAssertEqual(c.noSpeechTimeout, 5.0, accuracy: 0.0001)
-        // Runaway guard — matches Amazon Lex max-speech 12s (+3s ceiling = 15s).
-        XCTAssertEqual(c.maxUtteranceDuration, 12.0, accuracy: 0.0001)
+        // Runaway guard. It was 12s (Amazon Lex's max-speech), raised to 60s by
+        // d9c8562 "fix(voice): stop premature endpointing on multi-clause utterances" —
+        // a 12s cap cut people off mid-sentence, and neither preset overrides it, so 60
+        // is the value that actually runs. The test kept asserting 12 because this
+        // target had not been run in a long while.
+        XCTAssertEqual(c.maxUtteranceDuration, 60.0, accuracy: 0.0001)
         // Knobs promoted from hardcoded constants.
         XCTAssertEqual(c.noiseFloorMarginDB, 12.0, accuracy: 0.0001)
         XCTAssertEqual(c.initialNoiseFloorDBFS, -60.0, accuracy: 0.0001)

@@ -38,7 +38,6 @@ private actor StubClassifier: IntentClassifying {
                 stage3: nil))
     }
 
-    func genaiURL(for text: String) -> URL { URL(string: "https://example.invalid/q")! }
     func warmUp() async {}
     func loadStage3() async {}
     func releaseStage3() async {}
@@ -49,30 +48,97 @@ private actor StubClassifier: IntentClassifying {
 final class ConfirmationAndSlotFlowTests: XCTestCase {
 
     private var pack: ResolvedPack!
+    private var schema: NLUSchema!
 
-    /// The intent under test: the only gated intent in `pack-en` with required
-    /// slots, and therefore the only place VIK-021 destroyed data.
-    private let reminder = "reminders.task.create"
+    /// The intent under test: the pack's intent with required slots, which is
+    /// where VIK-021 destroyed data. Resolved from the pack — see
+    /// `PackTestSupport.intentWithRequiredSlots`.
+    private var reminder: String!
+
+    /// Every expected string comes from the pack through the schema, never from a
+    /// literal in this file. The literals are what broke when the taxonomy moved:
+    /// `reminders.task.create.ask_date_time` is not a key any pack has any more,
+    /// and a test asserting against one is testing its own memory.
+    private var askDateTime: String? { slotPrompt("date_time") }
+    private var confirmPrompt: String? { schema.intents[reminder]?.followup?.prompt }
+    private var fulfilment: String? { schema.intents[reminder]?.fulfillment }
+    private var action: String? { schema.intents[reminder]?.action }
+
+    /// Routes through Stage 0: `keywords/en.json` carries
+    /// `\b(set|create|add|make)\b.{0,20}\breminder\b`, so this utterance reaches the
+    /// intent WITHOUT the classifier — and, today, without the confirmation gate.
+    private let keywordRouted = "set a reminder to go to the airport"
+
+    /// Reaches the CLASSIFIER: no keyword rule matches this phrasing, so the stub's
+    /// confidence and the injected gate are what decide the turn.
+    ///
+    /// Every confirmation test below must use this one. They used `keywordRouted` and
+    /// therefore never reached a gate at all: four went red for the obvious reason, and
+    /// three stayed GREEN while testing nothing — a "yes" answered a slot prompt rather
+    /// than a confirmation, and the assertion could not tell the difference.
+    private let classifierRouted = "remind me to go to the airport"
+
+    private func slotPrompt(_ name: String) -> String? {
+        schema.intents[reminder]?.slots.first { $0.name == name }?.prompt
+    }
 
     override func setUpWithError() throws {
         try super.setUpWithError()
         pack = try PackTestSupport.loadPack()
+        schema = PackEngineFactory.schema(from: pack)
+        // The reminder shape: a free-text name plus a time. `Cmd.MemoryChange` also
+        // has a required slot, so "has required slots" alone selects the wrong flow.
+        reminder = try PackTestSupport.intent(requiringSlots: ["name", "date_time"], in: pack)
     }
 
     /// An engine wired exactly as `PackEngineFactory` wires one, but with a
     /// stubbed classifier. Kept in step with the factory deliberately: if the
     /// factory's wiring changes and this does not, these tests stop describing
     /// production and start describing themselves.
-    private func makeEngine(confidence: Double, label: String? = nil) -> NLUEngine {
-        NLUEngine(
-            schema: PackEngineFactory.schema(from: pack),
+    /// - Parameter gate: the confirmation gate for `reminder`. `nil` uses the
+    ///   pack's own policy.
+    ///
+    ///   It has to be injectable now, and that is a statement about the pack rather
+    ///   than about the test. `pack-en` today gates exactly one intent (`always`,
+    ///   `Cmd.SendMessage`) and that intent has no slots, while the intent that has
+    ///   slots is `never` — so no pack intent is both gated AND slot-bearing, and
+    ///   the confirm-then-collect flow VIK-021 broke cannot be reached through the
+    ///   pack at all. The engine behaviour is still real and still worth guarding,
+    ///   so the gate is supplied here instead of pretending the pack supplies it.
+    private func makeEngine(confidence: Double,
+                            label: String? = nil,
+                            gate: ConfirmationGate? = nil) -> NLUEngine {
+        var gates = PackEngineFactory.confirmationGates(from: pack)
+        if let gate { gates[reminder] = gate }
+        return NLUEngine(
+            schema: schema,
             classifier: StubClassifier(label: label ?? reminder, confidence: confidence),
             entities: PackSlotResolver(pack: pack),
             uncertain: [],
             noIdioms: [],
             carriers: pack.lexicon.carriers,
             leadingConnectors: pack.lexicon.leadingConnectors,
-            confirmationGates: PackEngineFactory.confirmationGates(from: pack))
+            confirmationGates: gates)
+    }
+
+    /// The band `pack-en` no longer carries. Fixed here so the half-open boundary
+    /// behaviour stays covered; the pack's own gating is asserted separately in
+    /// `testGatesAreReadFromThePackPolicy`.
+    private static let testBand = ConfirmationGate.whenAmbiguous(floor: 0.55, ceiling: 0.91)
+
+    /// The premise the confirmation tests rest on. A keyword rule added for the
+    /// `remind me` phrasing would route those tests around the gate again, and they
+    /// would pass while asserting nothing.
+    func testTheTwoUtterancesTakeTheRoutesTheseTestsAssume() throws {
+        let rules = pack.keywordRules.map(\.pattern)
+        func matches(_ text: String) -> Bool {
+            rules.contains { text.range(of: $0, options: [.regularExpression, .caseInsensitive]) != nil }
+        }
+        XCTAssertTrue(matches(keywordRouted), "\(keywordRouted) must reach Stage 0")
+        XCTAssertFalse(matches(classifierRouted), """
+            \(classifierRouted) now matches a keyword rule, so the confirmation tests \
+            below bypass the gate and prove nothing. Pick another phrasing for them.
+            """)
     }
 
     // MARK: The gate itself
@@ -91,27 +157,80 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
     }
 
     /// The gates must come from `policies.confirmation`, not from whether a
-    /// workflow happens to carry a `confirmation` block.
+    /// workflow happens to carry a `confirmation` block. `reminders.add` is the
+    /// proof: it ships a `confirmation` block and a `never` policy, and the policy
+    /// is what must win.
+    ///
+    /// This used to require `uncertain_confirm_below`/`_floor` from the pack and
+    /// assert that 14 intents gated on ambiguity. Both are gone, deliberately —
+    /// the compiler moved to one fire threshold with no confidence-driven
+    /// confirmation. So the assertion is now the pack's actual shape, and the
+    /// consistency rule that matters: a pack may omit the band only while no
+    /// intent asks for `when_ambiguous`.
     func testGatesAreReadFromThePackPolicy() throws {
         let gates = PackEngineFactory.confirmationGates(from: pack)
-        let band = try XCTUnwrap(pack.uncertainConfirmBand,
-                                 "pack-en carries uncertain_confirm_below/_floor")
+        XCTAssertEqual(gates.count, pack.intents.count, "every intent gets a gate")
 
-        XCTAssertEqual(gates[reminder],
-                       .whenAmbiguous(floor: band.floor, ceiling: band.ceiling))
-
-        var never = 0, ambiguous = 0, always = 0
-        for (_, gate) in gates {
-            switch gate {
-            case .never: never += 1
-            case .whenAmbiguous: ambiguous += 1
-            case .always: always += 1
+        for (id, gate) in gates {
+            switch pack.confirmationPolicy(for: id) {
+            case .always: XCTAssertEqual(gate, .always, id)
+            case .never:  XCTAssertEqual(gate, .never, id)
+            case .whenAmbiguous:
+                XCTAssertNotNil(pack.uncertainConfirmBand, """
+                    \(id) asks for when_ambiguous but the pack carries no band — the \
+                    runtime can only degrade it to `never`, so the intent acts without \
+                    confirming. A pack must ship the band or stop asking for it.
+                    """)
             }
         }
-        XCTAssertEqual(gates.count, pack.intents.count, "every intent gets a gate")
-        XCTAssertEqual(ambiguous, 14, "pack-en gates 14 intents on ambiguity")
-        XCTAssertEqual(never, pack.intents.count - 14)
-        XCTAssertEqual(always, 0)
+
+        let ambiguous = pack.intents.keys.filter {
+            pack.confirmationPolicy(for: $0) == .whenAmbiguous
+        }
+        if pack.uncertainConfirmBand == nil {
+            XCTAssertTrue(ambiguous.isEmpty, """
+                No confirmation band, but \(ambiguous.sorted()) request when_ambiguous.
+                """)
+        }
+    }
+
+    /// VIK-036 — a keyword rule bypasses the CLASSIFIER, never the POLICY.
+    ///
+    /// Stage 0 used to go straight to `advanceSlots`, so an intent reached through a
+    /// keyword rule never met its confirmation gate. `pack-en` is the worst case for
+    /// that: `Cmd.SendMessage` is the ONE intent it gates `always`, and it ships four
+    /// keyword rules — `^ptt$`, `^push to talk$`, and two `send…message` patterns. A
+    /// message went out without asking, on the only intent the pack says to always ask
+    /// about.
+    ///
+    /// The premise is asserted rather than assumed: if this utterance stops reaching an
+    /// always-gated intent through Stage 0, the test says so instead of passing hollow.
+    func testAKeywordRoutedAlwaysGatedIntentStillConfirms() async throws {
+        let utterance = "send a message to mom"
+
+        func matches(_ pattern: String) -> Bool {
+            utterance.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+        }
+        let routed = pack.keywordRules.first { rule in
+            matches(rule.pattern) && !rule.guards.contains(where: matches)
+        }
+        let intent = try XCTUnwrap(routed?.intent,
+                                   "\(utterance) no longer matches any keyword rule")
+        try XCTSkipUnless(pack.confirmationPolicy(for: intent) == .always,
+                          "\(intent) is no longer gated `always`, so this utterance cannot "
+                          + "demonstrate the defect — find another always-gated intent with a "
+                          + "keyword rule, or retire this test with the policy that motivated it.")
+
+        let engine = makeEngine(confidence: 0.99, label: intent)
+        let response = await engine.handle(utterance)
+
+        guard case .confirm(let confirmed, _, _) = response else {
+            return XCTFail("""
+                \(intent) is policy `always` and was reached through a keyword rule, but \
+                the engine returned \(response) — it acted without asking (VIK-036).
+                """)
+        }
+        XCTAssertEqual(confirmed, intent)
     }
 
     // MARK: Confident — no confirmation, straight to slots
@@ -120,7 +239,7 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
     /// must keep the name it was given, and must ask for the time.
     func testConfidentReminderSkipsConfirmationAndCollectsSlots() async throws {
         let engine = makeEngine(confidence: 0.95)
-        let response = await engine.handle("set a reminder to go to the airport")
+        let response = await engine.handle(keywordRouted)
 
         guard case .prompt(let intent, let question, let filled) = response else {
             return XCTFail("expected a slot prompt, got \(response)")
@@ -129,15 +248,14 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
         XCTAssertEqual(filled["name"], "go to the airport",
                        "the name is in the opening utterance — asking for it again is the bug")
         XCTAssertNil(filled["date_time"], "no time was given")
-        XCTAssertEqual(question,
-                       pack.responses["reminders.task.create.ask_date_time"],
+        XCTAssertEqual(question, askDateTime,
                        "the outstanding slot is the time, and the prompt is the pack's")
     }
 
     /// The other phrasing, through the carrier the pack has always shipped.
     func testPackCarriersHandleTheRemindMePhrasing() async throws {
         let engine = makeEngine(confidence: 0.95)
-        let response = await engine.handle("remind me to go to the airport")
+        let response = await engine.handle(classifierRouted)
 
         guard case .prompt(_, _, let filled) = response else {
             return XCTFail("expected a slot prompt, got \(response)")
@@ -177,22 +295,22 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
     // MARK: Ambiguous — confirm, then continue
 
     func testAmbiguousReminderConfirmsFirst() async throws {
-        let engine = makeEngine(confidence: 0.80)
-        let response = await engine.handle("set a reminder to go to the airport")
+        let engine = makeEngine(confidence: 0.80, gate: Self.testBand)
+        let response = await engine.handle(classifierRouted)
 
         guard case .confirm(let intent, _, let question) = response else {
             return XCTFail("expected a confirmation, got \(response)")
         }
         XCTAssertEqual(intent, reminder)
-        XCTAssertEqual(question, pack.responses["reminders.task.create.confirm"])
+        XCTAssertEqual(question, confirmPrompt)
     }
 
     /// VIK-021's actual damage. "Yes" used to fulfil with `parameters: [:]` —
     /// a reminder with no name and no time, reported as success.
     func testYesContinuesSlotFillingInsteadOfFulfillingEmpty() async throws {
-        let engine = makeEngine(confidence: 0.80)
+        let engine = makeEngine(confidence: 0.80, gate: Self.testBand)
 
-        let confirm = await engine.handle("set a reminder to go to the airport")
+        let confirm = await engine.handle(classifierRouted)
         guard case .confirm = confirm else {
             return XCTFail("expected a confirmation, got \(confirm)")
         }
@@ -211,14 +329,14 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
         XCTAssertEqual(intent, reminder)
         XCTAssertEqual(filled["name"], "go to the airport",
                        "slots staged before the confirmation must survive it")
-        XCTAssertEqual(question, pack.responses["reminders.task.create.ask_date_time"])
+        XCTAssertEqual(question, askDateTime)
     }
 
     /// The whole flow, as a user would walk it.
     func testAmbiguousReminderCompletesEndToEnd() async throws {
-        let engine = makeEngine(confidence: 0.80)
+        let engine = makeEngine(confidence: 0.80, gate: Self.testBand)
 
-        _ = await engine.handle("set a reminder to go to the airport")
+        _ = await engine.handle(classifierRouted)
         _ = await engine.handle("yes")
         let done = await engine.handle("tomorrow at 5pm")
 
@@ -226,10 +344,10 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
             return XCTFail("expected fulfilment, got \(done)")
         }
         XCTAssertEqual(intent, reminder)
-        XCTAssertEqual(action, "reminders.task.create")
+        XCTAssertEqual(action, self.action, "the action is the pack's, not a literal")
         XCTAssertEqual(parameters["name"], "go to the airport")
         XCTAssertNotNil(parameters["date_time"], "the time answer must be stored")
-        XCTAssertEqual(message, pack.responses["reminders.task.create.done"])
+        XCTAssertEqual(message, fulfilment)
 
         let collecting = await engine.isCollecting
         XCTAssertFalse(collecting, "the flow is finished")
@@ -238,9 +356,9 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
     // MARK: Declining
 
     func testNoCancelsAndClearsTheFlow() async throws {
-        let engine = makeEngine(confidence: 0.80)
+        let engine = makeEngine(confidence: 0.80, gate: Self.testBand)
 
-        _ = await engine.handle("set a reminder to go to the airport")
+        _ = await engine.handle(classifierRouted)
         let declined = await engine.handle("no")
 
         guard case .fulfill(_, _, _, let message, _, _, _) = declined else {
@@ -259,8 +377,8 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
     /// "nope" and "no thanks" worked.
     func testEveryDeclineWordInThePackActuallyDeclines() async throws {
         for word in pack.lexicon.negative {
-            let engine = makeEngine(confidence: 0.80)
-            _ = await engine.handle("set a reminder to go to the airport")
+            let engine = makeEngine(confidence: 0.80, gate: Self.testBand)
+            _ = await engine.handle(classifierRouted)
             let response = await engine.handle(word)
 
             guard case .fulfill(_, _, _, let message, _, _, _) = response else {
@@ -272,8 +390,8 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
 
     func testEveryAcceptWordInThePackActuallyAccepts() async throws {
         for word in pack.lexicon.affirmative {
-            let engine = makeEngine(confidence: 0.80)
-            _ = await engine.handle("set a reminder to go to the airport")
+            let engine = makeEngine(confidence: 0.80, gate: Self.testBand)
+            _ = await engine.handle(classifierRouted)
             let response = await engine.handle(word)
 
             guard case .prompt = response else {
