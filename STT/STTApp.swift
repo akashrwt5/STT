@@ -28,7 +28,7 @@ enum OTAStorageLocator {
 /// Bridges STT to VoiceIntentKit's OTA engine hooks.
 ///
 /// `smokeTest` is a real dress rehearsal: it loads the staged pack through the SAME path a live
-/// `VoiceIntentSession` uses (`BundleDataLoader` + `PackEngineFactory`) and runs one classification.
+/// `VoiceIntentSession` uses (`VoiceIntentPack.smokeTest`) and runs one classification.
 /// If it throws, the OTA installer refuses to activate the pack — so a crypto-valid but
 /// device-unloadable pack can never become `Current`.
 final class STTNLUEngineProvider: NLUEngineProvider, Sendable {
@@ -49,9 +49,12 @@ final class STTNLUEngineProvider: NLUEngineProvider, Sendable {
     func smokeTest(packRoot: URL, language: String) async throws {
         // Load the staged pack exactly as a live session would, and run one inference. Throwing here
         // aborts activation before the pack becomes `Current`.
-        let pack = try BundleDataLoader.load(packAt: packRoot, language: language, trust: trust)
-        let engine = try PackEngineFactory.makeEngine(pack: pack)
-        _ = await engine.handle("hello")
+        //
+        // One SDK call, not three app-side steps. The load + build + classify sequence now lives
+        // inside VoiceIntentKit, so this app and the next one cannot rehearse activation slightly
+        // differently — passing a different trust policy here than the session loads with would
+        // have made the whole idle-gate check meaningless while still reading as correct.
+        _ = try await VoiceIntentPack.smokeTest(packRoot: packRoot, language: language, trust: trust)
     }
 }
 
@@ -78,20 +81,30 @@ final class STTPackExtractor: PackExtractor, Sendable {
                 try FileManager.default.removeItem(at: subDir)
             }
         }
-        
-        // Step 2: Hotfix — Inject 'version' field if the Python backend hasn't added it yet.
-        // TODO: Remove once Python backend ships the version field (TODO_Python.md)
-        if FileManager.default.fileExists(atPath: bundleURL.path),
-           let data = try? Data(contentsOf: bundleURL),
-           let jsonObject = try? JSONSerialization.jsonObject(with: data, options: .mutableContainers) as? NSMutableDictionary {
-            if jsonObject["version"] == nil, let bundleId = jsonObject["bundle_id"] as? String,
-               let range = bundleId.range(of: "-v") {
-                jsonObject["version"] = String(bundleId[range.upperBound...])
-                if let patched = try? JSONSerialization.data(withJSONObject: jsonObject) {
-                    try patched.write(to: bundleURL)
-                }
-            }
-        }
+
+        // NOTHING BELOW THIS LINE MAY WRITE INTO THE PACK.
+        //
+        // There used to be a second step here that injected a `version` field into
+        // `bundle.json` when the compiler had not emitted one, parsing it out of
+        // `bundle_id`. It has to go, and not because it stopped being needed
+        // (nlu_compiler bd3c5bf now emits `version`, inside the signed bytes).
+        //
+        // It has to go because of WHERE it ran. `PackValidator.extractAndValidate`
+        // calls this extractor first and verifies second: the Ed25519 signature is
+        // checked over `integrity/manifest.sha256 ‖ bundle.json`, and `bundle.json`
+        // is deliberately not listed in the checksum table — the signature is the
+        // only thing binding it. So a patched `bundle.json` is a `bundle.json` whose
+        // signature cannot verify. Today that passes only because the dev trust
+        // policy skips signature verification; the day production signing is turned
+        // on, every OTA install would fail with `integrityCheckFailed` and the cause
+        // would read as "tampered pack" rather than "we tampered with it".
+        //
+        // Hoisting above is fine and stays: it moves files, it does not edit them,
+        // and the manifest's paths are relative to the pack root it produces.
+        //
+        // A pack that reaches here without a `version` is a pack built before
+        // bd3c5bf. The correct answer is for the SDK to reject it loudly, which it
+        // now does.
     }
 }
 

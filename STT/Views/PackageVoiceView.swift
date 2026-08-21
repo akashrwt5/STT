@@ -63,8 +63,12 @@ struct PackProviderForApp: PackProvider {
         // 1. OTA-activated pack — the freshest verified pack, if one has been published. Gated by
         //    a full integrity check so a corrupt `Current` falls through to the seed instead of
         //    being handed to the session (which would throw rather than degrade).
+        //    `VoiceIntentPack.verify` runs the same checks a real load runs — signature chain,
+        //    every digest, runtime contract, dev-pack refusal, report-card gates — and now also
+        //    asserts the pack CARRIES this language. A pack that verifies perfectly and does not
+        //    speak `language` used to pass here and fail later inside `start()`.
         if let current = Self.otaStorage?.currentPack(for: language),
-           (try? PackIntegrity.verify(packRoot: current, trust: Self.trust)) != nil {
+           (try? VoiceIntentPack.verify(at: current, language: language, trust: Self.trust)) != nil {
             return current
         }
 
@@ -202,17 +206,18 @@ private struct PackageVoiceSessionView: View {
             .toolbar { ToolbarItem(placement: .topBarLeading) { Button("Close") { session.stop(); dismiss() } } }
         }
         .task {
+            // Pre-flight: which pack WOULD load, decided by the SDK rather than by
+            // this view decoding `bundle.json` itself. `verify` runs the same checks a
+            // real load runs, so a corrupt, wrong-language or untrusted pack shows up
+            // here instead of at the first tap on Start.
             do {
                 let url = try await provider.packURL(for: language.languageCode)
-                let bundleURL = url.appendingPathComponent("bundle.json")
-                if let data = try? Data(contentsOf: bundleURL),
-                   let manifest = try? JSONDecoder().decode(NLUPackManifest.self, from: data) {
-                    packVersion = manifest.version
-                } else {
-                    packVersion = "Unknown version"
-                }
+                let identity = try VoiceIntentPack.verify(at: url,
+                                                          language: language.languageCode,
+                                                          trust: PackProviderForApp.trust)
+                packVersion = identity.version
             } catch {
-                packVersion = "Error loading pack"
+                packVersion = "No usable pack: \(error)"
             }
             
             for await event in session.events {
@@ -221,6 +226,11 @@ private struct PackageVoiceSessionView: View {
                     transcript = t
                 case .stateChanged(let s):
                     status = "\(s)"
+                    // Once the engine is built, show what the SESSION actually bound.
+                    // OTA activation is apply-on-next-build, so the pack on disk and
+                    // the pack in this session can legitimately differ — and the one
+                    // that classified the user's words is this one.
+                    if let loaded = session.loadedPack { packVersion = loaded.version }
                     // Button reflects "is the mic actually live?". `.listening`
                     // is the only state where the mic is capturing user audio;
                     // everything else means "not listening right now" — stopped,
