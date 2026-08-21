@@ -5,7 +5,7 @@ client app (Engage) **to check compatibility, not to ship**. This lists
 everything still open across the two repos, says which side owns it, and labels
 what that decision actually gates.
 
-Sources: `VoiceAIKit/BUG_TRACKER.md` (11 open), `IntentClassifier/docs/BUG_TRACKER.md`
+Sources: `VoiceAIKit/BUG_TRACKER.md` (10 open), `IntentClassifier/docs/BUG_TRACKER.md`
 (13 open), and the non-tracker items in `docs/VIK_CLIENT_APP_READINESS.md`.
 
 State at the time of writing: package builds clean, the full test suite runs
@@ -40,10 +40,16 @@ be `COMPAT` if it blocks the spike mechanically.
 | **C5** | — | `.interrupted(cancelledIntent:)` is emitted ahead of the real terminal turn, against the SPEC's "exactly one terminal event per turn". | **`COMPAT`** | This is a *decision*, not code — either the SPEC gets a carve-out or the adapter swallows the event. Cheap now, expensive after Engage has written their adapter around the current behaviour. |
 | **C2** | — | No public accessor for the pack's capability set (`capabilities/*/capability.json`, incl. `messaging.ptt`) — `appOwnedIntentFamilies` cannot be populated. | **`GA`** | For a compatibility check the adapter can hardcode the list. For production a hardcoded list drifts silently from the pack, which is the failure class OTA exists to remove. |
 | **VIK-030** | Med | `runtime/routing.json` is decoded and never read — the pack's `ladder` and `assist_cloud` switch do nothing. | **`GA`** | Every pack ships it and no code path consults it, so the pack cannot change the behaviour it appears to control. All three routes (out of scope, below gate, 3 failed slot attempts) currently collapse into one `.fallback(intent:)`. A host wanting the ladder has to rebuild it from confidence alone. |
-| **VIK-034** | Med | Two independent `Decodable` models of `bundle.json` (`NLUBundle`, `NLUPackManifest`), each missing fields the other reads. | **`GA`** | Live consequence: the OTA installer cannot see `channel`, so `refusesDevelopmentPacks` is enforced only later, inside `BundleDataLoader` — a dev-channel pack stages and activates, and is refused at session load. Fix is one type, decoded once from verified bytes. |
+| ~~**VIK-034**~~ | Med | ~~Two independent `Decodable` models of `bundle.json`.~~ | **✅ FIXED** | One model (`NLUBundle`), `PackIdentity` on the OTA surface, `NLUPackManifest` + 7 companion types deleted, and the `refusesDevelopmentPacks` check moved from session load to validation. Also closed `PUBLIC_API_PLAN` §6.1. Verified on Simulator 26 and against a live OTA install. |
 | **H4** | — | `AudioSessionManager.swift:99` uses `.allowBluetooth`, deprecated on iOS 26 in favour of `.allowBluetoothHFP`. | **`BACKLOG`** | Engage runs `.appProvided` audio, so the mic path is not on their route — but the code still ships in their binary and will raise a deprecation warning in their build. Either compile it out behind a trait or document host-audio mode as the only supported path. |
 | **VIK-012** | Low | `DateTimeGrammar` lookup tables are computed properties — rebuilt on every access, i.e. per utterance. | **`BACKLOG`** | Correctness is fine; it is wasted work per turn. Build once at `PackDateTimeParser.init`. |
 | **H3** | — | `print()` in shipping code. | **Closed — verified** | Only `MemoryProbe` still prints, and the whole file is inside `#if DEBUG` (line 11). Nothing else in `Sources/` prints. |
+
+### 1a-bis. Found outside both trackers — STT app configuration
+
+| Item | Sev | Label | Detail |
+|---|---|---|---|
+| **Background OTA refresh has never run** | Med | **`GA`** | `STTApp.swift:182` registers `.backgroundTask(.appRefresh("com.starkey.stt.nlu.refresh"))` and line 192 submits a matching `BGAppRefreshTaskRequest`, but neither `BGTaskSchedulerPermittedIdentifiers` nor `UIBackgroundModes` exists anywhere in the project — `GENERATE_INFOPLIST_FILE = YES`, no physical `Info.plist`, and the `INFOPLIST_KEY_*` settings cover only mic, speech and orientation. iOS therefore rejects the registration and `submit()` fails with `Unrecognized Identifier`. Foreground `checkForUpdates` works, which is why nobody noticed: the background path is silently dead, not broken. Fix is two Info keys in the STT target — app-side, not the package. |
 
 ### 1b. iOS consumes, Python must emit first
 
@@ -105,7 +111,7 @@ side of the work is visible.
 
 | Item | iOS side | Python side | Label |
 |---|---|---|---|
-| **B2 — production trust policy** (deferred by explicit decision: "security keys wala production ke around karenge") | Enforce `refusesDevelopmentPacks: true` structurally, not incidentally (see VIK-034); pin the BFF certificate. | Generate the production Ed25519 keypair, sign releases with it, publish `key_id`. | **`GA` — hard blocker for production, deliberately not now.** Until this lands, an attacker-authored pack is a trusted pack. |
+| **B2 — production trust policy** (deferred by explicit decision: "security keys wala production ke around karenge") | Ship a real policy with `refusesDevelopmentPacks: true` — STT and `PackageVoiceView` both hardcode `.unverifiedForTesting`. The enforcement points are now in place at both layers (VIK-034 added the validator-side refusal); what is missing is a policy that turns them on. Pin the BFF certificate. | Generate the production Ed25519 keypair, sign releases with it, publish `key_id`. | **`GA` — hard blocker for production, deliberately not now.** Until this lands, an attacker-authored pack is a trusted pack. |
 
 ---
 

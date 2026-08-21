@@ -146,14 +146,14 @@ Everything below stays `public`. Everything not below becomes `internal`.
 | Symbol | File | Note |
 |---|---|---|
 | `VoiceIntentClient`, `VoiceIntentClientError` | `VoiceIntentClient.swift` | |
-| `NLUPackInstaller` | `OTA/Installer/` | `preparePack` should return `PackIdentity`, not `NLUPackManifest` |
+| `NLUPackInstaller` | `OTA/Installer/` | ✅ `preparePack` returns `PackIdentity` (VIK-034) |
 | `PackState` | `OTA/Models/` | |
 | `PackStorageControlling`, `PackStorageController` | `OTA/Storage/` | |
 | `PackValidating`, `PackValidator` | `OTA/Validation/` | |
 | `PackExtractor` | `OTA/Validation/` | host implements |
 | `NLUEngineProvider` | `OTA/` | host implements |
 | `PackTrustPolicy`, `PackLoadPolicy` | `Data/PackIntegrity.swift` | move to `Facade/` or `OTA/`; they are host policy, not data-layer detail |
-| **trim** `NLUPackManifest` | `OTA/Models/` | 44 public declarations; the host reads `.version`. Keep the type public with a small public face, decode internally — or delete it from the surface entirely once `preparePack` returns `PackIdentity` |
+| ~~**trim** `NLUPackManifest`~~ | ~~`OTA/Models/`~~ | ✅ **DELETED** in VIK-034, along with `EngineCompat`, `SignatureInfo`, `LanguageStatus`, `CapabilityStatus`, `ModelArtifact`, and the two resolution types (now internal). 44 public declarations across 8 types, gone. `PackIdentity` took its place on `PackValidating` and `preparePack` |
 
 ### Tier 3 — new
 
@@ -198,7 +198,7 @@ SPI keeps a symbol out of the public interface while remaining callable, and the
 |---|---|---|---|
 | **1** ✅ | **DONE** — `PackIdentity`, `VoiceIntentPack.verify`, `VoiceIntentPack.smokeTest`, `session.loadedPack` are in (see §3 for what actually shipped). Remaining: `preparePack` returns `PackIdentity`. Migrate the three STT call sites (`STTApp.swift:49`, `STTApp.swift:139`, `PackageVoiceView.swift:63`). | STT app builds; no host file imports anything from `Data/` | ½ day |
 | **2** ✅ | **DONE** — 69 top-level declarations across 33 files in `Core/`, `NLU/`, `Data/` flipped to `internal`; 4 kept public (`SilenceDetectionConfiguration`, `PackTrustPolicy`, `PackLoadPolicy`, `VoiceIntentError`). The predicted conformance fallout was exactly the six `TranscriptionDelegate` methods on `VoiceIntentSession`. No `@_spi` was needed. Remaining: the 3 STT call sites. | Package + tests build | 1 day |
-| **3** ◑ | **PARTLY DONE** — 504 member-level `public`s inside now-internal types stripped; the four `print("[Deinit] …")` calls moved to `os.Logger` at `.debug`. `NLUPackManifest` trim **deferred**, see §6.1. `MemoryProbe` needed nothing — it is already `#if DEBUG`. | 686 → 178 public declarations; 38 public types | ½ day |
+| **3** ✅ | **DONE** — 504 member-level `public`s inside now-internal types stripped; the four `print("[Deinit] …")` calls moved to `os.Logger` at `.debug`. `MemoryProbe` needed nothing — it is already `#if DEBUG`. The `NLUPackManifest` trim, deferred here, landed with **VIK-034**: the type and its seven companions are deleted rather than trimmed, and `PackIdentity` is what the OTA surface vends. See §6.1. | 686 → 178 public declarations; 38 public types, then −8 with VIK-034 | ½ day |
 | **4** | CI guard (§7). | A PR that adds a public symbol fails until the snapshot is updated deliberately | ½ day |
 | **5** | Remove every `@_spi` from Phase 2. Rewrite `README.md` and `INTEGRATION.md` against the real surface — both currently show a `VoiceIntentConfiguration` init with no `packProvider` and no `trust`, which will not compile. | Zero `@_spi` in the repo; README compiles as written | ½ day |
 
@@ -231,7 +231,7 @@ Out of scope here, tracked in `docs/VIK_CLIENT_APP_READINESS.md`:
 
 ---
 
-## 6.1 Why `NLUPackManifest` is still public
+## 6.1 Why `NLUPackManifest` was still public — RESOLVED
 
 Phase 3 planned to trim it: 44 public declarations across 8 top-level types
 (`NLUPackManifest`, `EngineCompat`, `SignatureInfo`, `LanguageStatus`, `ModelArtifact`,
@@ -267,3 +267,22 @@ Three reasons to wait:
 **Do it as part of VIK-034**, once the compiler team confirms whether `version` is
 guaranteed. Then one manifest type, decoded once from verified bytes, `PackIdentity`
 vended to hosts, and the eight types collapse together instead of one at a time.
+
+---
+
+### ✅ Done — that is exactly what happened
+
+VIK-034 is fixed and this section is closed. `NLUPackManifest` is deleted, not trimmed;
+`NLUBundle` is the one model of `bundle.json`; `PackValidating.extractAndValidate` and
+`NLUPackInstaller.preparePack` return `PackIdentity`. All eight types went together.
+
+Reason 3 — "the cost is untested churn in the install path" — was answered rather than
+accepted. The install path now has assertions it did not have before: the validator's
+first positive-path test, the dev-pack refusal against the real seed pack, and a token-guard
+test that distinguishes a rebuilt staging directory from a relabelled one. Verified on
+iOS Simulator 26 and against a live OTA install in the STT app.
+
+The change also paid for itself outside the surface number: because `NLUPackManifest` had
+no `channel`, the OTA installer could not enforce `refusesDevelopmentPacks` and a dev pack
+was refused only after activation. It is refused at validation now. See `BUG_TRACKER.md`
+VIK-034.

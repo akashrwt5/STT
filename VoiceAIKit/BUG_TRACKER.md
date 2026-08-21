@@ -4,7 +4,7 @@ Defects found while making the package data-driven. The pack compiler's own
 tracker lives in the IntentClassifier repo (`docs/BUG_TRACKER.md`); anything
 here is iOS-side, or a contract gap that bites iOS specifically.
 
-**Summary:** 26 fixed, 11 open.
+**Summary:** 27 fixed, 10 open.
 
 Two of the fixes (VIK-015, VIK-016) were found by the parity suite on its first
 run, in code that compiled cleanly and had been read against the reference twice.
@@ -52,7 +52,7 @@ evidence here.
 | VIK-031 | security | **High** | Unresolved turns returned a URL built from pack data, with the user's transcript in its query string | **Fixed** |
 | VIK-032 | STT | **High** | A locale the device cannot transcribe was swallowed by `try?` — pack in one language, recogniser in another, silently | **Fixed** |
 | VIK-033 | packaging | Med | The package persisted the transcription locale in the HOST app's `UserDefaults.standard` | **Fixed** |
-| VIK-034 | contract | Med | `bundle.json` has TWO independent Decodable models that read different subsets of it | Open |
+| VIK-034 | packaging | Med | `bundle.json` had TWO independent Decodable models reading different subsets of it | **Fixed** |
 | VIK-035 | security | **High** | The host extractor rewrote `bundle.json` before signature verification — every OTA install would fail once signing is on | **Fixed** |
 | VIK-036 | NLU | **High** | Keyword-routed intents skipped the confirmation gate — `Cmd.SendMessage` (`always`) sent without asking | **Fixed** |
 | VIK-037 | NLU | Med | An open slot's free text was overwritten by a gazetteer canonical — a reminder the user named "drink water" was stored as "Drink Water" | **Fixed** |
@@ -829,7 +829,7 @@ Downstream: with `UserDefaults` gone the target uses no required-reason API, so 
 entry — restoring the structural zero-data guarantee (no resource means SwiftPM does
 not synthesise `Bundle.module` at all).
 
-### VIK-034 — Two Decodable models of `bundle.json`, each missing what the other reads (Med)
+### VIK-034 — Two Decodable models of `bundle.json`, each missing what the other reads (Med) — Fixed
 
 `NLUBundle` (`Data/`, the session load path) and `NLUPackManifest` (`OTA/Models/`, the
 installer and `VoiceIntentClient`) both decode `bundle.json`, independently, and
@@ -856,6 +856,62 @@ handed to whoever needs it.
 **Also:** `version` is optional in one and required in the other, for the same file.
 Confirm with the compiler team whether it is guaranteed; if it is, tighten `NLUBundle`
 and drop the optionality out of `PackIdentity`.
+
+---
+
+**Fix.** One model. `NLUBundle` decodes `bundle.json` — everywhere: session load
+(`BundleDataLoader`), OTA install (`PackValidator`), the C8 token guard
+(`NLUPackInstaller`) and path resolution (`VoiceIntentClient`). `NLUPackManifest` is
+deleted, and with it the seven types that existed only to describe its fields —
+`EngineCompat`, `SignatureInfo`, `LanguageStatus`, `CapabilityStatus`, `ModelArtifact`
+top-level (`ModelResolution` and `ModelResolutionError` survive as internal types).
+That closes `PUBLIC_API_PLAN.md` §6.1, which deferred the trim specifically so it could
+land here rather than twice.
+
+`PackIdentity` is what hosts see now: `PackValidating.extractAndValidate` and
+`NLUPackInstaller.preparePack` both return it. The installer and a running session
+therefore answer "which pack?" in the same vocabulary, which was the point.
+
+**The dev-pack refusal moved to where it can act.** `PackValidator` gained a step 6 and
+a `ValidationError.developmentPackRefused(channel:keyID:)`. Before, the OTA path decoded
+a model with no `channel` field, so it could not ask the question at all — a dev pack was
+downloaded, verified, staged and ACTIVATED, and the refusal arrived at the next session
+load, after the working pack had already been replaced. The `BundleDataLoader` check
+stays: the seed pack never passes through this installer, so that path is not redundant.
+
+**The C8 token guard now matches on `checksums_root`, not `version`.** A version is a
+label the compiler picks and a rebuild of 1.0.38 is still 1.0.38, so a version match never
+established that these were the verified bytes. The digest the signature covers does.
+
+**`Codable` → `Decodable`, and internal.** `NLUPackManifest` was public AND encodable —
+the exact shape that produced VIK-035 (decode → modify → re-encode → broken signature).
+`NLUBundle` is internal and decode-only; `PackIdentity` does not decode at all. A host can
+no longer make that mistake through this SDK's types.
+
+**One dead branch removed.** `resolveModelPaths` preferred a `vocabulary_artifact` key.
+`spec/bundle/3.0/bundle.schema.json` sets `additionalProperties: false` on the model entry
+and does not list that key, so a pack emitting it fails its own schema. The branch was
+unreachable in every pack that can exist; the `vocab.txt` sibling is now the only path.
+
+**Consequence worth knowing:** `PackValidator` and `VoiceIntentClient` now decode
+STRICTLY. A pack missing `channel`, `compiler_version`, `required_runtime_features`,
+`telemetry_schema_version`, `report_card_summary` or `engine_compat.max_tested_runtime_contract`
+is refused at install instead of at session load. All six are `required` in the bundle
+schema, so no compliant compiler output is affected — but a hand-edited pack that used to
+install and then fail now fails earlier and says why.
+
+**Tests:** `MockPackValidator` produces a complete, strictly-decodable `bundle.json` (the
+old one emitted a document the real loader would have rejected, so it was not testing the
+loader at all). `PackValidatorTests` gains its first positive-path assertions, run against
+the real seed pack: the dev-pack refusal, its inverse under a permissive policy, and the
+premise that the seed pack is dev-signed. `NLUPackInstallerTests` gains the case the old
+token-guard test could not distinguish — a well-formed staging bundle carrying the SAME
+version and different bytes.
+
+Verified on iOS Simulator 26 (full suite green) and against a live OTA install in the STT
+app: download → prepare → activate. STT is unaffected by the provenance check because it
+runs `.unverifiedForTesting`, and unaffected by the strict `VoiceIntentClient` decode
+because it deliberately does not call `voiceClient.start(...)`.
 
 ### VIK-035 — The host extractor rewrote `bundle.json` before it was verified (**High**) — Fixed
 
