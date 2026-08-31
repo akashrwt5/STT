@@ -100,6 +100,102 @@ final class VoiceIntentSessionSmokeTests: XCTestCase {
         }
     }
 
+    // MARK: - stop() actually stops
+
+    /// A turn outcome must never be applied to a session the host is not running.
+    ///
+    /// Regression for: `didReceiveFinalResult` launched an unowned `Task` that `stop()`
+    /// did not cancel, and nothing downstream asked whether the session was still
+    /// wanted. The task finished its `await`, called `apply`, and drove a whole turn —
+    /// speaking aloud, arming the 30s external-TTS watchdog, and reopening the
+    /// microphone — after the user had stopped. `started` was written twice and read in
+    /// none, so the flag that should have prevented it was inert.
+    ///
+    /// SCOPE: this drives the delegate callback directly, so it covers the guard on the
+    /// entry path (`started == false`). The true race — `stop()` landing *during*
+    /// `engine.handle(text)` — needs a live microphone session and is covered by the
+    /// guards at `apply()` and `handleTurnAdvance()`, verified manually (speak, then tap
+    /// stop the moment the UI shows "thinking").
+    @MainActor
+    func testFinalTranscriptOnAStoppedSessionProducesNoTurn() async throws {
+        let session = VoiceIntentSession(configuration: try configuration())
+
+        // Build the engine without a microphone. After this `engine != nil`, which is
+        // what `didReceiveFinalResult` needs in order to reach the classifier at all —
+        // so if the guard were missing, this test would exercise the full turn path.
+        _ = try await session.classify(text: "turn up the volume")
+        XCTAssertEqual(session.state, .idle, "classify(text:) must not move the session")
+
+        var events: [VoiceIntentEvent] = []
+        let collector = Task { for await event in session.events { events.append(event) } }
+        defer { collector.cancel() }
+
+        // The session was never started (equivalently: has been stopped).
+        session.didReceiveFinalResult("turn up the volume")
+
+        // Give any leaked task the main-actor hops it would need to run to completion.
+        for _ in 0..<10 { await Task.yield() }
+        try? await Task.sleep(for: .milliseconds(200))
+
+        XCTAssertEqual(session.state, .idle,
+                       "a stopped session must stay put, not move to .thinking/.listening")
+        for event in events {
+            switch event {
+            case .turn:
+                XCTFail("a turn was applied to a session that is not running")
+            case .finalTranscript:
+                XCTFail("a final transcript was reported for a session that is not running")
+            case .stateChanged(let state) where state == .listening || state == .speaking:
+                XCTFail("the session came back to \(state) after being stopped")
+            default:
+                continue
+            }
+        }
+    }
+
+    /// The OTHER door to `.stopped`: a fatal transcription error.
+    ///
+    /// Regression for the hole in the first cut of the stop() fix — it cleared the
+    /// "host wants this running" flag in `stop()` only, so a session killed by a mic
+    /// failure kept the flag set and an in-flight turn could still run and reopen the
+    /// microphone. Both doors now go through `markNotRunning()`.
+    @MainActor
+    func testFatalErrorAlsoStopsTheSessionForRealNotJustInName() async throws {
+        let session = VoiceIntentSession(configuration: try configuration())
+        _ = try await session.classify(text: "turn up the volume")   // build the engine
+
+        session.didEncounterError(.deviceNotSupported)
+        XCTAssertEqual(session.state, .stopped)
+
+        var events: [VoiceIntentEvent] = []
+        let collector = Task { for await event in session.events { events.append(event) } }
+        defer { collector.cancel() }
+
+        // A final result still in flight from the coordinator when the error landed.
+        session.didReceiveFinalResult("turn up the volume")
+        for _ in 0..<10 { await Task.yield() }
+        try? await Task.sleep(for: .milliseconds(200))
+
+        XCTAssertEqual(session.state, .stopped,
+                       "a session killed by an error must stay stopped")
+        for event in events {
+            if case .turn = event {
+                XCTFail("a turn ran on a session that a fatal error had already stopped")
+            }
+            if case .stateChanged(let state) = event, state == .listening || state == .speaking {
+                XCTFail("the session came back to \(state) after a fatal error")
+            }
+        }
+    }
+
+    /// `stop()` is safe to call at any time and always lands in `.stopped`.
+    @MainActor
+    func testStopFromIdleIsStopped() throws {
+        let session = VoiceIntentSession(configuration: try configuration())
+        session.stop()
+        XCTAssertEqual(session.state, .stopped)
+    }
+
     // MARK: - Helpers
 
     /// A turn is "plausible" if it names an intent, asks a follow-up, or hands

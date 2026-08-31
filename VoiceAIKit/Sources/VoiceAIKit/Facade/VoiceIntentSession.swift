@@ -60,7 +60,21 @@ public final class VoiceIntentSession {
     private let appAudio: AppAudioInputProvider?
     private let speaker = ConversationSpeaker()
     private var engine: (any ConversationEngine)?
+    /// Whether the HOST wants this session running — set by `start()`, cleared by
+    /// `stop()`. Deliberately separate from `state`, which tracks where inside a turn
+    /// we are: after `stop()` a turn can still be in flight, and `state` will happily
+    /// be driven back to `.speaking`/`.listening` by that turn unless something says
+    /// "the host is done". This flag is that something.
+    ///
+    /// It existed before and was written in exactly two places and read in none, which
+    /// is why `stop()` could not actually stop anything (VIK: mic reopened after stop).
     private var started = false
+    /// The in-flight classification for the most recent final transcript.
+    ///
+    /// Stored so `stop()` can cancel it. Unowned, this task outlives `stop()`, finishes
+    /// its `await`, and drives a whole turn — speaking, and reopening the microphone —
+    /// after the user asked the session to stop.
+    private var classifyTask: Task<Void, Never>?
     /// True after a follow-up/confirmation, so the mic auto-restarts to hear the answer.
     private var awaitingAnswer = false
     /// Generation tag for the external-TTS delivery watchdog. A fresh
@@ -153,6 +167,7 @@ public final class VoiceIntentSession {
 
         started = true
         awaitingAnswer = false          // fresh start: not mid-conversation
+
         try await beginListening()
     }
 
@@ -218,12 +233,32 @@ public final class VoiceIntentSession {
 
     /// Stops listening and speaking and releases audio resources. Safe to call anytime.
     public func stop() {
-        started = false
-        awaitingAnswer = false
+        markNotRunning()
         speaker.stop()
         coordinator.stopLiveTranscription()
         coordinator.releaseAudioSession()
         state = .stopped
+    }
+
+    /// Everything that must become true the moment this session stops running —
+    /// whichever door it leaves through.
+    ///
+    /// There are TWO doors to `.stopped`: `stop()` and `didEncounterError(_:)`. This
+    /// lives in one place on purpose. The first cut of this fix wired only `stop()`,
+    /// which left a fatal microphone error able to run a whole turn and reopen the mic —
+    /// the exact bug the fix was written to close, walking in through the other door.
+    ///
+    /// It deliberately does NOT touch audio, TTS or `state`: the two callers tear those
+    /// down differently (by the time the error path runs, the coordinator has already
+    /// gone `.failed`, stopped the provider and torn the audio session down), and each
+    /// sets `state` itself.
+    private func markNotRunning() {
+        started = false
+        awaitingAnswer = false
+        // Cancelling is the optimisation; `started` is the correctness. A task already
+        // past its last cancellation point is stopped by the guards, not by this line.
+        classifyTask?.cancel()
+        classifyTask = nil
     }
 
     /// Abandons any in-progress multi-turn conversation without stopping the session.
@@ -324,6 +359,11 @@ public final class VoiceIntentSession {
     // MARK: - Listening
 
     private func beginListening() async throws {
+        // NOT guarded on `started`. `startNextListeningTurn()` is a public entry point
+        // that reaches here directly, and `VoiceIntentSessionSmokeTests`
+        // .testStartNextListeningTurnFromIdleThrowsWithoutMic asserts it does NOT return
+        // early. The mic-reopen paths are closed at `apply()` and `handleTurnAdvance()`
+        // instead, which is where a stopped session's turn actually leaks through.
         // Slot answers get the unhurried window; first commands the standard one.
         coordinator.silenceConfiguration = awaitingAnswer
             ? (config.slotAnswerSilence ?? .slotAnswer)
@@ -335,6 +375,15 @@ public final class VoiceIntentSession {
     // MARK: - Turn application
 
     private func apply(_ response: NLUResponse, utterance: String) {
+        // The single choke point for a turn's outcome, and therefore the place to
+        // refuse one belonging to a session the host has stopped. Every branch below
+        // has a side effect that must not happen after `stop()`: speaking aloud,
+        // arming the external-TTS watchdog, setting `awaitingAnswer` (which would leak
+        // into the next `start()`), or reopening the microphone.
+        guard started else {
+            logger.info("Discarding a turn outcome: the session was stopped while it was in flight.")
+            return
+        }
         switch response {
         case .prompt(let intent, let question, let filled):
             awaitingAnswer = true
@@ -438,6 +487,10 @@ public final class VoiceIntentSession {
     /// the internal TTS finishing (`handleSpeechFinished`), by `hostDidFinishSpeaking()`
     /// in external-TTS mode, or immediately for turns with nothing to speak.
     private func handleTurnAdvance() {
+        // Reached from the external-TTS watchdog too, which fires up to 30s later and
+        // does not pass through `apply()`. Note the early return rather than falling
+        // to the `.idle` branch below: a stopped session must stay `.stopped`.
+        guard started else { return }
         if awaitingAnswer {
             // Mid-conversation: listen for the user's answer.
             Task { try? await beginListening() }
@@ -500,17 +553,39 @@ extension VoiceIntentSession: TranscriptionDelegate {
     func didReceiveFinalResult(_ text: String) {
         // Ignore audio captured while the assistant is speaking (our own TTS).
         guard state != .speaking else { return }
+        // A final result can still be in flight from the coordinator when `stop()` runs.
+        // Refusing it here is cheaper than classifying it and discarding the outcome,
+        // and it keeps `.thinking` and `.finalTranscript` from being reported for a
+        // session the host has already stopped.
+        guard started else {
+            logger.info("Discarding a final transcript: the session is not started.")
+            return
+        }
         continuation.yield(.finalTranscript(text))
         state = .thinking
-        Task { [weak self] in
+        classifyTask?.cancel()
+        classifyTask = Task { [weak self] in
             guard let self, let engine = self.engine else { return }
             let response = await engine.handle(text)
+            // Re-check AFTER the suspension point. `stop()` may have run while the
+            // engine was classifying, and applying a turn to a stopped session is what
+            // reopened the microphone.
+            guard !Task.isCancelled, self.started else { return }
             self.apply(response, utterance: text)
         }
     }
 
     func didEncounterError(_ error: TranscriptionError) {
         continuation.yield(.error(message: String(describing: error)))
+        // Both callers of this are fatal: the recognizer failed (`TranscriptionCoordinator`
+        // .recognitionService(_:didFailWith:) — it has already gone `.failed`, stopped the
+        // provider and torn down the audio session), or the microphone could not be
+        // resumed after an interruption. `state = .stopped` below already says the session
+        // is over; this makes the flag agree with it, so an in-flight turn cannot finish
+        // and reopen the microphone. A host recovers the same way as before: observe
+        // `.error`, call `start()` again — which is still allowed from `.stopped` and sets
+        // `started` back to true.
+        markNotRunning()
         state = .stopped
     }
 
