@@ -392,6 +392,16 @@ public final class VoiceIntentSession {
             ? (config.slotAnswerSilence ?? .slotAnswer)
             : (config.autoStopOnSilence ? (config.commandSilence ?? .singleUtterance) : .disabled)
         try await coordinator.startLiveTranscription()
+        // `stop()` can land while the audio stack is starting — it is several tens of
+        // milliseconds of permissions, session configuration and analyzer start. Without
+        // this the microphone comes up AFTER the user stopped the session and `state` is
+        // driven back to `.listening` on top of `.stopped`. Undo rather than ignore: the
+        // mic is genuinely running by this point.
+        guard started else {
+            logger.info("Microphone came up after the session was stopped — tearing it back down.")
+            coordinator.stopLiveTranscription()
+            return
+        }
         state = .listening
     }
 
@@ -516,13 +526,64 @@ public final class VoiceIntentSession {
         guard started else { return }
         if awaitingAnswer {
             // Mid-conversation: listen for the user's answer.
-            Task { try? await beginListening() }
+            resumeListening()
         } else if !config.autoStopOnSilence {
             // Continuous mode: resume so the user can speak a new command.
-            Task { try? await beginListening() }
+            resumeListening()
         } else {
             // Single-utterance mode, conversation done — leave the mic off.
             state = .idle
+        }
+    }
+
+    /// Reopens the microphone for the next turn, and — unlike the `Task { try? ... }`
+    /// this replaces — says so out loud when it cannot.
+    ///
+    /// `beginListening()` throws for things the host has to react to: microphone or
+    /// speech-recognition permission revoked mid-conversation, the audio session failing
+    /// to configure, the analyzer refusing to start. `try?` swallowed all of them, and
+    /// because `state` only becomes `.listening` on success, the session was left sitting
+    /// in the `.thinking` that `handleSpeechFinished()` had just set — no error, no state
+    /// change, no way back. The host's UI showed "thinking..." forever and the only cure
+    /// was killing the app. That silence is Recommendation #1.
+    ///
+    /// The task is deliberately NOT stored and NOT cancellable.
+    /// `TranscriptionCoordinator.startLiveTranscription()` has no teardown on its throw
+    /// path and `TranscriptionState.isActive` excludes `.preparingAudio`, so cancelling
+    /// into it strands the coordinator holding a configured audio session and a live
+    /// provider. `started` is what neutralises a stale turn instead — storing a handle
+    /// nobody may safely use is how `started` itself became a flag written twice and read
+    /// never.
+    private func resumeListening() {
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.beginListening()
+            } catch is CancellationError {
+                return
+            } catch {
+                // `stop()` may have landed while the audio stack was starting. A session
+                // the host has already given up on does not need an error report, and
+                // must not be dragged out of `.stopped`.
+                guard self.started else { return }
+
+                self.logger.error("Could not reopen the microphone for the next turn: \(error.localizedDescription, privacy: .public)")
+
+                // `startLiveTranscription()` has no teardown on its throw path, so the
+                // coordinator can be sitting in `.preparingAudio` holding a configured
+                // audio session. Tear it down rather than leave the session dead with the
+                // route still taken.
+                self.coordinator.stopLiveTranscription()
+
+                // This is the THIRD door to `.stopped`, after `stop()` and
+                // `didEncounterError(_:)`. It goes through the same helper for the same
+                // reason: a door that sets the state but not the flag leaves a pending
+                // turn free to run and reopen the microphone — which is the bug the
+                // previous commit closed, and which this handler would have reopened.
+                self.markNotRunning()
+                self.continuation.yield(.error(message: String(describing: error)))
+                self.state = .stopped
+            }
         }
     }
 
