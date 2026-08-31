@@ -91,9 +91,9 @@ Two names worth explaining, because neither is obvious:
 ## Requirements
 
 - **iOS 26+** — `SpeechAnalyzer` / `SpeechTranscriber` are iOS 26 APIs, and they are load-bearing.
-- Xcode 26+. The package builds in **Swift 5 language mode**; your app does not have to, and
-  most hosts never notice. It is pinned deliberately, not left behind — see
-  [Swift language mode](#swift-language-mode-pinned-to-5) for what it costs you.
+- Xcode 26+. The package builds in **Swift 6 language mode**; your app does not have to —
+  language mode is per-target, so a Swift 5 host links it fine. See
+  [Swift language mode](#swift-language-mode) for what that does and does not guarantee.
 - `Info.plist`: `NSMicrophoneUsageDescription` and `NSSpeechRecognitionUsageDescription`.
   Speech-recognition authorization is required even when the host owns the microphone.
 - Background Modes → Audio, if you run sessions in the background.
@@ -357,79 +357,48 @@ Refusing is a feature here; the alternative is a hearing aid acting on a guess.
 - **No unverified pack.** Ed25519 over `manifest.sha256 ‖ bundle.json`, `checksums_root` binding
   the two, then every file's digest — all before a byte is parsed.
 
-## Swift language mode: pinned to 5
+## Swift language mode
 
-`Package.swift` ends with `swiftLanguageModes: [.v5]`. Your app is unaffected — language mode is
-per-target, so a Swift 6 app links this happily. But you should know why the line is there, because
-the reason is not laziness and the consequence is real.
+The package builds in **Swift 6 language mode**. Nothing is required of your app —
+language mode is per-target, so a Swift 5 host links it happily.
 
-### What happens without it
+It was pinned to Swift 5 for a long time, and the note explaining why was wrong. Since
+that note is the sort of thing an integrating team reads and plans around, here is the
+corrected version.
 
-Removing the line makes SwiftPM build the package under Swift 6 strict concurrency. Compiling is
-the easy part; it has been done. The problem is at runtime:
+**The belief:** iOS 26's `SpeechAnalyzer` uses a custom serial executor, and Swift 6
+scheduling moved its callbacks off that queue, tripping an assertion inside
+`Speech.framework`. Unfixable from outside Apple.
 
-> On device (iPhone 17 Pro Max, iOS 26), roughly **one second after the microphone starts**:
-> `EXC_BREAKPOINT` (`brk #0x1`) on `com.apple.RealtimeMR_ForceQueue`, in
-> `_dispatch_assert_queue_fail`, **inside `Speech.framework`**.
+**The reality:** the crash was in this package's own audio tap.
+`AudioCaptureService.startEngine` is `@MainActor`, and in Swift 6 an escaping closure
+written inside an isolated function **inherits that isolation** unless it says
+otherwise — so the `installTap` block was compiled as main-actor code. AVAudioEngine
+then calls it from its real-time audio thread, Swift's runtime isolation check runs,
+and the process traps. `Speech.framework` appears nowhere in the stack.
 
-The same code, byte-for-byte, does not crash when built in Swift 5 mode.
+The fix is one annotation on that block:
 
-### Why
+```swift
+installTap(onBus: 0, bufferSize: bufferSize, format: format) { @Sendable [stopped] buffer, _ in
+```
 
-Three things have to line up.
+It states what was always true: the block runs on the audio thread and needs nothing
+from the main actor. Swift 5 simply never inserted the check.
 
-**Every piece of async code runs on an *executor*** — the thing that decides which thread it lands
-on. Most actors use the shared cooperative thread pool, and any free thread will do.
+**Worth carrying away if you write audio code:** any escaping closure handed to an
+Objective-C callback API — an `AVAudioNodeTapBlock`, a completion handler — picks up the
+isolation of the function it is written in. If that callback fires on a non-main thread,
+Swift 6 will trap at runtime, not at compile time. Mark those closures `@Sendable`.
 
-**`SpeechAnalyzer` is not most actors.** It pins itself to one specific queue,
-`com.apple.RealtimeMR_ForceQueue`. Audio has hard deadlines: a buffer late is a glitch, so Apple
-binds the analyzer to a real-time queue rather than letting it float.
+**What Swift 6 mode does not mean here.** The package builds with zero warnings, but it
+carries six `@unchecked Sendable` types and fifteen `nonisolated(unsafe)` bindings, and
+suppressing diagnostics is precisely what those do. Swift 6 mode guarantees that new
+code is checked; it does not retroactively verify those twenty-one escape hatches.
 
-**Apple guards that with `dispatch_assert_queue()`** — "am I on the queue I am supposed to be on?"
-If not, it traps. That `EXC_BREAKPOINT` is not memory corruption or a bug in your code; it is a
-deliberate alarm saying *the threading contract was broken*.
-
-Now the actual failure. Your code `await`s the analyzer's async API. After every `await`, Swift
-decides which thread to resume on:
-
-- **Swift 5** resumed back onto the analyzer's own queue. The assertion passed.
-- **Swift 6** is stricter about which code counts as `nonisolated` — and `nonisolated` async code
-  runs on the generic cooperative pool, not on any particular queue. Some of the analyzer's
-  internal callbacks therefore resume on a pool thread instead of the real-time queue, the
-  assertion fires, and the process traps.
-
-That is also why the crash arrives a second in rather than at setup. Setup is direct calls; the
-callbacks that keep firing once real audio flows are where the resumption thread matters.
-
-**`@unchecked Sendable` and `nonisolated(unsafe)` do not fix this.** They silence the *compiler*.
-They do not change *runtime scheduling*. Getting the package to compile under Swift 6 and getting
-it to stop crashing are two different projects.
-
-### What this costs you
-
-The package has never been validated under Swift 6 strict concurrency, so its `Sendable`
-conformances are promises rather than compiler-checked facts. Six internal types are
-`@unchecked Sendable`; two of them — `PackStorageController` and `PackValidator` — are public.
-If your app runs in Swift 6 mode, it inherits those promises unverified.
-
-Nothing here is a landmine for a host. It is a known Apple framework constraint, worked around
-deliberately, with the diagnosis written down.
-
-### The real fix, when someone does it
-
-Take the choice away from Swift: route the analyzer's calls through an isolated helper that
-respects its custom executor, or place explicit `Task.detached` boundaries, inside
-`SpeechRecognitionService`'s task group. A separate engineering task, not a migration blocker.
-
-Note that two `deinit`s — `AudioSessionManager` and `VoiceIntentSession` — read isolated stored
-state, which Swift 5 permits and Swift 6 does not. A migration needs `isolated deinit`
-(SE-0371, Swift 6.1+) or a restructure there.
-
-### How much of this is measured
-
-**Measured:** the crash, reproduced on device; the stack inside `Speech.framework`; the queue name;
-and that switching language mode was the only change. Three other fixes were tried first and all
-failed the same way — they are recorded in [`MIGRATION.md`](MIGRATION.md) as rejected diagnoses.
+The stack, the postmortem, and two other fixes that did not work are in
+[`MIGRATION.md`](MIGRATION.md).
+the region-isolation error and also failed.
 
 **Inferred:** exactly which hop the Swift runtime schedules differently. `Speech.framework` is
 closed source, so this is the best available explanation rather than a verified trace. Worth

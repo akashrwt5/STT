@@ -99,7 +99,20 @@ final class AudioCaptureService: AudioInputProvider, @unchecked Sendable {
             // required format happens later in SpeechRecognitionService.
             let format = resolveFormat()
 
-            engine.inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) { [stopped] buffer, _ in
+            // `@Sendable` is LOAD-BEARING, and its absence is a crash under Swift 6.
+            //
+            // `startEngine` is `@MainActor`, and in Swift 6 an escaping closure written
+            // inside an isolated function INHERITS that isolation unless it says otherwise.
+            // AVAudioEngine then calls this tap from its real-time audio thread
+            // (`RealtimeMessenger.mServiceQueue`), Swift's runtime isolation check fires —
+            // `swift_task_isCurrentExecutorWithFlags` -> `_swift_task_checkIsolatedSwift`
+            // -> `dispatch_assert_queue` — finds it is not on the main actor, and traps.
+            //
+            // Marking it `@Sendable` says what has always been true: this block runs off
+            // the main actor, on the audio thread. Everything it touches is already safe
+            // for that — `stopped` is an `OSAllocatedUnfairLock`, `continuation` is
+            // `Sendable`, and the buffer is deep-copied before it leaves.
+            engine.inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) { @Sendable [stopped] buffer, _ in
                 // Drop buffers the instant stop() is called, even though the engine's own
                 // teardown happens on a later main-actor hop — prevents stale buffers from
                 // a stopping session leaking into a freshly started one.

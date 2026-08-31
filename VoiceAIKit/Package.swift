@@ -90,13 +90,7 @@ let package = Package(
             ]
         ),
     ],
-    // Match the STT app's SWIFT_VERSION = 5 language mode.
-    //
-    // Under Swift 6 strict concurrency, iOS 26's `SpeechAnalyzer` (which uses a
-    // custom serial executor on `com.apple.RealtimeMR_ForceQueue`) trips a
-    // `dispatch_assert_queue_fail` on that queue mid-live-session. The app's copy
-    // of the exact same code runs fine because the app builds in Swift 5 mode.
-    // Aligning the package to Swift 5 keeps the code byte-copyable and behaves
-    // identically to the app at runtime. See VoiceAIKit/MIGRATION.md.
-    swiftLanguageModes: [.v5]
+    // Moved to Swift 6 after the installTap @Sendable fix in AudioCaptureService. The
+    // earlier .v5 pin was based on an incorrect diagnosis; see MIGRATION.md.
+    swiftLanguageModes: [.v6]
 )

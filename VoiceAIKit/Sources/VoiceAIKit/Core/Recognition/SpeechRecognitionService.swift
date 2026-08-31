@@ -468,107 +468,29 @@ final class SpeechRecognitionService {
                     // task-group CHILD rather than the group body: if the analyzer child
                     // fails, the group observes that failure and cancels this loop instead of
                     // leaving it blocked forever on a results stream that will never close.
-                    group.addTask { @MainActor [weak self] in
+                    //
+                    // `nonisolated(unsafe)`, the same idiom as the feed bindings above and
+                    // for the same reason: `SpeechTranscriber` is not Sendable, this value is
+                    // created in the enclosing scope and consumed by exactly one child. Without
+                    // it, Swift 6's region-based isolation checker cannot analyse a `@MainActor`
+                    // task-group child capturing a non-Sendable value from a nonisolated scope
+                    // and reports "Pattern that the region-based isolation checker does not
+                    // understand how to check" — a checker limitation, not an unsafe capture.
+                    //
+                    // Deliberately NOT `self.transcriber`, which would need no annotation at all
+                    // inside this @MainActor closure: that property holds whatever transcriber is
+                    // CURRENT, and a newer session may have replaced it (which is why this class
+                    // carries a `generation` counter). This child must use the one its own
+                    // session built.
+                    nonisolated(unsafe) let resultsTranscriber = transcriber
+                    // Child 3 is nonisolated like children 1 and 2; the main-actor hop
+                    // happens inside `consumeResults`. See that method for why the isolation
+                    // cannot live on this closure.
+                    group.addTask { [weak self] in
                         guard let self else { return }
-                    // `transcriber.results` is an async property in iOS 26.
-                    logger.info("[Results] Awaiting transcriber.results async property…")
-                    let resultStream = await transcriber.results
-                    logger.info("[Results] Got result stream. Starting iteration…")
-
-                    var resultCount = 0
-                    // Endpoint-lag instrumentation: time from the last transcript-changing
-                    // partial to the committed final. This is the "invisible" wait between
-                    // the user finishing their utterance and the pipeline being able to
-                    // respond — the span the VAD endpoint exists to bound.
-                    var lastPartialAt: CFAbsoluteTime?
-                    let latencyLog = Logger(subsystem: "com.voiceaikit", category: "Latency")
-                    for try await result in resultStream {
-                        guard !Task.isCancelled else {
-                            logger.info("[Results] Task cancelled — breaking result loop.")
-                            break
-                        }
-                        resultCount += 1
-                        let plainText = String(result.text.characters)
-                        let isFinal = result.isFinal
-                        logger.debug("AK: [Results] Result #\(resultCount): isFinal=\(isFinal), text='\(plainText)'")
-
-                        // ── Endpointing authority ─────────────────────────────────
-                        // Apple's SpeechTranscriber (.progressiveTranscription) emits
-                        // isFinal at each grammatical/pause boundary and then immediately
-                        // starts a NEW chunk. isFinal marks a stable SEGMENT, NOT the end of
-                        // the user's turn: "It's a bit louder here." finalizes mid-sentence
-                        // when the speaker pauses at the comma.
-                        //
-                        // On the live single-utterance path we treat every result (volatile
-                        // OR final) purely as transcript to accumulate, and let the feed-loop
-                        // endpointer be the SOLE authority on turn-end. Apple's isFinal never
-                        // triggers the NLU here. This is the fix for the premature-endpointing
-                        // bug (the mic no longer cuts off, and NLU no longer fires, mid-clause).
-                        if silenceConfiguration.isEnabled {
-                            // Turn already committed by the endpointer (speculative final /
-                            // VAD). Remaining results are analyzer-drain — never re-deliver.
-                            if self.hasReceivedFinalResult {
-                                if isFinal {
-                                    self.appendFinalizedSegment(plainText)
-                                    if let lastPartialAt {
-                                        let lagMs = (CFAbsoluteTimeGetCurrent() - lastPartialAt) * 1000
-                                        latencyLog.info("ENDPOINT LAG: recognizer final committed \(lagMs, format: .fixed(precision: 0))ms after last partial (endpoint already fired).")
-                                    }
-                                }
-                                continue
-                            }
-
-                            // Commit finalized SEGMENTS into the accumulator; the running
-                            // transcript is (finalized segments + current volatile chunk),
-                            // so it is always the full utterance — not just the last chunk.
-                            if isFinal { self.appendFinalizedSegment(plainText) }
-                            let running = self.runningTranscript(withVolatile: isFinal ? "" : plainText)
-
-                            if !running.isEmpty {
-                                if !self.hasVolatileText {
-                                    self.hasVolatileText = true
-                                    self.firstSpeechAt = CFAbsoluteTimeGetCurrent()
-                                }
-                                if running != self.lastPartialText {
-                                    self.lastPartialText = running
-                                    self.lastPartialChangeAt = CFAbsoluteTimeGetCurrent()
-                                }
-                            }
-                            if !isFinal { lastPartialAt = CFAbsoluteTimeGetCurrent() }
-
-                            // Always surfaced as a PARTIAL — the turn's real final is
-                            // synthesized by commitStableTranscriptAsFinal() at endpoint.
-                            self.delegate?.recognitionService(
-                                self,
-                                didReceivePartialResult: TranscriptionResult(
-                                    text: running, isFinal: false, locale: locale, confidence: nil
-                                )
-                            )
-                            continue
-                        }
-
-                        // ── File / continuous-captioning path (silence detection off) ──
-                        // No notion of a "turn": Apple's isFinal is authoritative and is
-                        // accumulated downstream (TranscriptionCoordinator / file loop).
-                        if !plainText.isEmpty {
-                            self.hasVolatileText = true
-                            if plainText != self.lastPartialText {
-                                self.lastPartialText = plainText
-                                self.lastPartialChangeAt = CFAbsoluteTimeGetCurrent()
-                            }
-                        }
-                        let transcriptionResult = TranscriptionResult(
-                            text: plainText, isFinal: isFinal, locale: locale, confidence: nil
-                        )
-                        if isFinal {
-                            self.hasReceivedFinalResult = true
-                            self.delegate?.recognitionService(self, didReceiveFinalResult: transcriptionResult)
-                        } else {
-                            lastPartialAt = CFAbsoluteTimeGetCurrent()
-                            self.delegate?.recognitionService(self, didReceivePartialResult: transcriptionResult)
-                        }
-                    }
-                    logger.info("[Results] Result stream exhausted. Total results received: \(resultCount).")
+                        try await self.consumeResults(from: resultsTranscriber,
+                                                      locale: locale,
+                                                      silenceConfiguration: silenceConfiguration)
                     }  // end Child 3 — result iteration
 
                     // Observe every child. The first to throw (e.g. analyzer.start failing)
@@ -625,6 +547,133 @@ final class SpeechRecognitionService {
         transcriber = nil
         logger.info("SpeechRecognitionService stopped.")
         if rearmPrewarm { prewarm() }
+    }
+
+
+    /// Child 3 of `startTranscribing`'s task group: iterate the transcriber's results and
+    /// drive the delegate. Runs on the main actor (this class is `@MainActor`), so delegate
+    /// delivery stays synchronous — exactly as it did when this was a closure.
+    ///
+    /// EXTRACTED FROM THE CLOSURE, and not for tidiness. Swift 6's region-based isolation
+    /// checker cannot analyse a `@MainActor` closure passed to `TaskGroup.addTask` here:
+    ///
+    ///     Pattern that the region-based isolation checker does not understand how to check.
+    ///     Please file a bug
+    ///
+    /// That is a checker limitation, not an unsafe capture — every value the body reaches for
+    /// is either Sendable (`locale`, `silenceConfiguration`) or already opted out
+    /// (`resultsTranscriber`). Neither `[weak self]` nor `[self]` avoids it; the trigger is
+    /// the `@MainActor` closure itself. Moving the isolation from the CLOSURE to this METHOD
+    /// gives the checker the shape it already handles — children 1 and 2 are nonisolated
+    /// closures and compile fine.
+    ///
+    /// `resultsTranscriber` is passed rather than read from `self.transcriber`: that property
+    /// holds whatever transcriber is CURRENT, and a newer session may have replaced it (hence
+    /// this class's `generation` counter). This loop must use the one its own session built.
+    private func consumeResults(
+        from resultsTranscriber: SpeechTranscriber,
+        locale: Locale,
+        silenceConfiguration: SilenceDetectionConfiguration
+    ) async throws {
+        // `transcriber.results` is an async property in iOS 26.
+        logger.info("[Results] Awaiting transcriber.results async property…")
+        let resultStream = await resultsTranscriber.results
+        logger.info("[Results] Got result stream. Starting iteration…")
+
+        var resultCount = 0
+        // Endpoint-lag instrumentation: time from the last transcript-changing
+        // partial to the committed final. This is the "invisible" wait between
+        // the user finishing their utterance and the pipeline being able to
+        // respond — the span the VAD endpoint exists to bound.
+        var lastPartialAt: CFAbsoluteTime?
+        let latencyLog = Logger(subsystem: "com.voiceaikit", category: "Latency")
+        for try await result in resultStream {
+            guard !Task.isCancelled else {
+                logger.info("[Results] Task cancelled — breaking result loop.")
+                break
+            }
+            resultCount += 1
+            let plainText = String(result.text.characters)
+            let isFinal = result.isFinal
+            logger.debug("AK: [Results] Result #\(resultCount): isFinal=\(isFinal), text='\(plainText)'")
+
+            // ── Endpointing authority ─────────────────────────────────
+            // Apple's SpeechTranscriber (.progressiveTranscription) emits
+            // isFinal at each grammatical/pause boundary and then immediately
+            // starts a NEW chunk. isFinal marks a stable SEGMENT, NOT the end of
+            // the user's turn: "It's a bit louder here." finalizes mid-sentence
+            // when the speaker pauses at the comma.
+            //
+            // On the live single-utterance path we treat every result (volatile
+            // OR final) purely as transcript to accumulate, and let the feed-loop
+            // endpointer be the SOLE authority on turn-end. Apple's isFinal never
+            // triggers the NLU here. This is the fix for the premature-endpointing
+            // bug (the mic no longer cuts off, and NLU no longer fires, mid-clause).
+            if silenceConfiguration.isEnabled {
+                // Turn already committed by the endpointer (speculative final /
+                // VAD). Remaining results are analyzer-drain — never re-deliver.
+                if self.hasReceivedFinalResult {
+                    if isFinal {
+                        self.appendFinalizedSegment(plainText)
+                        if let lastPartialAt {
+                            let lagMs = (CFAbsoluteTimeGetCurrent() - lastPartialAt) * 1000
+                            latencyLog.info("ENDPOINT LAG: recognizer final committed \(lagMs, format: .fixed(precision: 0))ms after last partial (endpoint already fired).")
+                        }
+                    }
+                    continue
+                }
+
+                // Commit finalized SEGMENTS into the accumulator; the running
+                // transcript is (finalized segments + current volatile chunk),
+                // so it is always the full utterance — not just the last chunk.
+                if isFinal { self.appendFinalizedSegment(plainText) }
+                let running = self.runningTranscript(withVolatile: isFinal ? "" : plainText)
+
+                if !running.isEmpty {
+                    if !self.hasVolatileText {
+                        self.hasVolatileText = true
+                        self.firstSpeechAt = CFAbsoluteTimeGetCurrent()
+                    }
+                    if running != self.lastPartialText {
+                        self.lastPartialText = running
+                        self.lastPartialChangeAt = CFAbsoluteTimeGetCurrent()
+                    }
+                }
+                if !isFinal { lastPartialAt = CFAbsoluteTimeGetCurrent() }
+
+                // Always surfaced as a PARTIAL — the turn's real final is
+                // synthesized by commitStableTranscriptAsFinal() at endpoint.
+                self.delegate?.recognitionService(
+                    self,
+                    didReceivePartialResult: TranscriptionResult(
+                        text: running, isFinal: false, locale: locale, confidence: nil
+                    )
+                )
+                continue
+            }
+
+            // ── File / continuous-captioning path (silence detection off) ──
+            // No notion of a "turn": Apple's isFinal is authoritative and is
+            // accumulated downstream (TranscriptionCoordinator / file loop).
+            if !plainText.isEmpty {
+                self.hasVolatileText = true
+                if plainText != self.lastPartialText {
+                    self.lastPartialText = plainText
+                    self.lastPartialChangeAt = CFAbsoluteTimeGetCurrent()
+                }
+            }
+            let transcriptionResult = TranscriptionResult(
+                text: plainText, isFinal: isFinal, locale: locale, confidence: nil
+            )
+            if isFinal {
+                self.hasReceivedFinalResult = true
+                self.delegate?.recognitionService(self, didReceiveFinalResult: transcriptionResult)
+            } else {
+                lastPartialAt = CFAbsoluteTimeGetCurrent()
+                self.delegate?.recognitionService(self, didReceivePartialResult: transcriptionResult)
+            }
+        }
+        logger.info("[Results] Result stream exhausted. Total results received: \(resultCount).")
     }
 
     // MARK: - Feed-task helpers (main-actor hops from the detached feed loop)

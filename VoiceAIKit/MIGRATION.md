@@ -160,51 +160,89 @@ new `VoiceIntentSession`-driven ViewModels.
 - The `IntentKit/` folder (an earlier greenfield design) is dead code; it
   can be removed in the same PR or a follow-up.
 
-## Swift language mode: package pinned to `.v5` to match the STT app
+## Swift language mode: on `.v6` — and the `.v5` diagnosis was wrong
 
-**Symptom on device (iPhone 17 Pro Max, iOS 26).** Tapping **Package** on
-the first screen crashed ~1s after the mic started with an `EXC_BREAKPOINT`
-(`brk #0x1`) on `com.apple.RealtimeMR_ForceQueue` —
-`_dispatch_assert_queue_fail` inside `Speech.framework`. The app's own
-English/Multilingual paths — running the same byte-copied code — did not
-crash. Prior speculative fixes (start/analyzeSequence swap, feed-done
-barrier) all failed with the same trap.
+**RESOLVED.** The package builds and runs in Swift 6 language mode. The pin is gone.
+This section is kept in full because the wrong diagnosis cost real time and the
+shape of the mistake is worth remembering.
 
-**Root cause.** The STT app builds with `SWIFT_VERSION = 5`; the package's
-`Package.swift` declared `swift-tools-version: 6.0` with no explicit
-language mode, so SwiftPM built the package under **Swift 6 strict
-concurrency**. iOS 26's `SpeechAnalyzer` is an actor with a custom serial
-executor pinned to `com.apple.RealtimeMR_ForceQueue`; under Swift 6 strict
-scheduling, some of its internal async callbacks run on the cooperative
-pool instead of that queue, tripping `dispatch_assert_queue()`. Swift 5's
-scheduler behaves the way `Speech.framework` expects and the assertion
-never fires.
+### What actually crashed
 
-**Fix.** Pin the package to Swift 5 mode:
+    Thread 3  Queue: RealtimeMessenger.mServiceQueue (serial)
+    #0  _dispatch_assert_queue_fail
+    #2  dispatch_assert_queue
+    #3  _swift_task_checkIsolatedSwift
+    #4  swift_task_isCurrentExecutorWithFlagsImpl
+    #5  closure #1 in AudioCaptureService.startEngine(continuation:)   <-- ours
+    #6  thunk for @escaping (AVAudioPCMBuffer, AVAudioTime) -> ()
+    #7  AVAudioNodeTap::TapMessage::RealtimeMessenger_Perform
+
+`startEngine` is `@MainActor`. **In Swift 6 an escaping closure written inside an
+isolated function inherits that isolation unless it says otherwise**, so the
+`installTap` block was compiled as `@MainActor`. AVAudioEngine then calls it from its
+real-time audio thread, Swift's runtime isolation check runs, finds it is not on the
+main actor, and traps.
+
+The fix is one annotation:
 
 ```swift
-let package = Package(
-    // …
-    targets: [ /* … */ ],
-    swiftLanguageModes: [.v5]   // match STT.xcodeproj SWIFT_VERSION = 5
-)
+engine.inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: format) {
+    @Sendable [stopped] buffer, _ in
 ```
 
-With that in place, `SpeechRecognitionService.swift` in the package
-matches the app's copy byte-for-byte (`start(inputSequence:)` followed by
-`finalizeAndFinishThroughEndOfInput()` — no barrier). The earlier
-speculative "barrier" workaround has been reverted.
+which states what was always true — the block runs on the audio thread. It needed
+nothing from the main actor: it touches only `stopped` (an `OSAllocatedUnfairLock`),
+the buffer parameter, and a `Sendable` continuation. Swift 5 simply never inserted the
+check, which is why the same code ran.
 
-**If you ever move the package to Swift 6 strict** — the fix will need to
-live inside `SpeechRecognitionService.swift`'s task-group structure (e.g.
-route analyzer calls through an isolated helper, or use
-`Task.detached` boundaries that respect the analyzer's custom executor).
-That is a separate engineering task, not a migration blocker.
+One other change was needed to COMPILE under `.v6`, unrelated to the crash: the
+`@MainActor` closure passed to `group.addTask` for result iteration tripped
+"Pattern that the region-based isolation checker does not understand how to check" —
+a checker limitation. `nonisolated(unsafe)` on the captured transcriber did not help,
+nor did `[self]` in place of `[weak self]`. Moving the body into
+`consumeResults(from:locale:silenceConfiguration:)` did: the child is now nonisolated
+like its siblings and the main-actor hop happens at the call.
 
-_(Previously this section documented an `analyzer.start + finalize`
-sequencing "fix" and an `analyzeSequence` swap — both were wrong; the
-symptom was queue affinity, not call order. Retained only as a note that
-those diagnoses were rejected.)_
+### The diagnosis that was wrong, and why it was believable
+
+The previous version of this section stated, with confidence:
+
+> iOS 26's `SpeechAnalyzer` is an actor with a custom serial executor pinned to
+> `com.apple.RealtimeMR_ForceQueue`; under Swift 6 strict scheduling, some of its
+> internal async callbacks run on the cooperative pool instead, tripping
+> `dispatch_assert_queue()`.
+
+Every observable detail fitted: a `dispatch_assert_queue` failure, on a real-time
+audio queue, about a second into a live session, only under Swift 6, in code that was
+byte-identical to the app's working copy. What was never checked was the one thing that
+settles it — **which frame is at the top of the stack.** `Speech.framework` does not
+appear anywhere in it. Neither does `SpeechAnalyzer`. Even the queue name was wrong:
+the stack says `RealtimeMessenger.mServiceQueue`, not `com.apple.RealtimeMR_ForceQueue`.
+
+That note sent every later reader looking at the analyzer, which is the part nobody can
+fix, instead of at a tap block one `@Sendable` away. The lesson is narrow and practical:
+**a crash diagnosis without a stack is a hypothesis, and it must be labelled as one.**
+
+### Still true, and still worth knowing
+
+Zero warnings under Swift 6 does not mean the concurrency is verified. The package
+carries six `@unchecked Sendable` types and fifteen `nonisolated(unsafe)` bindings, and
+silencing diagnostics is exactly what those do. What Swift 6 mode buys is that anything
+NEW is checked.
+
+`-strict-concurrency=complete` via `.unsafeFlags` should never be left in
+`Package.swift`: SwiftPM refuses `unsafeFlags` in a package consumed as a versioned
+dependency, which would block any host adding VoiceAIKit by URL + version rather than
+as a local path. Under `.v6` it is redundant anyway.
+
+**The same bug is still live in the app's copy** —
+`STT/STT/Audio/AudioCaptureService.swift` has the identical un-annotated tap block. It
+cannot crash while the app builds in Swift 5, and `@Sendable` is harmless there, so it
+can be added at any time. It must be added before the app moves to Swift 6.
+
+_(Earlier still, this section documented an `analyzer.start + finalize` sequencing "fix"
+and an `analyzeSequence` swap — both were wrong; the symptom was never call order.
+Retained as a record that those diagnoses were rejected.)_
 
 ## Earlier package-only compile fixes (still valid under Swift 5)
 
