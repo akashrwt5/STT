@@ -1,5 +1,9 @@
 // MemoryProbe.swift
-// STT
+// VoiceAIKit
+//
+// Lives in `Diagnostics/`. It sat in `NLU/` for historical reasons only — it is
+// a Mach VM walker with nothing NLU about it, and the recognizer is its only
+// caller.
 //
 // Diagnostic-only. Walks the process's VM regions via Mach APIs to classify
 // memory as dirty (anonymous, charged against the jetsam budget) vs. clean /

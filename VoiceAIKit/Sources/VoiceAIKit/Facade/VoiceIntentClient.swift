@@ -1,3 +1,13 @@
+// VoiceIntentClient.swift
+// VoiceAIKit
+//
+// The OTA-side entry point: prepare, activate and report on installed packs.
+// The conversation-side entry point is `VoiceIntentSession`; both live in
+// `Facade/` because both are surface the host holds directly.
+//
+// Moved here from the module root, where it was the only loose file among
+// directories.
+
 import Foundation
 
 public enum VoiceIntentClientError: Error, LocalizedError {

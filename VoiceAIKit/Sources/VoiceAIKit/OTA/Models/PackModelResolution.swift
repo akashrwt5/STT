@@ -4,7 +4,7 @@
 // Resolving a model's on-disk paths from the pack's own manifest.
 //
 // This file used to hold `NLUPackManifest` — a SECOND `Decodable` model of
-// `bundle.json`, alongside `NLUBundle` in `Data/`. The two read different
+// `bundle.json`, alongside `NLUBundle` in `Pack/Schema/`. The two read different
 // subsets of the same file and disagreed about what was in it: `NLUBundle`
 // carried `channel`, `compiler_version`, `required_runtime_features` and
 // `telemetry_schema_version`; `NLUPackManifest` carried none of them. (VIK-034.)

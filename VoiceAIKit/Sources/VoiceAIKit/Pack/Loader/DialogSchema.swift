@@ -5,9 +5,11 @@
 //
 // Was `NLU/NLUCore/NLUSchema.swift`, a typed model of `nlu_schema.json` that
 // loaded itself from `Bundle.module` and `fatalError`ed if the file was missing.
-// It now lives in `Data/` because that is what it became: a projection of a
-// pack, built by `PackEngineFactory.schema(from:)`. Nothing decodes it from JSON
-// any more.
+// It now lives in `Pack/Loader/` because that is what it became: a projection
+// of a pack, built by `PackEngineFactory.schema(from:)`. Deliberately NOT in
+// `Pack/Schema/` — that directory holds the pack's on-disk FORMAT, and this type
+// is the factory's OUTPUT, so it is filed next to the only thing that constructs
+// it. Nothing decodes it from JSON any more.
 //
 // THE `Decodable` CONFORMANCES ARE GONE, and that is the substantive change
 // rather than a tidy-up. `NLUSchema` and `IntentDef` declared `init(from:)`

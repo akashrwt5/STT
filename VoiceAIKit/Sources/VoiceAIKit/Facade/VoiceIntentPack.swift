@@ -13,7 +13,7 @@
 // argument is right there — and the OTA activation gate silently checks something
 // other than what will actually run.
 //
-// Offering them here is what lets `Data/` stop being public.
+// Offering them here is what lets `Pack/` stop being public.
 
 import Foundation
 
