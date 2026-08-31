@@ -224,7 +224,7 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
         let engine = makeEngine(confidence: 0.99, label: intent)
         let response = await engine.handle(utterance)
 
-        guard case .confirm(let confirmed, _, _) = response else {
+        guard case .confirm(let confirmed, _, _, _) = response else {
             return XCTFail("""
                 \(intent) is policy `always` and was reached through a keyword rule, but \
                 the engine returned \(response) — it acted without asking (VIK-036).
@@ -298,7 +298,7 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
         let engine = makeEngine(confidence: 0.80, gate: Self.testBand)
         let response = await engine.handle(classifierRouted)
 
-        guard case .confirm(let intent, _, let question) = response else {
+        guard case .confirm(let intent, _, let question, _) = response else {
             return XCTFail("expected a confirmation, got \(response)")
         }
         XCTAssertEqual(intent, reminder)
@@ -397,6 +397,54 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
             guard case .prompt = response else {
                 return XCTFail("'\(word)' did not accept — got \(response)")
             }
+        }
+    }
+    func testIntentSurvivesThroughInitialClassificationFollowUpConfirmationAndFulfilled() async throws {
+        let engine = makeEngine(confidence: 0.80, gate: Self.testBand)
+        
+        // 1. Initial classification -> Returns confirm
+        let confirmResponse = await engine.handle(classifierRouted)
+        guard case .confirm(let intent1, _, _, let filled1) = confirmResponse else {
+            return XCTFail("Expected confirm, got \(confirmResponse)")
+        }
+        XCTAssertEqual(intent1, reminder)
+        XCTAssertEqual(filled1["name"], "go to the airport")
+        
+        // 2. Affirmative -> Returns prompt (followUp) for slots
+        let promptResponse = await engine.handle("yes")
+        guard case .prompt(let intent2, _, let filled2) = promptResponse else {
+            return XCTFail("Expected prompt, got \(promptResponse)")
+        }
+        XCTAssertEqual(intent2, reminder)
+        XCTAssertEqual(filled2["name"], "go to the airport")
+        
+        // 3. Fulfill the slots -> Returns fulfill
+        let fulfillResponse = await engine.handle("tomorrow at 5pm")
+        guard case .fulfill(let intent3, _, let params, _, _, _, _) = fulfillResponse else {
+            return XCTFail("Expected fulfill, got \(fulfillResponse)")
+        }
+        XCTAssertEqual(intent3, reminder)
+        XCTAssertEqual(params["name"], "go to the airport")
+        XCTAssertNotNil(params["date_time"])
+    }
+
+    func testResetSessionDoesNotInheritPreviousIntentOrSlots() async throws {
+        let engine = makeEngine(confidence: 0.80, gate: Self.testBand)
+        
+        // Start a session for reminder
+        let confirmTurn = await engine.handle(classifierRouted)
+        guard case .confirm = confirmTurn else {
+            return XCTFail("Expected confirm, got \(confirmTurn)")
+        }
+        
+        // Reset the engine
+        await engine.reset()
+        
+        // Send "yes". If it didn't reset, this would be interpreted as an affirmative answer to the confirmation, returning .prompt.
+        // Since it reset, "yes" is treated as a brand new utterance. The stub classifier returns `reminder`, which needs confirmation, so we expect .confirm.
+        let turnAfterReset = await engine.handle("yes")
+        guard case .confirm = turnAfterReset else {
+            return XCTFail("Expected confirm after reset since 'yes' is treated as a new utterance, got \(turnAfterReset)")
         }
     }
 }

@@ -248,10 +248,10 @@ private struct PackageVoiceSessionView: View {
 
     private func describe(_ t: VoiceIntentTurn) -> String {
         switch t {
-        case .followUp(let q, _):
-            return "❓ \(q)"
-        case .confirmation(let q):
-            return "✅? \(q)"
+        case .followUp(let intent, let q, _):
+            return "❓ [\(intent)] \(q)"
+        case .confirmation(let intent, let q, _):
+            return "✅? [\(intent)] \(q)"
         case .fulfilled(let i, let s, _, let c, let rescue, let stages):
             let slotsStr = s.isEmpty ? "" : " \(s)"
             return "🎯 \(i)\(slotsStr) (\(pct(c)))\n\(stageLine(stages, rescue: rescue))"

@@ -207,9 +207,9 @@ public struct VoiceIntentStages: Sendable {
 public enum VoiceIntentTurn: Sendable {
     /// The dialog needs another piece of information. Speak/show `question`;
     /// `collected` holds the slots gathered so far.
-    case followUp(question: String, collected: [String: String])
+    case followUp(intent: String, question: String, collected: [String: String])
     /// A yes/no confirmation is required before acting.
-    case confirmation(question: String)
+    case confirmation(intent: String, question: String, collected: [String: String])
     /// Fully resolved. `intent` is the label, `slots` the extracted parameters,
     /// `message` the fulfillment text, `confidence` the model score,
     /// `viaSemanticRescue` true when Stage 3 (MiniLM) produced it, and

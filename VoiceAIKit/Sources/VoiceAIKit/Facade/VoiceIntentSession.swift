@@ -156,6 +156,24 @@ public final class VoiceIntentSession {
         try await beginListening()
     }
 
+    /// Safely starts a new recognition turn from an idle state.
+    ///
+    /// Use this to resume the conversation loop after completing external TTS delivery
+    /// (e.g. after a `.notUnderstood` fallback where the host generated and spoke an answer).
+    ///
+    /// This is a lightweight transition that bypasses engine setup and safely rejects
+    /// calls if the session is already active.
+    ///
+    /// - Throws: a transcription error if the audio session cannot start.
+    public func startNextListeningTurn() async throws {
+        guard state == .idle else {
+            logger.warning("startNextListeningTurn() ignored: state is \(self.state), expected .idle")
+            return
+        }
+        logger.info("[Session] startNextListeningTurn(): Resuming listening from idle state.")
+        try await beginListening()
+    }
+
     /// The one-time half of `start()`: locale, delegates, engine, prewarm.
     private func prepare() async throws {
         // Build the engine FIRST, before any audio setup.
@@ -318,14 +336,14 @@ public final class VoiceIntentSession {
 
     private func apply(_ response: NLUResponse, utterance: String) {
         switch response {
-        case .prompt(_, let question, let filled):
+        case .prompt(let intent, let question, let filled):
             awaitingAnswer = true
-            continuation.yield(.turn(.followUp(question: question, collected: filled)))
+            continuation.yield(.turn(.followUp(intent: intent, question: question, collected: filled)))
             ask(question)
 
-        case .confirm(_, _, let question):
+        case .confirm(let intent, _, let question, let filled):
             awaitingAnswer = true
-            continuation.yield(.turn(.confirmation(question: question)))
+            continuation.yield(.turn(.confirmation(intent: intent, question: question, collected: filled)))
             ask(question)
 
         case .fulfill(let intent, _, let params, let message, let confidence, let rescue, let bd):
@@ -341,8 +359,9 @@ public final class VoiceIntentSession {
             continuation.yield(.turn(.notUnderstood(
                 intent: intent, confidence: confidence,
                 stages: Self.stages(from: bd))))
-            // External TTS: the host may want to speak "didn't understand" — wait for it.
-            if config.speaksPrompts { finishTurnIfNeeded() } else { awaitHostDelivery() }
+            // Fallbacks are fully delegated to the host (GenAI/Wolfram). We do not wait for
+            // TTS delivery here. Transition to idle; the host will explicitly resume when ready.
+            handleTurnAdvance()
 
         case .interrupted(let cancelled, let inner):
             continuation.yield(.turn(.interrupted(cancelledIntent: cancelled)))
@@ -353,8 +372,8 @@ public final class VoiceIntentSession {
     /// Maps an NLU response to a single public turn (text-path convenience).
     private static func turn(from response: NLUResponse) -> VoiceIntentTurn {
         switch response {
-        case .prompt(_, let q, let filled):           return .followUp(question: q, collected: filled)
-        case .confirm(_, _, let q):                    return .confirmation(question: q)
+        case .prompt(let intent, let q, let filled):           return .followUp(intent: intent, question: q, collected: filled)
+        case .confirm(let intent, _, let q, let filled):       return .confirmation(intent: intent, question: q, collected: filled)
         case .fulfill(let i, _, let p, let m, let c, let r, let bd):
             return .fulfilled(intent: i, slots: p, message: m, confidence: c,
                               viaSemanticRescue: r, stages: stages(from: bd))

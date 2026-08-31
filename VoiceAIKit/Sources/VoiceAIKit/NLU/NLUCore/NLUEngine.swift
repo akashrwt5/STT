@@ -191,7 +191,7 @@ actor NLUEngine: ConversationEngine {
             // Re-arm the context and ask again. Any slots staged when the
             // confirmation was armed survive, because nothing is reset here.
             session.setContext(fu.context, lifespan: fu.lifespan)
-            return .confirm(intent: intent, action: nil, question: fu.prompt)
+            return .confirm(intent: intent, action: nil, question: fu.prompt, filled: session.pendingSlots)
 
         case .some(true):
             session.clearContext(fu.context)
@@ -370,7 +370,7 @@ actor NLUEngine: ConversationEngine {
                 session.awaitingSlot = nil
                 session.pendingBreakdown = nil
                 session.setContext(fu.context, lifespan: fu.lifespan)
-                return .confirm(intent: kwIntent, action: cfg.action, question: fu.prompt)
+                return .confirm(intent: kwIntent, action: cfg.action, question: fu.prompt, filled: slots)
             }
 
             session.pendingIntent = kwIntent
@@ -426,7 +426,7 @@ actor NLUEngine: ConversationEngine {
             session.awaitingSlot = nil
             session.pendingBreakdown = breakdown
             session.setContext(fu.context, lifespan: fu.lifespan)
-            return .confirm(intent: intent, action: cfg.action, question: fu.prompt)
+            return .confirm(intent: intent, action: cfg.action, question: fu.prompt, filled: staged)
         }
 
         // Intent that needs slots — extract what we can from this first utterance.

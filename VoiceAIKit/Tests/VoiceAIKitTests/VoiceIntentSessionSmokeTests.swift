@@ -84,6 +84,22 @@ final class VoiceIntentSessionSmokeTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testStartNextListeningTurnFromIdleThrowsWithoutMic() async throws {
+        let session = VoiceIntentSession(configuration: try configuration())
+        XCTAssertEqual(session.state, .idle, "Fresh session must start in .idle")
+        
+        do {
+            // This is allowed from .idle, but will throw deep inside the coordinator
+            // because the test environment lacks microphone permissions/hardware.
+            try await session.startNextListeningTurn()
+            XCTFail("startNextListeningTurn() must throw when audio stack cannot start")
+        } catch {
+            // We expect an error here, but we also proved the method was invoked and 
+            // didn't return early from its state guard.
+        }
+    }
+
     // MARK: - Helpers
 
     /// A turn is "plausible" if it names an intent, asks a follow-up, or hands

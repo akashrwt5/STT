@@ -12,7 +12,7 @@ indirect enum NLUResponse: Sendable {
     case prompt(intent: String, question: String, filled: [String: String])
 
     /// A yes/no confirmation is needed (e.g. "Do you want to send this message?").
-    case confirm(intent: String, action: String?, question: String)
+    case confirm(intent: String, action: String?, question: String, filled: [String: String])
 
     /// All slots collected (or none needed) — ready to execute `action`.
     /// `semanticRescue` is true when Stage 3 (MiniLM) classified this intent.
@@ -37,7 +37,7 @@ indirect enum NLUResponse: Sendable {
     var pendingQuestion: String? {
         switch self {
         case .prompt(_, let q, _):   return q
-        case .confirm(_, _, let q):  return q
+        case .confirm(_, _, let q, _):  return q
         case .interrupted(_, let r): return r.pendingQuestion
         case .fulfill, .fallback:    return nil
         }
