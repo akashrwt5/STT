@@ -1,96 +1,57 @@
 // swift-tools-version: 6.0
-// VoiceAIKit — on-device speech-to-text + intent classification, in one package.
+// VoiceAIKit — on-device speech-to-text and intent classification.
 //
-// Single-language by design: whichever language's models/overlays are bundled (and
-// selected via `VoiceIntentConfiguration.language`) is the language the package
-// speaks. The code itself is language-neutral.
-//
-// This is a SELF-CONTAINED copy of the app's STT + NLU implementation, adapted for
-// reuse (Bundle.module resources, one public facade). The app's own sources are left
-// untouched; see MIGRATION.md for the Phase-2 plan to make this the single source.
+// The package is language-neutral: all language-specific data comes from a pack the
+// host supplies at runtime.
 
 import PackageDescription
 
 let package = Package(
     name: "VoiceAIKit",
-    // iOS 26+ is required by SpeechAnalyzer / SpeechTranscriber. Version given as a
-    // string so it builds regardless of the PackageDescription enum's known cases.
-    platforms: [ .iOS("26.0") ],
+    // Keep the deployment target as a string so this remains compatible across
+    // PackageDescription versions that may not expose a dedicated iOS 26 case.
+    platforms: [.iOS("26.0")],
     products: [
-        .library(name: "VoiceAIKit", targets: ["VoiceAIKit"]),
-        // The English seed pack, as its OWN library.
-        //
-        // Separate so that (a) `VoiceAIKit` keeps shipping zero data and
-        // cannot read a pack from its own bundle, and (b) an app that downloads
-        // every language links only `VoiceAIKit` and carries nothing instead of
-        // the whole English pack. With one library every app pays for English, including the
-        // ones that will never speak it.
-        .library(name: "VoiceAISeedPackEN", targets: ["VoiceAISeedPackEN"]),
+        .library(
+            name: "VoiceAIKit",
+            targets: ["VoiceAIKit"]
+        ),
+        // Separate product so apps that only depend on VoiceAIKit do not link or bundle
+        // a seed pack they will never use.
+        .library(
+            name: "VoiceAISeedPackEN",
+            targets: ["VoiceAISeedPackEN"]
+        ),
     ],
     targets: [
-        // The library ships ZERO data.
-        //
-        // No `resources:` block, and that absence is the acceptance test for the
-        // whole work package — `Bundle.module` is not even synthesised for this
-        // target, so there is no bundled schema, lexicon, entity table or model
-        // for a failure to quietly fall back on. Everything comes from a verified
-        // pack the host supplies at runtime (`PackProvider`).
-        //
-        // A `PrivacyInfo.xcprivacy` briefly lived here, for the `UserDefaults`
-        // required-reason API (CA92.1) the locale override used. That override is
-        // gone, the target now touches no required-reason API, collects nothing,
-        // and is not on Apple's list of commonly used third-party SDKs — the three
-        // things that would make a manifest mandatory. So the manifest went too,
-        // and with it the one resource that forced `Bundle.module` into existence.
-        // `PackageResourceInvariantTests` keeps the guarantee honest either way.
-        //
-        // What used to be here: 4 `.mlpackage` models, 5 JSON/vocab files and
-        // `Resources/LanguagePacks/` — about 29 MB, and the reason a language
-        // released after the app shipped could never be used.
+        // The engine intentionally declares no resources. Declaring one would synthesise
+        // Bundle.module and give language-specific data somewhere to live inside the core
+        // library. PackageResourceInvariantTests fails the build if any non-source file
+        // appears under Sources/VoiceAIKit.
         .target(
             name: "VoiceAIKit",
             path: "Sources/VoiceAIKit"
         ),
-        // The English seed pack. No dependency on `VoiceAIKit` — it vends a
-        // URL and nothing more, so the arrow points app → kit and app → seed,
-        // and the kit never learns that a seed exists.
+        // This target exists only to carry the seed pack, which is what keeps the engine
+        // free of language-specific data. It does not depend on VoiceAIKit; it only vends
+        // the pack URL.
         //
-        // `.copy`, never `.process`: copy preserves the directory tree verbatim.
-        // The pack's structure IS its data — `capabilities/<id>/responses/<lang>.json`
-        // encodes both in the path, `integrity/manifest.sha256` lists every file
-        // by path, and `models/intent/en/` holds two different files both named
-        // `IntentClassifier.mlpackage`. Flattening breaks all three, and a
-        // flattened pack fails its own signature check.
+        // Use .copy, never .process. The pack's directory structure is part of its
+        // integrity contract: integrity/manifest.sha256 records every file by path, so
+        // processing or flattening the tree would invalidate the pack's signature.
         .target(
             name: "VoiceAISeedPackEN",
             path: "Sources/VoiceAISeedPackEN",
             resources: [.copy("packs")]
         ),
-
-        // Test target — runtime smoke tests + Phase-2 parity tests ported from
-        // STTTests. The golden fixture is copied here (test-only, doesn't belong
-        // in the library). The tests reach the classifier through the library's
-        // public/@testable API, so library resources still resolve via
-        // Bundle.module inside the library itself.
+        // SwiftPM warns about any non-source file it finds in a target. The tests read
+        // these fixtures straight from disk, so exclude them rather than bundling them.
         .testTarget(
             name: "VoiceAIKitTests",
             dependencies: ["VoiceAIKit"],
             path: "Tests/VoiceAIKitTests",
-            resources: [
-                // Expected values captured from the Python engine at a FIXED
-                // clock. The pack itself is located by walking up from #filePath
-                // rather than being declared here — it is deliberately not an
-                // SPM resource, since the point of the refactor is that the
-                // package ships no data.
-                .copy("Fixtures/reference_expectations.json"),
-                // Topic derivation captured from `entities.py::strip_datetime`
-                // and `engine.py::_derive_topic`. Same rule: regenerate, never
-                // hand-edit.
-                .copy("Fixtures/topic_expectations.json"),
-            ]
+            exclude: ["Fixtures"]
         ),
     ],
-    // Moved to Swift 6 after the installTap @Sendable fix in AudioCaptureService. The
-    // earlier .v5 pin was based on an incorrect diagnosis; see MIGRATION.md.
     swiftLanguageModes: [.v6]
 )
