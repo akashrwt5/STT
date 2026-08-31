@@ -1,6 +1,6 @@
 # NLU OTA Update Manager Implementation Plan
 
-This plan outlines the architecture for the dynamic NLU model over-the-air (OTA) updates, specifically delineating the responsibilities between the `VoiceIntentKit` (the core SDK/Package) and the Client Application (the Host App).
+This plan outlines the architecture for the dynamic NLU model over-the-air (OTA) updates, specifically delineating the responsibilities between the `VoiceAIKit` (the core SDK/Package) and the Client Application (the Host App).
 
 ## User Review Required
 
@@ -22,12 +22,12 @@ The Client App handles all networking, OS-level background scheduling, and user 
 - **Network Requests**: Call the `/api/v1/nlu/latest` endpoint using the app's existing network stack.
 - **Downloading**: Execute the actual download of the `.nlu` zip file.
 - **Background Execution**: Integrate with iOS `BGTaskScheduler` to silently wake the app and perform the check/download process.
-- **Handoff**: Once the zip file is downloaded to a temporary URL, pass it to `VoiceIntentKit` for validation and preparation.
+- **Handoff**: Once the zip file is downloaded to a temporary URL, pass it to `VoiceAIKit` for validation and preparation.
 
-### 2. `VoiceIntentKit` (The SDK / Swift Package)
+### 2. `VoiceAIKit` (The SDK / Swift Package)
 The SDK is a "Thin SDK" focused entirely on NLU logic. It does **not** make network calls. It manages the file payload, validates compatibility, runs smoke tests, and manages the active model state safely.
 
-**Core Components to add to VoiceIntentKit:**
+**Core Components to add to VoiceAIKit:**
 
 - **`NLUPackManifest`**: A strongly typed model representing the pack metadata (version, language, minimum SDK/App versions, checksum).
 - **`PackState` Enum**: Represents the explicit lifecycle: `.downloaded`, `.validating`, `.readyToActivate`, `.active`, `.failed`.
@@ -62,12 +62,12 @@ While `preparePack()` can happen at any time in the background, **activation mus
 
 **Defining "Engine Idle":** The Host Application must verify the engine is idle before calling `activatePreparedPack()`. This means:
 1. No active audio recording session is capturing microphone input.
-2. The `VoiceIntentKit` inference queue is empty (no pending tasks).
-3. We recommend adding an `isIdle` boolean property to the `VoiceIntentKit` engine that the client can check.
+2. The `VoiceAIKit` inference queue is empty (no pending tasks).
+3. We recommend adding an `isIdle` boolean property to the `VoiceAIKit` engine that the client can check.
 
 ## Package Format & Metadata
 
-The `.nlu` file is a ZIP archive that matches the structure of the existing `VoiceIntentSeedPackEN`.
+The `.nlu` file is a ZIP archive that matches the structure of the existing `VoiceAISeedPackEN`.
 
 **Expected `.nlu` Package Format:**
 ```text
@@ -117,7 +117,7 @@ The file system will act as the source of truth, structured to support multiple 
 
 ```text
 BaseStorageURL/ (e.g. App Support)
-└── VoiceIntentKit/
+└── VoiceAIKit/
     └── Packs/
         ├── en/
         │   ├── 1.0.32/
@@ -133,19 +133,19 @@ BaseStorageURL/ (e.g. App Support)
 
 ## Proposed Changes
 
-### VoiceIntentKit (SDK)
+### VoiceAIKit (SDK)
 
-#### [NEW] `Sources/VoiceIntentKit/OTA/Models/NLUPackManifest.swift`
+#### [NEW] `Sources/VoiceAIKit/OTA/Models/NLUPackManifest.swift`
 Strongly typed Codable models for the manifest and state enums.
 
-#### [NEW] `Sources/VoiceIntentKit/OTA/NLUPackInstaller.swift`
+#### [NEW] `Sources/VoiceAIKit/OTA/NLUPackInstaller.swift`
 Exposes the `preparePack` and `activatePreparedPack` APIs. Runs the inference smoke test before allowing activation.
 
-#### [NEW] `Sources/VoiceIntentKit/OTA/PackValidator.swift`
+#### [NEW] `Sources/VoiceAIKit/OTA/PackValidator.swift`
 Logic to unzip, check compatibility (SDK/App versions), and verify SHA256 integrity.
 
-#### [NEW] `Sources/VoiceIntentKit/Storage/PackStorageController.swift`
-Manages the `VoiceIntentKit/Packs/{lang}/{version}` directory structure. Handles atomic renames from `staging` to a versioned folder and enforces the cleanup policy (e.g., keep only active and previous versions, delete the rest).
+#### [NEW] `Sources/VoiceAIKit/Storage/PackStorageController.swift`
+Manages the `VoiceAIKit/Packs/{lang}/{version}` directory structure. Handles atomic renames from `staging` to a versioned folder and enforces the cleanup policy (e.g., keep only active and previous versions, delete the rest).
 
 ### Client Application Integration
 

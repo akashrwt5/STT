@@ -1,4 +1,4 @@
-# Prompt: NLU pack contract requests from the iOS client (VoiceIntentKit)
+# Prompt: NLU pack contract requests from the iOS client (VoiceAIKit)
 
 > Copy everything below the line into the Python `nlu-compiler` repo session.
 
@@ -6,7 +6,7 @@
 
 ## Context
 
-You are working on the Python `nlu-compiler` that produces `pack-<lang>-v<version>` NLU bundles. I am the iOS client team. We are refactoring **VoiceIntentKit** (a Swift Package) to be fully data-driven: it will ship **zero static resources** and derive 100% of its behaviour from a pack loaded at runtime, including OTA hot-swap.
+You are working on the Python `nlu-compiler` that produces `pack-<lang>-v<version>` NLU bundles. I am the iOS client team. We are refactoring **VoiceAIKit** (a Swift Package) to be fully data-driven: it will ship **zero static resources** and derive 100% of its behaviour from a pack loaded at runtime, including OTA hot-swap.
 
 Reference pack I audited: `pack-en-v1.0.26` — `format_version 3.0`, `compiler_version "nlu-compiler 1.0.0-content"`, `min_runtime_contract 1`, `git_commit 2b3519d1`.
 
@@ -53,7 +53,7 @@ The file does not exist in the pack. Only `SemanticHead.mlpackage` ships, and on
 
 ### A2. No MiniLM embedder artifact or vocab anywhere in the pack
 
-`bundle.json` declares `"embedder_id": "minilm-l6-v2"`, but the pack contains **no embedder model and no vocab file** (I searched for any file matching `*vocab*` — zero hits). Today VoiceIntentKit ships `MiniLMEmbedder.mlpackage` + `minilm-vocab.txt` statically; under zero-static-resources those are being deleted.
+`bundle.json` declares `"embedder_id": "minilm-l6-v2"`, but the pack contains **no embedder model and no vocab file** (I searched for any file matching `*vocab*` — zero hits). Today VoiceAIKit ships `MiniLMEmbedder.mlpackage` + `minilm-vocab.txt` statically; under zero-static-resources those are being deleted.
 
 This is currently masked because `runtime/cascade.json` sets `semantic.enabled = false`, so Stage 3 never loads. But it means **semantic rescue can never be re-enabled** by flipping that flag — the artifacts won't exist.
 

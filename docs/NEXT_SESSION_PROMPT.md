@@ -1,4 +1,4 @@
-# Handoff prompt — VoiceIntentKit WP4
+# Handoff prompt — VoiceAIKit WP4
 
 > Paste everything below the line into a new session.
 
@@ -16,13 +16,13 @@ work and will send you down dead ends. Read exactly:
 
 | File | What it is |
 |---|---|
-| `STT/docs/VoiceIntentKit_Architecture.md` (or `IntentClassifier/docs/Prod-Work-Documentation/`) | The ADD — the target architecture. Referred to as "the ADD". |
+| `STT/docs/VoiceAIKit_Architecture.md` (or `IntentClassifier/docs/Prod-Work-Documentation/`) | The ADD — the target architecture. Referred to as "the ADD". |
 | `STT/docs/VIK_DATA_DRIVEN_REFACTOR_PLAN.md` | The plan. WP0–WP9. Some parts are now stale — see "Plan corrections" below. |
-| `STT/VoiceIntentKit/BUG_TRACKER.md` | iOS-side defects. 8 fixed, 8 open. |
+| `STT/VoiceAIKit/BUG_TRACKER.md` | iOS-side defects. 8 fixed, 8 open. |
 | `IntentClassifier/docs/BUG_TRACKER.md` | Compiler-side defects. 11 fixed, 13 open. |
 | `STT/docs/PROMPT_FOR_NLU_COMPILER_TEAM.md` | Outstanding contract asks. |
-| `STT/VoiceIntentKit/Sources/VoiceIntentKit/Data/*.swift` | The 12 files written so far. |
-| `STT/VoiceIntentKit/Tests/VoiceIntentKitTests/Pack*.swift` | The parity suite. |
+| `STT/VoiceAIKit/Sources/VoiceAIKit/Data/*.swift` | The 12 files written so far. |
+| `STT/VoiceAIKit/Tests/VoiceAIKitTests/Pack*.swift` | The parity suite. |
 
 For anything about the Python reference, read the SOURCE
 (`IntentClassifier/packages/runtime/nlu_engine/entities.py`), not docs about it.
@@ -30,16 +30,16 @@ For anything about the Python reference, read the SOURCE
 ## Where things stand
 
 Two repos:
-- `~/development/Starkey_Research/STT` — the iOS app + `VoiceIntentKit` SPM package
+- `~/development/Starkey_Research/STT` — the iOS app + `VoiceAIKit` SPM package
 - `~/PycharmProjects/IntentClassifier` — the Python NLU compiler that emits packs
 
-`VoiceIntentKit` is being converted from a package with ~29 MB of bundled
+`VoiceAIKit` is being converted from a package with ~29 MB of bundled
 resources into one that ships **zero data** and derives everything from a
 downloaded `pack-<lang>-v<version>`. The vendored fixture is
-`VoiceIntentKit/Sources/pack-en-v1.0.29`.
+`VoiceAIKit/Sources/pack-en-v1.0.29`.
 
 **Done (WP1, WP3, WP5, tests):** 12 files under
-`Sources/VoiceIntentKit/Data/` — pack loading with full ed25519 + sha256 trust
+`Sources/VoiceAIKit/Data/` — pack loading with full ed25519 + sha256 trust
 chain, the v3 section decoders, a pack-driven TF-IDF classifier, entity
 extraction, and a datetime parser. Plus a 38-test parity suite that passes.
 
@@ -84,7 +84,7 @@ Then WP6 (label boundary + `Cmd.*` alias), WP7 (telemetry), WP8 (OTA hot-swap).
   load, +1.69 MB footprint, and ANE/CPU return different logits, making the
   shipped model non-reproducible under a 0.70 gate.
 - **The pack decides stage enablement**, not host configuration.
-- **VoiceIntentKit never interprets an intent label.** Even out-of-scope is
+- **VoiceAIKit never interprets an intent label.** Even out-of-scope is
   discovered from the pack.
 - **One `ResolvedPack` per language.** Packs are one-per-language; switching
   language means loading a different pack, which is the same path as OTA.
@@ -118,7 +118,7 @@ Then WP6 (label boundary + `Cmd.*` alias), WP7 (telemetry), WP8 (OTA hot-swap).
   Six bugs were found that way this session; two of them only surfaced by
   running, after passing a careful read.
 - **Regenerate fixtures, never hand-edit.**
-  `Tests/VoiceIntentKitTests/Fixtures/reference_expectations.json` is captured
+  `Tests/VoiceAIKitTests/Fixtures/reference_expectations.json` is captured
   from the reference at a fixed clock (`2026-08-03T10:00:00Z`, a Monday) with
   full second precision — `ISO8601DateFormatter` cannot parse minute-precision
   ISO, which cost a debugging round.
@@ -128,8 +128,8 @@ Then WP6 (label boundary + `Cmd.*` alias), WP7 (telemetry), WP8 (OTA hot-swap).
 Run the suite in Xcode (⌘U) or:
 
 ```bash
-cd ~/development/Starkey_Research/STT/VoiceIntentKit
-xcodebuild test -scheme VoiceIntentKit \
+cd ~/development/Starkey_Research/STT/VoiceAIKit
+xcodebuild test -scheme VoiceAIKit \
   -destination 'platform=iOS Simulator,name=iPhone 16 Pro'
 ```
 

@@ -44,9 +44,15 @@ protocol ProviderConformanceCase {
 // Run for: DialogflowAdapterConformance, OnDeviceAdapterConformance
 ```
 
+> **Read CF-01 with CF-14.** A turn where the user changes topic mid-slot-fill emits TWO
+> `.dialogue` events — `.abandoned`, then the new utterance's outcome — and that is correct
+> (SPEC §3.2.6). CF-01 counts *turn-ending* events, not `.dialogue` events. If CF-01 is written
+> to count `.dialogue` and then fails on interruption, the fix is CF-01, never suppressing
+> `.abandoned`: the host has UI bound to the dialogue that died and needs to be told.
+
 | # | Assertion | SPEC ref |
 |---|---|---|
-| CF-01 | Exactly one terminal event per turn, across resolved / unresolved / timeout / failure | §3.2.6 |
+| CF-01 | Exactly one **turn-ending** event per turn, across resolved / unresolved / timeout / failure | §3.2.6 |
 | CF-02 | `.finalTranscript` precedes `.dialogue` in every non-error turn | §3.2.3 |
 | CF-03 | Events arrive in emission order on one serial scheduler | §3.2.7 |
 | CF-04 | `send(audioChunk:)` outside `Capturing` is discarded without throwing | §3.2.2 |
@@ -57,10 +63,19 @@ protocol ProviderConformanceCase {
 | CF-09 | Parameter mapping is total; `.unmodelled` is logged, never silent | §2.4 |
 | CF-10 | `providerIdentity` fully populated (incl. model version/checksum on-device) | §8 |
 | CF-11 | No low-confidence `.resolved` leaks; thresholding is internal | §5 |
-| CF-12 | **On-device only:** `fallbackURL` never appears in any emitted event | §6.2 |
+| CF-12 | **On-device only:** the adapter links no URL-opening or networking API | §6.2 |
 | CF-13 | No provider-native type in the public API surface (compile-time + lint) | §2 |
+| CF-14 | Topic interruption emits `.abandoned` **then** exactly one turn-ending event for the same utterance. `.abandoned` is never the last event of a turn, and is never suppressed while `supportsTopicInterruption == true` | §3.2.6 |
 
-**CF-12 deserves special attention.** It is the mapping most likely to be written "obviously correctly" and be wrong — passing the kit's GenAI URL straight through would look plausible in review and would silently bypass the CMS and Wolfram legs of the fallback chain. Assert on the *absence* of the URL, not just the presence of `.unresolved`.
+**CF-12 has changed shape.** It used to assert that the kit's GenAI URL never escaped the adapter
+— the mapping most likely to be written "obviously correctly" and be wrong, since passing that URL
+through would look plausible in review and would silently bypass the CMS and Wolfram legs of the
+fallback chain. VIK-031 removed the URL from the kit entirely (it was built from unsigned pack data
+and carried the user's verbatim transcript in its query string), so there is no longer a value to
+assert the absence of. What remains is the boundary itself: assert that the adapter links no
+URL-opening or networking API at all.
+
+**CF-14 is the one most likely to be "fixed" the wrong way.** See the note above CF-01.
 
 ## 4. Behavioural Equivalence Suite
 
@@ -131,7 +146,7 @@ IT-13 is not a formality. It is the evidence behind the privacy claim in the ADR
 | Full existing suite (`bundle exec fastlane test`) | merge | all |
 | Conformance suite, both adapters | merge | from 1 |
 | Behavioural Equivalence Suite — §4.1 divergence == 0 | merge | from 4 |
-| Lint: no protobuf / VoiceIntentKit symbol outside `Adapters/` | merge | from 3 |
+| Lint: no protobuf / VoiceAIKit symbol outside `Adapters/` | merge | from 3 |
 | Core ML ↔ Python parity (`ios-coreml-parity.yml`) | merge on model repo | from 4 |
 | Holdout accuracy ≥ 89.4% for the shipped bundle | model release | from 4 |
 | Analytics event-schema snapshot unchanged | merge | from 2 |

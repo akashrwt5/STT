@@ -18,5 +18,11 @@ Package.resolved
 
 # Packs unpacked at runtime (the app writes these to Application Support;
 # nothing here should ever be committed). The SEED pack under
-# Sources/VoiceIntentSeedPackEN/ IS committed — it ships in the app.
+# Sources/VoiceAISeedPackEN/ IS committed — it ships in the app.
 /UnpackedPacks/
+
+# Xcode regenerates the aggregate <Package>-Package scheme on demand. VoiceAIKit's
+# own scheme already runs the tests, through .swiftpm/VoiceAIKit.xctestplan, so the
+# aggregate is a second name for the same thing — and the one that drifted after the
+# rename while nobody was looking at it.
+VoiceAIKit/.swiftpm/xcode/xcshareddata/xcschemes/*-Package.xcscheme

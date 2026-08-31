@@ -1,14 +1,14 @@
-# VoiceIntentKit — Data-Driven Refactor Plan
+# VoiceAIKit — Data-Driven Refactor Plan
 
-**Target:** VoiceIntentKit consumes `pack-<lang>-v<version>` bundles produced by the Python NLU compiler, with zero static resources and zero language-specific Swift.
-**Reference:** `VoiceIntentKit_Architecture.md` (the ADD)
-**Baseline audited:** `feature/claude/multilingual-nlu-status-check-s7ggcw-Base/VAIKit-refactoring` @ 7,096 LOC Swift, against `VoiceIntentKit/Sources/pack-en-v1.0.26` (format_version 3.0, runtime contract 1)
+**Target:** VoiceAIKit consumes `pack-<lang>-v<version>` bundles produced by the Python NLU compiler, with zero static resources and zero language-specific Swift.
+**Reference:** `VoiceAIKit_Architecture.md` (the ADD)
+**Baseline audited:** `feature/claude/multilingual-nlu-status-check-s7ggcw-Base/VAIKit-refactoring` @ 7,096 LOC Swift, against `VoiceAIKit/Sources/pack-en-v1.0.26` (format_version 3.0, runtime contract 1)
 
 ---
 
 ## 1. Where we actually stand
 
-**VoiceIntentKit is not data-driven today. It is manifest-driven within a statically-linked resource set.** Those are different things, and the gap is the whole project.
+**VoiceAIKit is not data-driven today. It is manifest-driven within a statically-linked resource set.** Those are different things, and the gap is the whole project.
 
 The existing `LanguagePack` / `LanguagePackRegistry` / `LocalizationLoader` layer is real, well-built abstraction — it means adding a language requires no Swift edits. But every path it resolves terminates in `Bundle.module`, at build time, from resources committed into the SPM. The package cannot read a pack it did not compile against.
 
@@ -93,9 +93,9 @@ Note: `bundle.json` itself is **not** in the manifest. It is bound only through 
 Per ADD §7, with the domains the ADD names and subfolders where it is silent.
 
 ```text
-VoiceIntentKit/
+VoiceAIKit/
 ├── Package.swift                        // NO resources block
-└── Sources/VoiceIntentKit/
+└── Sources/VoiceAIKit/
     ├── Facade/
     │   ├── VoiceIntentSession.swift     // + updateBundle(url:), telemetryStream
     │   ├── VoiceIntentTypes.swift       // VoiceLanguage becomes a plain code+locale
@@ -173,7 +173,7 @@ Freeze runtime contract v1. File the §5 asks with the Python team. Vendor `pack
 *Exit:* `BundleDataLoader.load(url:language:)` returns a populated `ResolvedPack` for the fixture, in tests only.
 
 ### WP2 — CoreML compilation and cache
-`CoreMLCompiler` as an actor. `MLModel.compileModel(at:)` returns a temp URL the system reclaims — move the result into `Caches/VoiceIntentKit/<bundleID>/<artifactSHA>/`. Key the cache on artifact SHA from the manifest, not path, so OTA invalidates correctly. Serialise concurrent compiles of the same artifact. Purge non-active bundle IDs. Compile off the main actor; expect seconds on first launch.
+`CoreMLCompiler` as an actor. `MLModel.compileModel(at:)` returns a temp URL the system reclaims — move the result into `Caches/VoiceAIKit/<bundleID>/<artifactSHA>/`. Key the cache on artifact SHA from the manifest, not path, so OTA invalidates correctly. Serialise concurrent compiles of the same artifact. Purge non-active bundle IDs. Compile off the main actor; expect seconds on first launch.
 *Exit:* cold compile + warm cache-hit benchmarks on device; ANE warm-up dummy inference per ADD §4.
 
 ### WP3 — Classifier and stage cutover

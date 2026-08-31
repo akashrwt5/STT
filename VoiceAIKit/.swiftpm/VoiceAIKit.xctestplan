@@ -1,0 +1,25 @@
+{
+  "configurations" : [
+    {
+      "id" : "78CC889B-212C-4CD1-BF97-D2A7167F440A",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "codeCoverage" : false,
+    "performanceAntipatternCheckerEnabled" : true
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "VoiceAIKitTests",
+        "name" : "VoiceAIKitTests"
+      }
+    }
+  ],
+  "version" : 1
+}

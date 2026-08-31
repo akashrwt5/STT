@@ -17,14 +17,14 @@ struct STTTestView: View {
     /// Non-nil while a PVA sheet is open. Setting this to nil dismisses the sheet
     /// and triggers full deallocation of the coordinator + NLU pipeline it owns.
     @State private var pvaViewModel: PVAViewModel?
-    /// Set when the user picks "Package" — presents the VoiceIntentKit-backed screen.
+    /// Set when the user picks "Package" — presents the VoiceAIKit-backed screen.
     @State private var showPackageSession = false
     /// Persisted NLU pipeline selection. NLUVariant.RawValue == String satisfies
     /// AppStorage's RawRepresentable requirement directly, so the choice survives
     /// app restarts with no extra storage glue.
     @AppStorage("selectedNLUVariant") private var variant: NLUVariant = .english
     /// First-screen selection including the package path. English/Multilingual map
-    /// to the existing NLUVariant flow; Package routes to VoiceIntentKit.
+    /// to the existing NLUVariant flow; Package routes to VoiceAIKit.
     @State private var pipeline: PipelineChoice = .english
     
     /// Displays the actively loaded SDK model version on the UI.
@@ -184,7 +184,7 @@ struct STTTestView: View {
             }
 
             // Pipeline selector — persisted across launches for English/Multilingual;
-            // Package is a per-launch choice that routes into VoiceIntentKit.
+            // Package is a per-launch choice that routes into VoiceAIKit.
             Picker("Pipeline", selection: $pipeline) {
                 ForEach(PipelineChoice.allCases) { Text($0.title).tag($0) }
             }
@@ -209,7 +209,7 @@ struct STTTestView: View {
             Button {
                 PVALaunchClock.tapped()
                 if pipeline == .package {
-                    showPackageSession = true                      // VoiceIntentKit path
+                    showPackageSession = true                      // VoiceAIKit path
                 } else {
                     pvaViewModel = PVAViewModel(variant: variant)  // existing in-app path
                 }

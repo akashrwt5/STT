@@ -1,17 +1,17 @@
 # PVA Voice Understanding — Provider Abstraction
 
-**Programme:** Decouple Personal Voice Assistant from Dialogflow and enable on-device intent classification via VoiceIntentKit
+**Programme:** Decouple Personal Voice Assistant from Dialogflow and enable on-device intent classification via VoiceAIKit
 **Owner:** Feature Architect · **Status:** Draft for review · **Last updated:** 31 July 2026
 
 ---
 
 ## What this is
 
-PVA today sends every utterance to Dialogflow and cannot function offline. This document set defines the architecture that lets PVA run intent understanding through **either** Dialogflow **or** VoiceIntentKit (on-device), selected by remote configuration, with no change to PVA business logic or intent handlers.
+PVA today sends every utterance to Dialogflow and cannot function offline. This document set defines the architecture that lets PVA run intent understanding through **either** Dialogflow **or** VoiceAIKit (on-device), selected by remote configuration, with no change to PVA business logic or intent handlers.
 
 ## Read this first — one paragraph
 
-We introduce a provider-neutral contract, `VoiceUnderstandingProvider`, that PVA depends on instead of `PvaProxyService`. Two adapters implement it: one wrapping today's Dialogflow gRPC stream, one wrapping VoiceIntentKit. **The app keeps microphone ownership** (hearing-aid mic is non-negotiable) and pushes audio into whichever provider is active. **VoiceIntentKit owns multi-turn dialogue on the on-device path**, with three explicit carve-outs — text-to-speech, the non-device fallback chain, and Push-to-Talk — which remain app-owned in both providers. Provider selection resolves once at app launch and is immutable for the process lifetime.
+We introduce a provider-neutral contract, `VoiceUnderstandingProvider`, that PVA depends on instead of `PvaProxyService`. Two adapters implement it: one wrapping today's Dialogflow gRPC stream, one wrapping VoiceAIKit. **The app keeps microphone ownership** (hearing-aid mic is non-negotiable) and pushes audio into whichever provider is active. **VoiceAIKit owns multi-turn dialogue on the on-device path**, with three explicit carve-outs — text-to-speech, the non-device fallback chain, and Push-to-Talk — which remain app-owned in both providers. Provider selection resolves once at app launch and is immutable for the process lifetime.
 
 ## Reading guide
 
@@ -33,7 +33,7 @@ These are settled inputs to the design, recorded here so reviewers don't relitig
 | Decision | Choice | ADR ref |
 |---|---|---|
 | Microphone ownership | **App.** PVA keeps `PVARecorderFactory` / `PVAAidRecorder`; audio is pushed into the provider | D1 |
-| Speech recognition ownership | **Provider.** Dialogflow does cloud ASR; VoiceIntentKit does `SpeechAnalyzer` ASR | D2 |
+| Speech recognition ownership | **Provider.** Dialogflow does cloud ASR; VoiceAIKit does `SpeechAnalyzer` ASR | D2 |
 | Multi-turn dialogue ownership | **Provider, with a carve-out matrix.** Kit owns slot filling / confirmation / interruption on-device | D3 |
 | Text-to-speech | **App, always.** Providers emit prompt *text*; they never speak | D4 |
 | Non-device fallback (CMS → GenAI → Wolfram) | **App, always.** Provider signals `unresolved`; it never terminates the turn itself | D5 |
@@ -58,4 +58,4 @@ Tracked here rather than scattered through the documents. Each blocks a specific
 - Diagrams are Mermaid, rendered inline by GitHub/GitLab and most IDEs.
 - The SPEC uses RFC 2119 keywords (**MUST**, **SHOULD**, **MAY**) with their normative meaning. No other document in this set is normative.
 - Swift shown in the ADR and HLD is illustrative. Only the SPEC's signatures are binding.
-- Class and file names match the Engage codebase (`Engage/Engage/Services/PersonalVoiceAssistant`) and the VoiceIntentKit package as of this date.
+- Class and file names match the Engage codebase (`Engage/Engage/Services/PersonalVoiceAssistant`) and the VoiceAIKit package as of this date.

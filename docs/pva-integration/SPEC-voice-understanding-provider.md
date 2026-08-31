@@ -1,6 +1,6 @@
 # SPEC — Voice Understanding Provider
 
-**Status:** Draft · **Version:** 0.1 · **Date:** 31 July 2026
+**Status:** Draft · **Version:** 0.2 · **Date:** 21 August 2026
 **Normative.** The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are to be interpreted as in RFC 2119.
 **Context:** [ADR-0001](./ADR-0001-voice-understanding-provider-abstraction.md) · [HLD](./HLD-voice-understanding.md)
 
@@ -14,7 +14,7 @@ Two providers are in scope at v0.1: `DialogflowVoiceUnderstandingAdapter` and `O
 
 ## 2. Type surface
 
-All types **MUST** be `Sendable`. All types **MUST** be free of provider-specific vocabulary: no protobuf types, no `VoiceIntentKit` types, no URLs pointing at a specific backend.
+All types **MUST** be `Sendable`. All types **MUST** be free of provider-specific vocabulary: no protobuf types, no `VoiceAIKit` types, no URLs pointing at a specific backend.
 
 ### 2.1 Protocol
 
@@ -84,8 +84,10 @@ public enum DialogueOutcome: Sendable {
     /// fallback chain. Providers MUST NOT attempt any fallback themselves.
     case unresolved(reason: UnresolvedReason, queryText: String, diagnostics: ClassificationDiagnostics?)
 
-    /// The user changed topic mid-dialogue; `cancelledIntent` was abandoned. The
-    /// outcome for the new utterance arrives as the NEXT `.dialogue` event.
+    /// The user changed topic mid-dialogue; `cancelledIntent` was abandoned.
+    ///
+    /// NOT turn-ending (§3.2.6). The outcome for the new utterance arrives as the NEXT
+    /// `.dialogue` event, which is the one that ends the turn.
     case abandoned(cancelledIntent: String)
 }
 
@@ -190,7 +192,8 @@ stateDiagram-v2
   Capturing --> Processing : endAudio() / provider endpoint
   Capturing --> Ready : cancelTurn()
   Processing --> AwaitingAnswer : dialogue(.needsSlot / .needsConfirmation)
-  Processing --> Ready : dialogue(.resolved / .unresolved / .abandoned)
+  Processing --> Ready : dialogue(.resolved / .unresolved)
+  Processing --> Processing : dialogue(.abandoned)
   Processing --> Ready : timeout / failed
   AwaitingAnswer --> Capturing : startTurn()
   AwaitingAnswer --> Ready : resetDialogue()
@@ -205,7 +208,28 @@ stateDiagram-v2
 3. A provider **MAY** end a turn on its own endpointing without `endAudio()`. When it does, it **MUST** emit `.finalTranscript` before the corresponding `.dialogue` event.
 4. `cancelTurn()` **MUST** discard in-flight audio and emit no further events for that turn. It **MUST NOT** clear dialogue state; use `resetDialogue()` for that.
 5. `closeSession()` **MUST** release all resources — network channels, audio graphs, loaded models — and **MUST** be safe to call from any state.
-6. Exactly one terminal event (`.dialogue`, `.timeout`, or `.failed`) **MUST** be emitted per turn.
+6. Exactly one **turn-ending** event **MUST** be emitted per turn. The turn-ending events are
+   `.dialogue(.needsSlot)`, `.dialogue(.needsConfirmation)`, `.dialogue(.resolved)`,
+   `.dialogue(.unresolved)`, `.timeout`, and `.failed`.
+
+   `.dialogue(.abandoned)` is **NOT** turn-ending. It reports that a dialogue in progress was
+   discarded, and it **MUST** be followed by exactly one turn-ending event for the same
+   utterance. A turn that abandons therefore emits two `.dialogue` events, in this order:
+
+   ```
+   .finalTranscript("actually what's the battery level")
+   .dialogue(.abandoned(cancelledIntent: "Cmd.SetReminder"))   ← the flow that died
+   .dialogue(.resolved(...))                                    ← the new utterance's outcome
+   ```
+
+   A provider **MUST NOT** suppress `.abandoned` to satisfy this rule. The host has UI and state
+   bound to the dialogue that was in progress — a half-filled reminder card, a pending question —
+   and silently swapping it for an unrelated outcome leaves that state stranded. This is also why
+   `capabilities.supportsTopicInterruption` exists: a provider that suppresses the event
+   **MUST** report `false`, because a host cannot act on an interruption it is never told about.
+
+   `.abandoned` **MUST NOT** be emitted more than once per turn, and **MUST NOT** be the last
+   event of a turn.
 7. Every event for a given session **MUST** be delivered on one serial scheduler, in emission order.
 
 ## 4. Host obligations
@@ -254,10 +278,17 @@ Therefore:
 | `.prompt(intent, question, filled)` | `.needsSlot(intent:question:collected:)` |
 | `.confirm(intent, _, question)` | `.needsConfirmation(intent:question:)` |
 | `.fulfill(intent, _, params, message, confidence, rescue, breakdown)` | `.resolved(IntentResolution(...))` with `fulfillmentTexts: [message]` |
-| `.fallback(url, confidence, breakdown)` | `.unresolved(reason:queryText:diagnostics:)` — **`url` MUST be discarded** |
+| `.fallback(intent, confidence, breakdown)` | `.unresolved(reason:queryText:diagnostics:)` — `intent` is the pack's own out-of-scope label (`Default Fallback Intent`) and **MUST NOT** be surfaced as a resolved intent |
 | `.interrupted(cancelled, inner)` | `.abandoned(cancelledIntent:)`, then map `inner` as the next event |
 
-- **MUST NOT** import or link any URL-opening or networking API. The kit's `fallbackURL` is a hand-off mechanism for a different host and has no meaning here.
+- **MUST NOT** import or link any URL-opening or networking API.
+
+  *Historical note (VIK-031, fixed 21 Aug 2026):* this rule previously read "the kit's `fallbackURL`
+  is a hand-off mechanism for a different host". That URL no longer exists. `NLUResponse.fallback`
+  carried a URL built from unsigned pack data with the user's verbatim transcript in its query
+  string — the only path in the kit that reached the network at all. It was removed and replaced
+  with the pack's out-of-scope intent name. There is nothing left to discard; the rule stands as a
+  boundary, not as a workaround.
 - **MUST** call `VoiceIntentSession.reset()` when the host calls `resetDialogue()`.
 - **MUST** implement `suspendCapture()` / `resumeCapture()` such that no audio captured during host TTS reaches the recogniser.
 - **MUST** populate `modelBundleVersion` and `modelChecksum` in `ProviderIdentity`.
@@ -313,7 +344,9 @@ This specification is versioned independently of the app. Breaking changes to th
 
 An implementation is conforming when all of the following hold. Each maps to a test in [Test Strategy](./PLAN-test-strategy.md) §3.
 
-- [ ] Exactly one terminal event per turn, in all paths including error and timeout
+- [ ] Exactly one turn-ending event per turn, in all paths including error and timeout
+- [ ] `.abandoned` is followed by exactly one turn-ending event for the same utterance, and is
+      never suppressed while `supportsTopicInterruption == true`
 - [ ] `.finalTranscript` precedes `.dialogue` in every non-error turn
 - [ ] Events delivered in order on a single serial scheduler
 - [ ] `send(audioChunk:)` outside `Capturing` is silently discarded
@@ -324,4 +357,4 @@ An implementation is conforming when all of the following hold. Each maps to a t
 - [ ] Parameter mapping is total; `.unmodelled` occurrences are logged
 - [ ] `providerIdentity` is fully populated
 - [ ] Thresholding happens inside the provider, never by returning low-confidence `.resolved`
-- [ ] (On-device) `fallbackURL` never escapes the adapter
+- [ ] (On-device) no URL-opening or networking API is linked by the adapter

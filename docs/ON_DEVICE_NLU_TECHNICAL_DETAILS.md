@@ -127,7 +127,7 @@ flowchart LR
 
 - One Python training pipeline, one shared intent/slot/keyword schema, drives model training for every target platform.
 - Trained artifacts export to ONNX (portable) and Core ML (iOS-native); the same artifact ships to every platform rather than platform teams training separate models that can drift apart.
-- **iOS**: fully integrated and running (`VoiceIntentKit` Swift package).
+- **iOS**: fully integrated and running (`VoiceAIKit` Swift package).
 - **Android**: no client implementation exists yet. Because the pipeline was deliberately built to export to a portable format rather than an iOS-specific one, this is scoped as a native-integration effort, not a retraining effort — but it should not be represented as already built.
 - **Conformance testing**: `test_ios_conformance.py` validates ONNX-vs-on-device numerical parity within a ±0.01 tolerance; a corresponding iOS test target (`IntentClassifierCoreMLParityTests`) exists and passes against golden fixtures. This is currently gated to a feature branch and a cross-repo credential rather than running on every merge to main — treat "conformance in progress" as accurate until that's promoted into the primary CI pipeline.
 
@@ -148,10 +148,10 @@ Documented here deliberately, so they're tracked rather than discovered later:
 
 | Concern | Location |
 |---|---|
-| On-device ASR + endpointing | `STT/`, `VoiceIntentKit/Sources/VoiceIntentKit/Core/Audio` |
-| Intent cascade (Swift, on-device) | `VoiceIntentKit/Sources/VoiceIntentKit/NLU/` (`KeywordMatcher.swift`, `TFIDFLogisticScorer.swift`, `SemanticClassifier.swift`) |
-| Conversation manager | `VoiceIntentKit/Sources/VoiceIntentKit/NLU/NLUCore/` (`NLUEngine.swift`, `NLUContext.swift`) |
+| On-device ASR + endpointing | `STT/`, `VoiceAIKit/Sources/VoiceAIKit/Core/Audio` |
+| Intent cascade (Swift, on-device) | `VoiceAIKit/Sources/VoiceAIKit/NLU/` (`KeywordMatcher.swift`, `TFIDFLogisticScorer.swift`, `SemanticClassifier.swift`) |
+| Conversation manager | `VoiceAIKit/Sources/VoiceAIKit/NLU/NLUCore/` (`NLUEngine.swift`, `NLUContext.swift`) |
 | Training pipeline (Python) | `IntentClassifier/scripts/` (`train.py`, `train_semantic_head.py`, `predict.py`, `auto_label.py`) |
-| Shared schema | `IntentClassifier/data/nlu_schema.json` and per-language variants under `VoiceIntentKit/Sources/VoiceIntentKit/Resources/Localization/` |
+| Shared schema | `IntentClassifier/data/nlu_schema.json` and per-language variants under `VoiceAIKit/Sources/VoiceAIKit/Resources/Localization/` |
 | Model artifacts + manifest | `IntentClassifier/models/`, `IntentClassifier/models/manifest.json` |
 | Cross-platform conformance tests | `IntentClassifier/scripts/test_ios_conformance.py`, `STTTests/IntentClassifierCoreMLParityTests.swift` |
