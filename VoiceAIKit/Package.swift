@@ -22,8 +22,8 @@ let package = Package(
         //
         // Separate so that (a) `VoiceAIKit` keeps shipping zero data and
         // cannot read a pack from its own bundle, and (b) an app that downloads
-        // every language links only `VoiceAIKit` and carries 0 MB instead of
-        // 8.8 MB. With one library every app pays for English, including the
+        // every language links only `VoiceAIKit` and carries nothing instead of
+        // the whole English pack. With one library every app pays for English, including the
         // ones that will never speak it.
         .library(name: "VoiceAISeedPackEN", targets: ["VoiceAISeedPackEN"]),
     ],

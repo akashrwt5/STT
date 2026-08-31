@@ -273,6 +273,45 @@ up by the very next session.** No app restart, no live hot-swap.
 
 ---
 
+## Breaking changes
+
+### `NLUPackInstaller` is an `actor`
+
+It used to be a `final class` marked `@unchecked Sendable`, guarded by an internal
+`NSLock`. `@unchecked` means the compiler was not checking a promise your app relies
+on — one new mutable property without the lock and nothing would have complained.
+
+**What changes for you:** `installer.stagingState` now requires `await`.
+
+```swift
+// before
+if client.installer.stagingState == .readyToActivate { … }
+
+// after
+if await client.installer.stagingState == .readyToActivate { … }
+```
+
+`preparePack(from:language:)` and `activatePreparedPack(language:)` were already
+`async` and are unchanged, so if those are all you call — which is the whole of the
+flow in Part 2 — you need to change nothing.
+
+### Lifecycle: call `stop()`, but dropping the session is now safe
+
+`VoiceIntentSession.stop()` remains the correct way to end a session. It is no longer
+the only thing standing between you and a hot microphone: dropping the session without
+calling it — a dismissed screen, a released view model — now tears down the audio
+engine and deactivates the shared `AVAudioSession`.
+
+This matters because `AVAudioSession` is a process-wide singleton. An activation that
+is never balanced outlives every object involved: other apps stay ducked and the
+microphone indicator can stay lit for the rest of your app's life. There was no object
+for ARC to clean up, so nothing did.
+
+The package assumes **one `VoiceIntentSession` at a time**, since it owns the shared
+audio session.
+
+---
+
 ## Checklist
 
 - [ ] Both products linked; deployment target iOS 26.0+
