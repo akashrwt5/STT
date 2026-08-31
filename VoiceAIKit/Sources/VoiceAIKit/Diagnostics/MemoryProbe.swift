@@ -64,10 +64,7 @@ enum MemoryProbe {
             buckets: buckets,
             regionCount: count
         )
-        // print() so output is always visible in Xcode's console regardless of
-        // unified-logging filtering. logger.notice should also fire.
-        print("[MemoryProbe] snapshot '\(label)': phys=\(fmt(s.physFootprint)) resident=\(fmt(s.residentSize)) anon=\(fmt(s.anonDirty)) ext=\(fmt(s.fileBacked))")
-        logger.notice("[MemoryProbe] snapshot '\(label, privacy: .public)' captured.")
+        logger.notice("snapshot '\(label, privacy: .public)': phys=\(fmt(s.physFootprint), privacy: .public) resident=\(fmt(s.residentSize), privacy: .public) anon=\(fmt(s.anonDirty), privacy: .public) ext=\(fmt(s.fileBacked), privacy: .public)")
         return s
     }
 
@@ -88,13 +85,6 @@ enum MemoryProbe {
 
     /// Log a before/after diff with a verdict on dirty vs. clean growth.
     static func logDiff(before: Snapshot, after: Snapshot) {
-        // print() mirror so the diff is visible even when os_log is filtered.
-        print("[MemoryProbe] ━━━ '\(before.label)' → '\(after.label)' ━━━")
-        print("[MemoryProbe]   phys_footprint Δ: \(signedFmt(after.physFootprint, before.physFootprint))   [jetsam]")
-        print("[MemoryProbe]   resident Δ:       \(signedFmt(after.residentSize, before.residentSize))")
-        print("[MemoryProbe]   anon dirty Δ:     \(signedFmt(after.anonDirty, before.anonDirty))")
-        print("[MemoryProbe]   file-backed Δ:    \(signedFmt(after.fileBacked, before.fileBacked))")
-
         logger.notice("━━━ MemoryProbe '\(before.label, privacy: .public)' → '\(after.label, privacy: .public)' ━━━")
         logger.notice("phys_footprint: \(fmt(before.physFootprint), privacy: .public) → \(fmt(after.physFootprint), privacy: .public)   (\(signedFmt(after.physFootprint, before.physFootprint), privacy: .public))   [jetsam budget]")
         logger.notice("resident_size:  \(fmt(before.residentSize), privacy: .public) → \(fmt(after.residentSize), privacy: .public)   (\(signedFmt(after.residentSize, before.residentSize), privacy: .public))")
