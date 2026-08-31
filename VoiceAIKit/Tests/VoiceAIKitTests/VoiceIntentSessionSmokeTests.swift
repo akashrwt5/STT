@@ -188,6 +188,46 @@ final class VoiceIntentSessionSmokeTests: XCTestCase {
         }
     }
 
+    /// An abandoned multi-turn conversation must not survive into the next `start()`.
+    ///
+    /// Regression for the divergence between the two halves of the conversation state:
+    /// `NLUEngine.handle()` sets `pendingIntent` / `awaitingSlot` before it returns, so a
+    /// turn that is never applied leaves the engine mid-slot-filling while the session
+    /// has forgotten. The next utterance was then eaten as the answer to a question the
+    /// user never heard — "set a reminder", stop, start, "turn up the volume", and the
+    /// reminder gets named "turn up the volume".
+    ///
+    /// Driven through `classify(text:)` because it shares the engine with the microphone
+    /// path; no mic needed to show the engine holding state across a stop.
+    @MainActor
+    func testAbandonedConversationDoesNotLeakIntoTheNextTurn() async throws {
+        let session = VoiceIntentSession(configuration: try configuration())
+
+        // Ask for something with required slots so the engine starts collecting.
+        let opener = try await session.classify(text: "set a reminder")
+        guard case .followUp = opener else {
+            throw XCTSkip("this pack did not ask a follow-up for 'set a reminder' (got \(opener)); the leak needs a slot-filling engine state to be visible")
+        }
+
+        // The user walks away: the session is stopped mid-question.
+        session.stop()
+        XCTAssertEqual(session.state, .stopped)
+
+        // A brand-new conversation.
+        //
+        // `try?`, not `try`: without a microphone `start()` throws inside
+        // `beginListening()` — but it throws AFTER the engine reset, which is the line
+        // under test. `testStartNextListeningTurnFromIdleThrowsWithoutMic` above relies
+        // on the same environment fact.
+        try? await session.start()
+        defer { session.stop() }
+
+        let next = try await session.classify(text: "turn up the volume")
+        if case .followUp = next {
+            XCTFail("'turn up the volume' was swallowed as the answer to the abandoned reminder question")
+        }
+    }
+
     /// `stop()` is safe to call at any time and always lands in `.stopped`.
     @MainActor
     func testStopFromIdleIsStopped() throws {

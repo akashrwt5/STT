@@ -168,6 +168,29 @@ public final class VoiceIntentSession {
         started = true
         awaitingAnswer = false          // fresh start: not mid-conversation
 
+        // ...and the engine has to be told, not just this object.
+        //
+        // `NLUEngine.handle()` mutates its OWN conversation state — `pendingIntent`,
+        // `awaitingSlot`, `pendingSlots` — before it returns the response. Clearing only
+        // `awaitingAnswer` above left the two disagreeing whenever a turn ended without
+        // being applied: the session forgot it had asked a question, the engine did not.
+        // The next utterance then arrived at `handleSlotFilling` and was swallowed as the
+        // answer to an abandoned question — say "set a reminder", stop, start, say "turn
+        // up the volume", and you get a reminder named "turn up the volume".
+        //
+        // This is why the reset belongs HERE and not in `startNextListeningTurn()`: the
+        // two entry points mean different things. `start()` is a fresh conversation — its
+        // own comment above has always said so — while `startNextListeningTurn()` exists
+        // precisely to RESUME one, and must leave the engine's context alone.
+        //
+        // `reset()` only clears dictionaries (its body is synchronous; the `await` is an
+        // actor hop), so this is free on the common path where nothing was pending.
+        let wasMidConversation = await engine?.isCollecting ?? false
+        await engine?.reset()
+        if wasMidConversation {
+            logger.info("start(): discarded an abandoned multi-turn conversation the engine was still holding.")
+        }
+
         try await beginListening()
     }
 
