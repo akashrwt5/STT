@@ -45,14 +45,20 @@ public enum InstallerError: Error, LocalizedError {
     }
 }
 
-/// The main orchestration class for NLU over-the-air updates.
+/// The main orchestration type for NLU over-the-air updates.
 /// The Host Application uses this to prepare downloaded zips and activate them when safe.
 ///
-/// Thread safety: the mutable state (`preparedPack`, `stagingState`) is guarded by the
-/// internal `stateLock` below — NOT by an assumption that some upstream actor serializes callers.
-/// `preparePack`/`activatePreparedPack` do no `await` inside the critical section, so holding the
-/// lock across each call is safe and cannot deadlock.
-public final class NLUPackInstaller: @unchecked Sendable {
+/// An `actor`, not a lock-guarded class. The previous version was `@unchecked Sendable`
+/// with an `NSLock`, which meant the compiler was not checking a promise every host
+/// depends on: add one mutable property and forget the lock, and nothing complains.
+///
+/// WHAT THE ACTOR DOES NOT GIVE YOU, and why the state guards below are still here:
+/// actor isolation is not mutual exclusion across `await`. Both public methods suspend —
+/// `activatePreparedPack` at the smoke test, `preparePack` at the extraction hop — and a
+/// second caller enters the actor at that point. `stagingState` is what rejects it, and
+/// the `guard`s in `claimForActivation()` / `commitActive()` are load-bearing for that
+/// reason, not as leftovers from the lock. Inlining them is how the race comes back.
+public actor NLUPackInstaller {
 
     private let storage: PackStorageControlling
     private let validator: PackValidating
@@ -60,27 +66,22 @@ public final class NLUPackInstaller: @unchecked Sendable {
 
     private let logger = Logger(subsystem: "com.starkey.voiceaikit", category: "OTAInstaller")
 
-    /// Serializes access to `preparedPack` and `stagingState`.
-    private let stateLock = NSLock()
-
     /// The identity of the pack admitted by the most recent prepare operation.
     private var preparedPack: PackIdentity?
 
-    /// Tracks the state of the pack currently sitting in the staging directory.
-    private var _stagingState: PackState = .downloaded
+    /// The state of the pack currently sitting in the staging directory.
+    ///
+    /// `await`-only now that this is an actor. That is a source-breaking change for a
+    /// host that reads it; `preparePack` and `activatePreparedPack` were already `async`
+    /// and are unaffected.
+    public private(set) var stagingState: PackState = .downloaded
 
-    /// The state of the pack currently sitting in the staging directory. Thread-safe.
-    public var stagingState: PackState {
-        stateLock.lock(); defer { stateLock.unlock() }
-        return _stagingState
-    }
-    
     public init(storage: PackStorageControlling, validator: PackValidating, engineProvider: NLUEngineProvider) {
         self.storage = storage
         self.validator = validator
         self.engineProvider = engineProvider
     }
-    
+
     /// Prepares a downloaded `.nlu` zip file for installation.
     /// This extracts the package into a temporary staging area and validates its cryptographic integrity.
     /// - Parameters:
@@ -93,37 +94,64 @@ public final class NLUPackInstaller: @unchecked Sendable {
         logger.info("Preparation started for language: \(language)")
         let start = DispatchTime.now()
 
-        stateLock.lock()
-        defer { stateLock.unlock() }
+        // Claim the staging directory before doing anything to it.
+        //
+        // Under the old lock the whole method ran inside one critical section, so two
+        // concurrent prepares serialised. This body now suspends at the extraction hop
+        // below, so without this guard a second caller would wipe and re-extract staging
+        // underneath the first — and the first would return an identity describing the
+        // second one's bytes. `.validating` is the same transient state activation
+        // claims, which is correct: neither may run while the other holds staging.
+        guard stagingState != .validating else {
+            logger.warning("Preparation refused: staging is already being prepared or activated.")
+            throw InstallerError.invalidStateForActivation
+        }
+        stagingState = .validating
 
-        _stagingState = .downloaded
+        do {
+            // 1. Get a clean staging directory
+            let stagingDir = try storage.stagingDirectory(for: language, clean: true)
 
-        // 1. Get a clean staging directory
-        let stagingDir = try storage.stagingDirectory(for: language, clean: true)
+            // 2. Extract and validate — OFF the actor.
+            //
+            // This is a synchronous unzip plus a sha256 over every file in the pack. Under
+            // the old `NSLock` it blocked the caller's own thread; left inline on an actor
+            // it would block a cooperative-pool thread instead, which is worse — that pool
+            // is bounded and shared with everything else in the process.
+            let validator = self.validator
+            let identity = try await Task.detached(priority: .utility) {
+                try validator.extractAndValidate(from: packageURL, into: stagingDir)
+            }.value
 
-        // 2. Extract and Validate
-        _stagingState = .validating
-        let identity = try validator.extractAndValidate(from: packageURL, into: stagingDir)
+            // 3. Mark as Ready. Re-check first: the claim above is what should have kept
+            //    this true across the suspension, so a violation means an unaccounted-for
+            //    writer rather than an expected race.
+            guard stagingState == .validating else {
+                throw InstallerError.invalidStateForActivation
+            }
+            self.preparedPack = identity
+            stagingState = .readyToActivate
 
-        // 3. Mark as Ready
-        // If validation succeeds, the package remains in `staging` safely until activation.
-        self.preparedPack = identity
-        _stagingState = .readyToActivate
+            let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000_000
+            logger.info("Preparation completed successfully in \(elapsed)s. State: readyToActivate.")
 
-        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000_000
-        logger.info("Preparation completed successfully in \(elapsed)s. State: readyToActivate.")
-
-        return identity
+            return identity
+        } catch {
+            // The claim must not outlive a failed prepare, or every later call is refused.
+            stagingState = .failed
+            throw error
+        }
     }
-    
+
     /// Safely activates the pack that was previously prepared in the staging directory.
     /// This runs a real smoke test (async) and then atomically swaps the active directory.
     /// - Parameter language: The language code (e.g., "en").
     ///
-    /// The smoke test is `async`, and awaiting under a lock is unsafe, so the flow is split into
-    /// three short critical sections — claim → (await smoke test, no lock) → commit — each guarded
-    /// by `stateLock`. The transient `.validating` state between claim and commit means a second,
-    /// racing `activatePreparedPack` is rejected (`commitActive` requires `.validating`).
+    /// The flow is still claim -> (await smoke test) -> commit, in three guarded steps. On
+    /// the lock-based version that shape existed because awaiting under a lock is unsafe.
+    /// It survives for a different reason: the smoke test is a suspension point, a second
+    /// `activatePreparedPack` enters the actor there, and the transient `.validating` state
+    /// is what makes it lose. Same behaviour, different mechanism.
     public func activatePreparedPack(language: String) async throws {
         logger.info("Activation started for language: \(language)")
 
@@ -156,7 +184,8 @@ public final class NLUPackInstaller: @unchecked Sendable {
             throw InstallerError.invalidStateForActivation
         }
 
-        // 2. Real smoke test — build an engine from staging and run one inference. No lock held.
+        // 2. Real smoke test — build an engine from staging and run one inference. This is the
+        //    suspension point the claim above exists to survive.
         do {
             try await engineProvider.smokeTest(packRoot: stagingDir, language: language)
         } catch {
@@ -166,7 +195,7 @@ public final class NLUPackInstaller: @unchecked Sendable {
             throw InstallerError.smokeTestFailed(error)
         }
 
-        // 3. Commit: atomic activation under the lock.
+        // 3. Commit: atomic activation.
         do {
             try commitActive(version: version, language: language)
         } catch is InstallerError {
@@ -179,13 +208,15 @@ public final class NLUPackInstaller: @unchecked Sendable {
         logger.info("Activation completed for language: \(language). Version: \(version)")
     }
 
-    // MARK: - Activation critical sections
+    // MARK: - Activation state transitions
 
     /// Verifies the installer is ready and the engine is idle, then transitions to the transient
-    /// `.validating` state and returns the prepared pack's identity. Locked.
+    /// `.validating` state and returns the prepared pack's identity.
+    ///
+    /// Synchronous on purpose: it must not suspend, or the window it exists to close reopens
+    /// inside the claim itself.
     private func claimForActivation() throws -> PackIdentity {
-        stateLock.lock(); defer { stateLock.unlock() }
-        guard _stagingState == .readyToActivate, let prepared = preparedPack else {
+        guard stagingState == .readyToActivate, let prepared = preparedPack else {
             throw InstallerError.invalidStateForActivation
         }
         // Ensure we don't disrupt an active voice session.
@@ -193,24 +224,23 @@ public final class NLUPackInstaller: @unchecked Sendable {
             logger.warning("Activation blocked: Engine is currently busy.")
             throw InstallerError.activationFailedEngineNotIdle
         }
-        _stagingState = .validating
+        stagingState = .validating
         return prepared
     }
 
-    /// Commits staging → active atomically. Requires the transient `.validating` state set by
-    /// `claimForActivation`; throws `invalidStateForActivation` if a racing caller changed it. Locked.
+    /// Commits staging -> active atomically. Requires the transient `.validating` state set by
+    /// `claimForActivation`; throws `invalidStateForActivation` if a re-entrant caller changed it.
+    /// Synchronous, for the same reason as the claim.
     private func commitActive(version: String, language: String) throws {
-        stateLock.lock(); defer { stateLock.unlock() }
-        guard _stagingState == .validating else {
+        guard stagingState == .validating else {
             throw InstallerError.invalidStateForActivation
         }
         try storage.commitStagingAndActivate(version: version, for: language)
         self.preparedPack = nil
-        _stagingState = .active
+        stagingState = .active
     }
 
     private func markFailed() {
-        stateLock.lock(); defer { stateLock.unlock() }
-        _stagingState = .failed
+        stagingState = .failed
     }
 }

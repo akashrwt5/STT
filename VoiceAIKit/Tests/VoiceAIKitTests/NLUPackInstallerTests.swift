@@ -19,7 +19,8 @@ final class NLUPackInstallerTests: XCTestCase {
     func testPreparePackSuccess() async throws {
         let identity = try await installer.preparePack(from: URL(fileURLWithPath: "/test.zip"), language: "en")
         XCTAssertEqual(identity.version, "1.0.0")
-        XCTAssertEqual(installer.stagingState, .readyToActivate)
+        let stagingState = await installer.stagingState
+        XCTAssertEqual(stagingState, .readyToActivate)
 
         // The fields the OTA path was structurally blind to before VIK-034: the manifest model it
         // decoded had no `channel` and no `compiler_version`, so the installer could not have
@@ -35,7 +36,8 @@ final class NLUPackInstallerTests: XCTestCase {
             _ = try await installer.preparePack(from: URL(fileURLWithPath: "/test.zip"), language: "en")
             XCTFail("Expected preparation to fail")
         } catch {
-            XCTAssertNotEqual(installer.stagingState, .readyToActivate)
+            let stagingState = await installer.stagingState
+            XCTAssertNotEqual(stagingState, .readyToActivate)
         }
     }
 
@@ -45,7 +47,8 @@ final class NLUPackInstallerTests: XCTestCase {
 
         XCTAssertEqual(engine.smokeTestCallCount, 1, "A real smoke test must run before activation")
         XCTAssertEqual(storage.commitCallCount, 1)
-        XCTAssertEqual(installer.stagingState, .active)
+        let stagingState = await installer.stagingState
+        XCTAssertEqual(stagingState, .active)
     }
 
     func testActivateFailsIfEngineBusy() async throws {
@@ -76,7 +79,8 @@ final class NLUPackInstallerTests: XCTestCase {
                 return XCTFail("Expected smokeTestFailed, got \(error)")
             }
             XCTAssertEqual(storage.commitCallCount, 0, "A bad pack must never become Current")
-            XCTAssertEqual(installer.stagingState, .failed)
+            let stagingState = await installer.stagingState
+            XCTAssertEqual(stagingState, .failed)
         }
     }
 
@@ -123,7 +127,8 @@ final class NLUPackInstallerTests: XCTestCase {
 
         try await installer.activatePreparedPack(language: "en")
         XCTAssertEqual(storage.commitCallCount, 1)
-        XCTAssertEqual(installer.stagingState, .active)
+        let stagingState = await installer.stagingState
+        XCTAssertEqual(stagingState, .active)
     }
 
     private func assertRefusesActivation(file: StaticString = #filePath, line: UInt = #line) async {
