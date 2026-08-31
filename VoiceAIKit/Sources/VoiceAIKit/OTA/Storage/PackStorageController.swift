@@ -34,9 +34,11 @@ public struct PackRetentionPolicy: Sendable {
 /// `activate`, `rollback`, `cleanup`) are serialized by an internal lock, and the `Current`
 /// symlink is swapped with the POSIX `rename(2)` syscall, which atomically replaces the
 /// destination. A reader resolving `Current` therefore always sees either the old target or the
-/// new one, never a missing link. This class is genuinely `Sendable`: the `@unchecked` is backed
-/// by the lock below, not by an assumption that some upstream actor serializes callers.
-public final class PackStorageController: PackStorageControlling, @unchecked Sendable {
+/// new one, never a missing link.
+///
+/// There is no mutable stored state — every property is a `let` and all mutation happens on the
+/// filesystem under the lock — so the `Sendable` conformance is checked rather than asserted.
+public final class PackStorageController: PackStorageControlling {
     /// The base directory provided by the Host Application (e.g. Application Support or an App Group container).
     public let baseStorageURL: URL
 
@@ -54,7 +56,9 @@ public final class PackStorageController: PackStorageControlling, @unchecked Sen
         rootURL.appendingPathComponent("Packs", isDirectory: true)
     }
 
-    private let fileManager: FileManager
+    /// `FileManager` is not `Sendable`, though its methods are documented as safe to call from
+    /// multiple threads when no `FileManagerDelegate` is set, which is the case here.
+    nonisolated(unsafe) private let fileManager: FileManager
     private let retentionPolicy: PackRetentionPolicy
     private let logger = Logger(subsystem: "com.starkey.voiceaikit", category: "PackStorage")
 

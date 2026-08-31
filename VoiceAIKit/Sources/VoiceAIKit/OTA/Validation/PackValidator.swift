@@ -27,10 +27,9 @@ public protocol PackValidating: Sendable {
 /// makes OTA validation and session load use ONE verifier and ONE `PackTrustPolicy`, instead of
 /// the two divergent implementations that existed before (this class used to bypass signatures
 /// when a key was absent and had an empty checksum stub).
-/// `@unchecked Sendable`: all stored properties are immutable `let`s, but `FileManager` is not
-/// itself `Sendable`. There is no mutable state to protect — the unchecked conformance only bridges
-/// that one non-`Sendable` (but effectively thread-safe) dependency.
-public final class PackValidator: PackValidating, @unchecked Sendable {
+/// Every stored property is an immutable `let`, so the `Sendable` conformance is checked rather
+/// than asserted. The one exception is marked at the property itself.
+public final class PackValidator: PackValidating {
 
     public enum ValidationError: Error, LocalizedError {
         case extractionFailed(Error)
@@ -58,7 +57,9 @@ public final class PackValidator: PackValidating, @unchecked Sendable {
         }
     }
 
-    private let fileManager: FileManager
+    /// `FileManager` is not `Sendable`, though its methods are documented as safe to call from
+    /// multiple threads when no `FileManagerDelegate` is set, which is the case here.
+    nonisolated(unsafe) private let fileManager: FileManager
     private let extractor: PackExtractor
 
     /// The current runtime contract of the VoiceAIKit engine.
