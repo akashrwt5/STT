@@ -19,7 +19,7 @@ This matters on exactly one date: **the day Engage links the package.** After th
 
 Worst case is not a rename. It is a client engineer who hits a gap in the facade — no pack version, no capability list — reaches past it into `ResolvedPack.manifest` because it happens to be public, and ships that. Now the internal data layer is load-bearing in someone else's release train, and the facade gap that caused it is never reported.
 
-**Target: ~110 public declarations across ~24 types**, and — more useful as a rule of thumb — *a host must be able to integrate without importing anything from `Core/`, `NLU/` or `Data/`.*
+**Target: ~110 public declarations across ~24 types**, and — more useful as a rule of thumb — *a host must be able to integrate without importing anything from `Core/`, `NLU/` or `Pack/`.*
 
 ---
 
@@ -33,7 +33,7 @@ Three tiers qualify, and nothing else does.
 - **Tier 2 — the OTA host contracts.** Protocols the host *implements* (`PackProvider`, `PackExtractor`, `NLUEngineProvider`) and the types it *drives* (`VoiceIntentClient`, the installer, storage, validator, trust policy).
 - **Tier 3 — three new entry points** that exist specifically so Tier 1 and 2 stop leaking internals. Without these, `BundleDataLoader`, `PackEngineFactory`, `PackIntegrity`, `ResolvedPack` and `NLUBundle` cannot go internal, because the host genuinely needs what they do today.
 
-Everything under `Core/`, `NLU/` and `Data/` fails the rule.
+Everything under `Core/`, `NLU/` and `Pack/` fails the rule.
 
 ---
 
@@ -118,7 +118,7 @@ Lets `PackIntegrity` (17), `BundleDataLoader` (3) go internal.
 
 Replaces `BundleDataLoader.load(...)` + `PackEngineFactory.makeEngine(...)` + `engine.handle("hello")` in `STTNLUEngineProvider.smokeTest` (`STTApp.swift:49`). That sequence is the SDK's own dress rehearsal, copied into every host — and a host that copies it slightly wrong (different `trust`, different variant) makes the OTA idle-gate meaningless while looking correct.
 
-Lets `PackEngineFactory` (9) and the whole `Data/` tree go internal.
+Lets `PackEngineFactory` (9) and the whole `Pack/` tree go internal.
 
 > Do **not** also add a `capabilities` accessor in this pass. It is needed (SPEC §C2), but it is a design question — which shape does the adapter want, pack capability IDs or the shared intent catalogue? — and it should not block a mechanical demotion.
 
@@ -138,7 +138,7 @@ Everything below stays `public`. Everything not below becomes `internal`.
 | `VoiceSessionState`, `VoiceIntentTurn`, `VoiceIntentStages`, `VoiceIntentEvent` | ″ | |
 | `VoiceIntentConfigurationError` | ″ | |
 | `PackProvider`, `StaticPackProvider` | `Facade/PackProvider.swift` | host implements the first |
-| `VoiceIntentError` | `Data/VoiceIntentError.swift` | thrown at the host; the one `Data/` export |
+| `VoiceIntentError` | `Pack/Integrity/VoiceIntentError.swift` | thrown at the host; the one `Pack/` export |
 | `SilenceDetectionConfiguration` | `Core/Models/` | reachable from `VoiceIntentConfiguration`; the one `Core/` export — **trim to the presets + memberwise init** (20 → ~10) |
 
 ### Tier 2 — OTA host contracts
@@ -152,7 +152,7 @@ Everything below stays `public`. Everything not below becomes `internal`.
 | `PackValidating`, `PackValidator` | `OTA/Validation/` | |
 | `PackExtractor` | `OTA/Validation/` | host implements |
 | `NLUEngineProvider` | `OTA/` | host implements |
-| `PackTrustPolicy`, `PackLoadPolicy` | `Data/PackIntegrity.swift` | move to `Facade/` or `OTA/`; they are host policy, not data-layer detail |
+| `PackTrustPolicy`, `PackLoadPolicy` | `Pack/Integrity/PackIntegrity.swift` | move to `Facade/` or `OTA/`; they are host policy, not data-layer detail |
 | ~~**trim** `NLUPackManifest`~~ | ~~`OTA/Models/`~~ | ✅ **DELETED** in VIK-034, along with `EngineCompat`, `SignatureInfo`, `LanguageStatus`, `CapabilityStatus`, `ModelArtifact`, and the two resolution types (now internal). 44 public declarations across 8 types, gone. `PackIdentity` took its place on `PackValidating` and `preparePack` |
 
 ### Tier 3 — new
@@ -163,7 +163,7 @@ Everything below stays `public`. Everything not below becomes `internal`.
 
 | Directory | Public declarations today | After |
 |---|---|---|
-| `Data/` (13 files: `PackSections`, `PackLexicon`, `NLUBundle`, `ResolvedPack`, `DialogSchema`, `PackIntegrity`, `PackEntityExtractor`, `PackSlotResolver`, `PackIntentClassifier`, `PackTFIDFVectorizer`, `PackDateTimeParser`, `PackEngineFactory`, `BundleDataLoader`) | 409 | 0 (`VoiceIntentError` + the two policies relocated) |
+| `Pack/` (13 files: `PackSections`, `PackLexicon`, `NLUBundle`, `ResolvedPack`, `DialogSchema`, `PackIntegrity`, `PackEntityExtractor`, `PackSlotResolver`, `PackIntentClassifier`, `PackTFIDFVectorizer`, `PackDateTimeParser`, `PackEngineFactory`, `BundleDataLoader`) | 409 | 0 (`VoiceIntentError` + the two policies relocated) |
 | `Core/` (14 files: coordinator, recognition, audio, models, protocols) | 122 | 0 (`SilenceDetectionConfiguration` relocated) |
 | `NLU/` (`NLUEngine`, `NLUContext`, `ConversationSpeaker`, `ConfirmationGate`, `NLUResponse`, `NLUProtocols`, `SlotFormatting`, `MemoryProbe`) | 53 | 0 |
 

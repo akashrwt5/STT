@@ -11,7 +11,7 @@ You are a Principal iOS Engineer working in the `Starkey_Research/STT` repositor
 - `VoiceAIKit/README.md` — the package's public API (`VoiceIntentSession`: `init`, `events`, `start()`, `stop()`, `reset()`, `classify(text:)`).
 - `VoiceAIKit/INTEGRATION.md` — how to add the package to the app + the third "Package" picker option + the Phase-2 migration plan.
 - `VoiceAIKit/Package.swift` — one target `VoiceAIKit`, iOS 26+, resources bundled (4 `.mlpackage` models via `.process`, JSON/vocab via `.copy`, `Localization/` as a subdir).
-- `VoiceAIKit/Sources/VoiceAIKit/` — `Facade/` (public), `Core/` (STT), `NLU/` (3-stage classifier + `NLUCore/` dialog manager, entity extractor, TTS), `Resources/`.
+- `VoiceAIKit/Sources/VoiceAIKit/` — `Facade/` (public), `Core/` (STT), `NLU/` (3-stage classifier + `Engine/` dialog manager, TTS), `Pack/` (pack schema, integrity, loader), `Diagnostics/`.
 - The app's original, still-canonical implementation lives in `STT/STT/Services/`, `STT/STT/Services/NLU/`, and `STT/STT/` (audio/recognition/coordinator). The package is a **copy** of these.
 
 ## Design invariants (do not violate)

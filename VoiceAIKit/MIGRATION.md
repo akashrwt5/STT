@@ -212,9 +212,9 @@ These were introduced when the package briefly built under Swift 6 strict
 mode; under Swift 5 they are valid no-ops / harmless attributes. Kept to
 preserve intent for a future strict-mode migration:
 
-- `NLU/MemoryProbe.swift` — `nonisolated(unsafe) static let byteFormatter`,
+- `Diagnostics/MemoryProbe.swift` — `nonisolated(unsafe) static let byteFormatter`,
   and `getpagesize()` in place of `vm_kernel_page_size`.
-- `NLU/NLUCore/EntityExtractor.swift` — `entitiesURL: URL? = nil` default
+- `Pack/Loader/PackEntityExtractor.swift` — `entitiesURL: URL? = nil` default
   with `Bundle.module` resolved inside `init` (public inits can't reference
   internal `Bundle.module` in a default argument in any language mode).
 - `Core/Audio/AudioCaptureService.swift` — `@preconcurrency import
@@ -225,7 +225,7 @@ preserve intent for a future strict-mode migration:
 
 ## Parser fix that lives only in the package
 
-The package's `Sources/VoiceAIKit/NLU/NLUCore/EntityExtractor.swift`
+The package's `Sources/VoiceAIKit/Pack/Loader/PackEntityExtractor.swift`
 runs **D3 (decimal-hour idioms) before D1 (digit + spaced clock-hour marker)**
 in `_extractDateTimeLexicon`. The app's copy of the same file still has D1
 before D3.

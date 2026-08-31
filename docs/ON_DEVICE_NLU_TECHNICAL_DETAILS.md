@@ -150,7 +150,7 @@ Documented here deliberately, so they're tracked rather than discovered later:
 |---|---|
 | On-device ASR + endpointing | `STT/`, `VoiceAIKit/Sources/VoiceAIKit/Core/Audio` |
 | Intent cascade (Swift, on-device) | `VoiceAIKit/Sources/VoiceAIKit/NLU/` (`KeywordMatcher.swift`, `TFIDFLogisticScorer.swift`, `SemanticClassifier.swift`) |
-| Conversation manager | `VoiceAIKit/Sources/VoiceAIKit/NLU/NLUCore/` (`NLUEngine.swift`, `NLUContext.swift`) |
+| Conversation manager | `VoiceAIKit/Sources/VoiceAIKit/NLU/Engine/` (`NLUEngine.swift`, `NLUContext.swift`) |
 | Training pipeline (Python) | `IntentClassifier/scripts/` (`train.py`, `train_semantic_head.py`, `predict.py`, `auto_label.py`) |
 | Shared schema | `IntentClassifier/data/nlu_schema.json` and per-language variants under `VoiceAIKit/Sources/VoiceAIKit/Resources/Localization/` |
 | Model artifacts + manifest | `IntentClassifier/models/`, `IntentClassifier/models/manifest.json` |
