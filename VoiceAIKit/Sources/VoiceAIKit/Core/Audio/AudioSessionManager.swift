@@ -114,6 +114,39 @@ final class AudioSessionManager {
         }
     }
 
+    /// Releases the audio session if this manager is dropped without `tearDown()`.
+    ///
+    /// `AVAudioSession` is a PROCESS-WIDE SINGLETON. It is never deallocated, so an
+    /// activation that is never balanced outlives this object, the coordinator that
+    /// owned it and the `VoiceIntentSession` above that — other apps stay ducked and
+    /// the microphone indicator can stay lit for the rest of the app's life. Nothing
+    /// in ARC cleans that up, because there is no object to clean up.
+    ///
+    /// A host reaching this is not misusing the SDK in an exotic way; it is the normal
+    /// shape of a dismissed screen or a released view model. `stop()` is still the
+    /// right thing to call — this is the floor under it, not a replacement.
+    ///
+    /// Safe from a nonisolated `deinit` for exactly the reason `configure()` already
+    /// depends on: `AVAudioSession` is thread-safe, which is why `configure()` calls
+    /// `setActive(true)` from inside `Task.detached` in the first place.
+    ///
+    /// Guarded on `isConfigured` so a manager that never activated the session cannot
+    /// deactivate one that somebody else did. That guard also covers app-provided audio:
+    /// `configure()` only runs when the coordinator owns the session, so in
+    /// `.appProvided` mode `isConfigured` is never true and this cannot deactivate a
+    /// session the HOST owns.
+    ///
+    /// Note there is no `removeObserver(self)` here. The two registrations in
+    /// `registerForNotifications()` use the selector-based
+    /// `addObserver(_:selector:name:object:)`, which NotificationCenter removes
+    /// automatically when the observer deallocates (iOS 9+). The call in `tearDown()` is
+    /// NOT redundant in the same way — that one runs while this object is still alive, to
+    /// stop delivery before a reconfigure.
+    deinit {
+        guard isConfigured else { return }
+        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
     /// Deactivates the audio session and removes notification observers.
     func tearDown() {
         NotificationCenter.default.removeObserver(self)

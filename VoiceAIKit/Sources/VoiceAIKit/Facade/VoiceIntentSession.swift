@@ -123,7 +123,63 @@ public final class VoiceIntentSession {
         speaker.onCancel = { [weak self] in self?.handleSpeechCancelled() }
     }
 
-    deinit { continuation.finish() }
+    /// Releases the microphone and the audio session when the host drops this object
+    /// without calling `stop()`.
+    ///
+    /// This used to be `continuation.finish()` and nothing else, which made "the screen
+    /// was dismissed" and "the view model was released" into a hot microphone and an
+    /// activated `AVAudioSession` for the rest of the app's life. `AudioSessionManager`
+    /// now has its own `deinit` as the floor; this is the deterministic path, so teardown
+    /// happens when the host lets go rather than whenever ARC finishes unwinding a chain
+    /// of objects that may still be referenced by an in-flight task.
+    ///
+    /// `coordinator` and `speaker` are captured STRONGLY on purpose: `self` is already
+    /// dying, and the closure has to keep the two objects that own the hardware alive
+    /// long enough to shut it down.
+    ///
+    /// `stopLiveTranscription()` covers the live case (its teardown deactivates the
+    /// session); `releaseAudioSession()` covers the already-idle case, where the first
+    /// call returns early. They are complementary, not duplicated.
+    ///
+    /// NOTE: `AVAudioSession` is shared process-wide, so this assumes the host runs one
+    /// `VoiceIntentSession` at a time — the same assumption `stop()` has always made.
+    ///
+    /// WHAT CAN GO WRONG HERE. None of the three calls throw, so there is no error being
+    /// swallowed. What they can do is no-op behind a guard, and each one is accounted for:
+    ///
+    /// - `speaker.stop()` guards on `synthesizer.isSpeaking` — nothing to stop, nothing
+    ///   to do.
+    /// - `stopLiveTranscription()` guards on `state != .idle, != .stopping`. At `.idle`
+    ///   the next line does the work; at `.stopping` a teardown is already in flight and
+    ///   will finish it.
+    /// - `releaseAudioSession()` guards on `ownsAudioSession, state == .idle`. This is the
+    ///   case the previous line skipped: a session left active across a TTS handoff
+    ///   (`stopLiveTranscription(deactivateSession: false)`) with the mic already off.
+    /// - In `.appProvided` mode both correctly do nothing: the HOST owns the audio
+    ///   session, and `configure()` is never called, so `AudioSessionManager.deinit`
+    ///   stands down too.
+    ///
+    /// And underneath all of it, `AudioSessionManager.deinit` is the floor: anything this
+    /// hop misses is caught when that object finally deallocates. This path exists to make
+    /// teardown deterministic, not to be the only thing that works.
+    deinit {
+        continuation.finish()
+
+        // `started` is still true only if the host never called `stop()`. Say so once —
+        // an integrating team debugging "why is my microphone indicator still on" should
+        // find the answer in Console rather than in this file.
+        if started {
+            logger.warning("VoiceIntentSession was deallocated without stop(). Tearing the audio stack down from deinit; call stop() to make this deterministic.")
+        }
+
+        let coordinator = self.coordinator
+        let speaker = self.speaker
+        Task { @MainActor in
+            speaker.stop()
+            coordinator.stopLiveTranscription()
+            coordinator.releaseAudioSession()
+        }
+    }
 
     // MARK: - Lifecycle
 
