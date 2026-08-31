@@ -373,6 +373,16 @@ final class SpeechRecognitionService {
                                 } else {
                                     outputBuffer = buffer
                                 }
+
+                                // The converter can hand back an empty buffer while priming or
+                                // when it reports inputRanDry. Feeding one makes AVFoundation log
+                                // a zero-byte-buffer warning, and it carries nothing for the RMS
+                                // pass or the VAD.
+                                guard outputBuffer.frameLength > 0 else {
+                                    logger.debug("[Feed] Dropped empty buffer after #\(bufferCount).")
+                                    continue
+                                }
+
                                 bufferCount += 1
                                 feedBuilder.yield(AnalyzerInput(buffer: outputBuffer))
 
