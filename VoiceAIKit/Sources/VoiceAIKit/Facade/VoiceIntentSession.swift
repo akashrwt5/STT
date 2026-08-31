@@ -167,7 +167,7 @@ public final class VoiceIntentSession {
     /// - Throws: a transcription error if the audio session cannot start.
     public func startNextListeningTurn() async throws {
         guard state == .idle else {
-            logger.warning("startNextListeningTurn() ignored: state is \(self.state), expected .idle")
+            logger.warning("startNextListeningTurn() ignored: state is \(String(describing: self.state), privacy: .public), expected .idle")
             return
         }
         logger.info("[Session] startNextListeningTurn(): Resuming listening from idle state.")
