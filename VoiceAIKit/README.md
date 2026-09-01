@@ -72,12 +72,12 @@ picks up whatever is `Current`.
 | Folder | Why it exists | What is in it |
 |---|---|---|
 | **`Facade/`** <br><sub>6 files, 1.4k lines</sub> | The only surface you touch. | `VoiceIntentSession` (the turn state machine), `VoiceIntentClient` (OTA entry point), `VoiceIntentTypes` (events, turns, configuration), `PackProvider`, `VoiceIntentPack` (verify / smoke-test without a session), `PackIdentity`. |
-| **`Core/`** <br><sub>19 files, 3.2k lines</sub> | Audio in, text out. The whole STT half. | `Audio/` — `AVAudioSession`, mic capture, VAD/silence detection, buffer conversion, file playback. `Recognition/` — the `SpeechAnalyzer` wrapper and `EndpointDecider` (the pure "should we commit this transcript now?" maths). `Coordinator/` — orchestration. `Models/`, `Protocols/`, `Extensions/`. |
+| **`Core/`** <br><sub>19 files, 3.3k lines</sub> | Audio in, text out. The whole STT half. | `Audio/` — `AVAudioSession`, mic capture, VAD/silence detection, buffer conversion, file playback. `Recognition/` — the `SpeechAnalyzer` wrapper and `EndpointDecider` (the pure "should we commit this transcript now?" maths). `Coordinator/` — orchestration. `Models/`, `Protocols/`, `Extensions/`. |
 | **`NLU/Engine/`** <br><sub>7 files, 1.2k lines</sub> | Text in, intent out. No audio, no file formats. | `NLUEngine` (an actor: classification, slot filling, confirmations), `NLUContext` (conversation state), `ConfirmationGate`, `ConversationSpeaker` (TTS), `NLUResponse`, `SlotFormatting`, `NLUProtocols`. |
 | **`Pack/Schema/`** <br><sub>4 files, 1.2k lines</sub> | Typed models of the pack's **on-disk format**. | `NLUBundle` (`bundle.json`, decoded strictly), `PackSections`, `PackLexicon`, `ResolvedPack`. |
 | **`Pack/Integrity/`** <br><sub>2 files, 432 lines</sub> | The trust chain, in one place. | `PackIntegrity` (Ed25519 + per-file SHA-256), `VoiceIntentError` (everything a load can refuse for). |
 | **`Pack/Loader/`** <br><sub>8 files, 2.7k lines</sub> | Pack → runtime. Verified bytes become working objects. | `BundleDataLoader`, `PackEngineFactory`, `DialogSchema` (the engine-facing projection the factory builds), and the pack-driven `PackIntentClassifier`, `PackEntityExtractor`, `PackSlotResolver`, `PackTFIDFVectorizer`, `PackDateTimeParser`. |
-| **`OTA/`** <br><sub>5 files, 848 lines</sub> | Getting a new pack onto disk without ever breaking the one that works. | `Installer/NLUPackInstaller` (an actor: prepare → smoke-test → activate), `Validation/PackValidator`, `Storage/PackStorageController` (versioned dirs + atomic symlink swap + rollback), `Models/`. |
+| **`OTA/`** <br><sub>5 files, 853 lines</sub> | Getting a new pack onto disk without ever breaking the one that works. | `Installer/NLUPackInstaller` (an actor: prepare → smoke-test → activate), `Validation/PackValidator`, `Storage/PackStorageController` (versioned dirs + atomic symlink swap + rollback), `Models/`. |
 | **`Diagnostics/`** <br><sub>1 file</sub> | DEBUG memory instrumentation. | `MemoryProbe` — walks Mach VM regions to separate dirty (jetsam-charged) from clean/file-backed memory. Used to characterise speech-model loading cost. |
 
 Two names worth explaining, because neither is obvious:
@@ -107,11 +107,11 @@ xcodebuild test -scheme VoiceAIKit -destination "id=<simulator udid>"
 
 or open `Package.swift` in Xcode and press Cmd+U. The `VoiceAIKit` scheme runs `VoiceAIKitTests`
 through the checked-in `.swiftpm/VoiceAIKit.xctestplan`; the test target itself belongs to no
-product, because SwiftPM does not allow test targets in `products:`..
+product, because SwiftPM does not allow test targets in `products:`.
 
 ## The whole public API
 
-Thirty-eight types. Everything else — the audio graph, the recogniser, the three-stage
+Thirty-one types. Everything else — the audio graph, the recogniser, the three-stage
 classifier, the dialogue manager, the pack loader — is internal and free to change.
 
 ### Running a session
@@ -136,6 +136,12 @@ VoiceIntentSession(configuration:)      // @MainActor
 `packProvider` and `trust` have **no defaults**, deliberately. Every default for the first is a
 language, and a wrong one is a session that confidently speaks the wrong tongue; a default for
 the second is a session that verifies nothing, and that default would ship.
+
+`loadsSemanticRescue` is **inert today** and its doc comment overstates it.
+`PackEngineFactory.loadStage3()` has an empty body, so setting it `true` loads no MiniLM head
+and costs none of the ~16 MB the comment claims — and `viaSemanticRescue` on a `.fulfilled`
+turn is never `true`. It stays public because removing it would break source compatibility for
+no gain; treat it as reserved until Stage 3 actually lands.
 
 ### The event stream
 
@@ -392,14 +398,11 @@ isolation of the function it is written in. If that callback fires on a non-main
 Swift 6 will trap at runtime, not at compile time. Mark those closures `@Sendable`.
 
 **What Swift 6 mode does not mean here.** The package builds with zero warnings, but it
-carries six `@unchecked Sendable` types and fifteen `nonisolated(unsafe)` bindings, and
-suppressing diagnostics is precisely what those do. Swift 6 mode guarantees that new
-code is checked; it does not retroactively verify those twenty-one escape hatches.
+carries four `@unchecked Sendable` types and nineteen `nonisolated(unsafe)` bindings, and
+suppressing a diagnostic is exactly what those do. Swift 6 mode guarantees that new code
+is checked; it does not retroactively verify those twenty-three escape hatches. None of
+the four is public — the three audio input providers guard their state with
+`OSAllocatedUnfairLock`, and `NLUSession` is owned exclusively by the `NLUEngine` actor.
 
-The stack, the postmortem, and two other fixes that did not work are in
+The stack, the postmortem, and the two other fixes that did not work are in
 [`MIGRATION.md`](MIGRATION.md).
-the region-isolation error and also failed.
-
-**Inferred:** exactly which hop the Swift runtime schedules differently. `Speech.framework` is
-closed source, so this is the best available explanation rather than a verified trace. Worth
-knowing if you ever attempt the migration and the symptom differs.
