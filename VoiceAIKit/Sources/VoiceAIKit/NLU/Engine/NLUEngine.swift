@@ -251,20 +251,58 @@ actor NLUEngine: ConversationEngine {
             return await handleNewIntent(text)
         }
 
-        // Re-classify every slot-filling turn. A different intent at high
-        // confidence means the user switched topics — abandon the pending flow
-        // and handle the new intent immediately (mirrors Python _handle_slot_filling).
-        let probe = await classifier.classifyAsync(text)
-        let isNewIntent = probe.label != intent
-            && probe.label != schema.fallbackIntent
-            && probe.label != "OUT_OF_SCOPE"
-            && probe.confidence >= Self.interruptThreshold
-            && schema.intents[probe.label] != nil
-        if isNewIntent {
-            let abandoned = intent
-            session.resetSlotFilling()
-            let newResult = await handleNewIntent(text)
-            return .interrupted(cancelledIntent: abandoned, result: newResult)
+        // VIK-038. Topic-switch probe — but ONLY when the awaited slot can produce
+        // evidence that this utterance is not an answer to it.
+        //
+        // The classifier is trained on COMMANDS. A slot answer is out-of-distribution
+        // input for it, and a confidence score on OOD input is not a quantity that can
+        // be thresholded. Measured on this pack's own weights, answering the reminder's
+        // "what shall I remind you about?" with
+        //
+        //     "Need to go to walk"     -> Cmd.ActivityWalk      0.994
+        //     "clean my hearing aids"  -> Help_CleanCare        1.000
+        //     "start my workout"       -> Cmd.ActivityExercise  0.995
+        //
+        // cancelled the reminder the user was in the middle of setting. Raising the
+        // 0.75 threshold does not help: "start my workout" (a legitimate reminder)
+        // outscores "start transcribing" (a real command, 0.962).
+        //
+        // What DOES carry evidence is the slot itself, so the gate is the awaited
+        // entity's KIND — never the intent's name, which this package does not
+        // interpret (see ResolvedPack.swift's second design rule):
+        //
+        //   closed gazetteer  the value is in the list or it is not. A miss is a
+        //                     fact, and the only honest reason to ask the classifier
+        //                     where the user went instead. PROBE.
+        //   open free-text    every utterance is a legal value. There is nothing to
+        //                     be right about. DO NOT PROBE.
+        //   date-time         the parser decides, not the classifier. DO NOT PROBE.
+        //
+        // For `pack-en` that means the reminder flow (`remind` open + `sys.date_time`)
+        // never interrupts, and the memory flow (`memory`, 38 values) still does —
+        // "increase volume" is not a memory, so it still switches topic correctly.
+        let awaitedEntity = session.awaitingSlot
+            .flatMap { name in cfg.slots.first { $0.name == name } }?
+            .entity
+        let slotCanRefuseTheAnswer: Bool = {
+            // No slot awaited: leave the pre-existing behaviour alone.
+            guard let awaitedEntity else { return true }
+            return !entities.isOpen(awaitedEntity) && !entities.isDateTime(awaitedEntity)
+        }()
+
+        if slotCanRefuseTheAnswer {
+            let probe = await classifier.classifyAsync(text)
+            let isNewIntent = probe.label != intent
+                && probe.label != schema.fallbackIntent
+                && probe.label != "OUT_OF_SCOPE"
+                && probe.confidence >= Self.interruptThreshold
+                && schema.intents[probe.label] != nil
+            if isNewIntent {
+                let abandoned = intent
+                session.resetSlotFilling()
+                let newResult = await handleNewIntent(text)
+                return .interrupted(cancelledIntent: abandoned, result: newResult)
+            }
         }
 
         // The utterance answers the slot we last prompted for.
@@ -274,17 +312,43 @@ actor NLUEngine: ConversationEngine {
             if entities.isDateTime(slot.entity) {
                 let (iso, filled) = resolveDateTime(text)
                 if filled, let iso { session.pendingSlots[slot.name] = iso }
+            } else if entities.isOpen(slot.entity) {
+                // VIK-039, the half VIK-037 left open — its fix reached only the three
+                // opening-utterance paths that call `fillOpenTopics`, and said so.
+                //
+                // OPEN free-text slot (e.g. @remind): the user's own words are the
+                // value, so derive the topic exactly the way the OPENING utterance
+                // already does through `fillOpenTopics` — strip the carrier, strip
+                // the date/time, strip the connective it left behind.
+                //
+                // This is what makes "remind me to call mom at 9am" produce the same
+                // name whether it opens the conversation or answers the prompt. It
+                // did not before: the opening ran `deriveTopic` and the answer took
+                // the raw text, so the same sentence became "call mom" in one place
+                // and "remind me to call mom at 9am" in the other.
+                //
+                // The time is NOT lost by stripping it here. `extractAllSlots` below
+                // runs over this same utterance and resolves the date-time slot from
+                // it, so "at 9am" leaves the name and arrives in `date_time`.
+                //
+                // The gazetteer is deliberately NOT consulted for an open entity. Its
+                // value list is a HINT, not a value set — matching it returns the
+                // CANONICAL and discards the rest of the sentence, so "I need to pick
+                // up prescription" became "Pick Up Prescription" and "drink water"
+                // became "Drink Water" while "buy milk" stayed verbatim. Same slot,
+                // three different shapes. Skipping it also removes the fuzzy hazard:
+                // `remind` is `fuzzy: true`, and its only fuzzy-eligible synonym is
+                // "activity", which "acidity" and "captivity" are both within the
+                // edit-distance limit of.
+                session.pendingSlots[slot.name] =
+                    deriveTopic(text) ?? text.trimmingCharacters(in: .whitespaces)
             } else {
-                // The user was asked for THIS slot and is answering it, so
-                // approximate matching is appropriate — a misheard memory name
-                // should still fill.
-                var value = entities.extract(slot.entity, from: text, isDirectAnswer: true)
-                // Open free-text entities (e.g. @remind) accept the raw answer as a
-                // fallback — a nil structured extraction is expected, not a failure.
-                if value == nil && entities.isOpen(slot.entity) {
-                    value = text.trimmingCharacters(in: .whitespaces)
+                // CLOSED entity. The user was asked for THIS slot and is answering it,
+                // so approximate matching is appropriate — a misheard memory name
+                // should still fill. Unchanged.
+                if let value = entities.extract(slot.entity, from: text, isDirectAnswer: true) {
+                    session.pendingSlots[slot.name] = value
                 }
-                if let value { session.pendingSlots[slot.name] = value }
             }
         }
 

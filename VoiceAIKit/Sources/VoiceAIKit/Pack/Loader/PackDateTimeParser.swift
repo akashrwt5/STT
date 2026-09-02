@@ -672,6 +672,28 @@ struct PackDateTimeParser: Sendable {
     /// Word boundaries are explicit lookarounds rather than `\b`: ICU's `\b`
     /// treats an accented letter as a non-word character, so `\bmardi\b` matches
     /// inside "démardi". Carried over from the lexicon path for that reason.
+    /// VIK-040. A one-or-two digit clock number, EITHER as digits or spelled out.
+    ///
+    /// `parse` normalises spelled-out numbers to digits before it matches
+    /// (`normalizeOrdinals` / `normalizeCardinals`, step 3). This function does
+    /// not, and every pattern below is written in `\d` — so "at nine" was
+    /// invisible to all of them while `parse` had already read it as 9:00. The
+    /// time reached `date_time` and ALSO stayed in the topic: "remind me to call
+    /// Mukesh at nine" produced the name "call Mukesh nine" (step 9 removed the
+    /// bare "at", stranding the number), where "at 9" produced "call Mukesh".
+    ///
+    /// Built from `numberIndex` — the same table `normalizeCardinals` uses — so
+    /// the two functions agree on what a number is by construction.
+    ///
+    /// Deliberately NOT solved by calling `normalizeCardinals` here: this text
+    /// becomes the reminder's NAME, and normalising it would rewrite every other
+    /// number the user said ("buy nine apples" -> "buy 9 apples"). Widening the
+    /// patterns only where a time marker is present leaves the rest alone.
+    private var clockNumber: String {
+        let words = Self.alternation(Array(numberIndex.keys))
+        return words.isEmpty ? #"\d{1,2}"# : #"(?:\d{1,2}|\#(words))"#
+    }
+
     func strippingDateTime(_ text: String) -> String {
         var t = text
 
@@ -690,7 +712,7 @@ struct PackDateTimeParser: Sendable {
         // 2 — a digit with an am/pm form, removed together. Stripping "pm"
         //     alone leaves a bare "9" in the topic.
         if let ampm = Self.alternationOrNil(stripAmPM) {
-            strip(#"\b\d{1,2}(?::\d{2})?\s*(?:\#(ampm))\b"#)
+            strip(#"\b\#(clockNumber)(?::\d{2})?\s*(?:\#(ampm))\b"#)
         }
 
         // 3 — a written clock.
@@ -701,7 +723,7 @@ struct PackDateTimeParser: Sendable {
         //     connectors — otherwise the connector goes and the orphan digit
         //     stays, and "dinner at 7" becomes the topic "dinner 7".
         if let atBy = Self.alternationOrNil(stripAtBy) {
-            strip(#"\b(?:\#(atBy))\s+\d{1,2}(?::\d{2})?\b"#)
+            strip(#"\b(?:\#(atBy))\s+\#(clockNumber)(?::\d{2})?\b"#)
         }
 
         // 5 — today / tomorrow / tonight.

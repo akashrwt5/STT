@@ -4,7 +4,7 @@ Defects found while making the package data-driven. The pack compiler's own
 tracker lives in the IntentClassifier repo (`docs/BUG_TRACKER.md`); anything
 here is iOS-side, or a contract gap that bites iOS specifically.
 
-**Summary:** 27 fixed, 10 open.
+**Summary:** 30 fixed, 12 open.
 
 Two of the fixes (VIK-015, VIK-016) were found by the parity suite on its first
 run, in code that compiled cleanly and had been read against the reference twice.
@@ -56,6 +56,11 @@ evidence here.
 | VIK-035 | security | **High** | The host extractor rewrote `bundle.json` before signature verification — every OTA install would fail once signing is on | **Fixed** |
 | VIK-036 | NLU | **High** | Keyword-routed intents skipped the confirmation gate — `Cmd.SendMessage` (`always`) sent without asking | **Fixed** |
 | VIK-037 | NLU | Med | An open slot's free text was overwritten by a gazetteer canonical — a reminder the user named "drink water" was stored as "Drink Water" | **Fixed** |
+| VIK-038 | NLU | **High** | Slot answers were re-classified and cancelled the flow — "Need to go to walk" scored 0.994 as a command and killed the reminder being set | **Fixed** |
+| VIK-039 | NLU | **High** | A follow-up answer skipped topic derivation — the carrier, the time and the gazetteer rewrite all survived into the reminder name | **Fixed** |
+| VIK-040 | NLU | **High** | Spelled-out times were read into `date_time` AND left in the name — "at nine" gave "call Mukesh nine", "at 9" gave "call Mukesh" | **Fixed** |
+| VIK-041 | contract | **High** | Politeness prefixes are not carriers — "Can you remind me to go for a walk" stores the whole sentence as the reminder name | Open — **pack-side** |
+| VIK-042 | NLU | Med | A bare hour 1–6 is assumed PM by a rule hardcoded in Swift — "at 3" is always 15:00, and no pack can change it | Open |
 
 ---
 
@@ -995,3 +1000,242 @@ opening-utterance paths call it, so the mid-flow opportunistic sweep is untouche
 happened to collide with a hint value ("drink water", "take medication"). Exactly the
 class of divergence the parity fixtures exist to catch, and exactly why VIK-013 wants
 them published by the pack's own build rather than captured by hand.
+
+---
+
+### VIK-038 — Slot answers were re-classified and cancelled the flow (**High**) — Fixed
+
+"Set a reminder" → *"What do you want to be reminded about?"* → **"Need to go to walk"** →
+the reminder was cancelled and a walk activity started.
+
+`handleSlotFilling` ran the intent classifier on **every** slot-filling turn, ahead of any
+attempt to fill the slot it had just asked about, and abandoned the flow whenever another
+intent came back at ≥ 0.75.
+
+The classifier is trained on COMMANDS. A slot answer is out-of-distribution input for it,
+and a confidence score on OOD input is not a quantity that can be thresholded. Measured
+against this pack's own weights:
+
+| the user's answer | classified as | conf |
+|---|---|---:|
+| "Need to go to walk" | `Cmd.ActivityWalk` | 0.994 |
+| "clean my hearing aids" | `Help_CleanCare` | 1.000 |
+| "charge my hearing aids" | `Help_Battery` | 0.979 |
+| "start my workout" | `Cmd.ActivityExercise` | 0.995 |
+| "pick up prescription" | `Cmd.VolumeIncrease` | 0.977 |
+| "send the report to my boss" | `Cmd.SendMessage` | 0.961 |
+
+Raising the threshold does not help: "start my workout" — a legitimate reminder — outscores
+"start transcribing", a real command (0.962). The two are structurally identical and differ
+only in whether the object is a device capability or a thing in the world.
+
+For a hearing-aid product the worst cases are the most likely reminders anyone will set:
+"remind me to clean my hearing aids" and "remind me to charge my hearing aids" both
+cancelled at 0.98+. The flow survived at all only by accident — "call mom", "drink water"
+and "buy milk" produce no vocabulary features, so they route out of scope through the
+`isVacuous` path.
+
+**Fix:** the probe is gated on what the awaited slot can *refuse*, never on the intent's
+name (this package does not interpret intent labels):
+
+| awaited entity | probe? | why |
+|---|---|---|
+| closed gazetteer | yes | in the list or not — a miss is a fact |
+| open free text | no | every utterance is a legal value; nothing to be right about |
+| date-time | no | the parser decides, not the classifier |
+
+For `pack-en` the reminder flow (`remind` + `sys.date_time`) no longer interrupts, and the
+memory flow (`memory`, 38 values) still does — "increase volume" is not a memory, so it
+still switches topic correctly. Reminder follow-up turns now cost no CoreML inference at all.
+
+**Introduced by:** `13653cb` (2026-06-20), *"Add intent interruption handling to slot-filling
+(mirrors Python NLUEngine)"*, which inserted the probe at the top of the method. Its worked
+example — "change memory to Car" — is command-shaped, so the feature was only ever checked
+against interruptions that look like commands. It shipped with no test, and none of the 142
+tests covered interruption until now. Live ~2.5 months.
+
+**Open question:** the commit claims it mirrors Python's `_handle_slot_filling`. That source
+is not in this repo. If Python fills first and probes second, this was purely a porting
+error and the server side is fine; if it probes first, the same bug is live there.
+
+**Found by:** field report — "set reminder" then "Need to go to walk" started a walk.
+**Tests:** `OpenSlotNameDerivationTests.testTheOpenNameSlotNeverInterrupts`,
+`.testTheDateSlotNeverInterrupts`, `.testTheClosedMemorySlotStillInterrupts`.
+
+---
+
+### VIK-039 — A follow-up answer skipped topic derivation (**High**) — Fixed
+
+The sibling VIK-037 left open. That fix made `fillOpenTopics` override rather than
+fill-if-empty, and said so explicitly: *"Only the three opening-utterance paths call it, so
+the mid-flow opportunistic sweep is untouched."* The answer to a slot's own prompt is that
+untouched path.
+
+So the same sentence produced two different names depending on where it was said:
+
+| the user says | as the opening | as the answer to the prompt |
+|---|---|---|
+| "remind me to buy milk" | `buy milk` | `remind me to buy milk` |
+| "set a reminder to call the doctor" | `call the doctor` | `set a reminder to call the doctor` |
+| "to walk the dog" | `walk the dog` | `to walk the dog` |
+| "drink water" | `drink water` | `Drink Water` |
+| "I need to pick up prescription" | `pick up prescription` | `Pick Up Prescription` |
+
+The last two are VIK-037 itself, still live on this path: `extract` runs first and returns
+the gazetteer's CANONICAL, discarding the rest of the sentence.
+
+**Fix:** an open entity is handled on its own branch and derives the topic the way the
+opening utterance already does. The gazetteer is not consulted for it at all — its value
+list is a hint, not a vocabulary (VIK-017) — which also removes a fuzzy hazard: `remind` is
+`fuzzy: true` and its only fuzzy-eligible synonym is "activity", which "acidity" and
+"captivity" are both inside the edit-distance limit of. Closed entities are untouched.
+
+**Tests:** `OpenSlotNameDerivationTests.testTheAnswerToThePromptHasItsCarrierStripped`,
+`.testATimeInTheAnswerFillsTheDateSlotAndLeavesTheName`,
+`.testOpeningAndFollowUpDeriveTheSameName`, `.testAClosedSlotStillResolvesThroughTheGazetteer`.
+
+---
+
+### VIK-040 — Spelled-out times survive into the reminder name (**High**) — Fixed
+
+```
+"Remind me to call Mukesh at 9"      ->  name "call Mukesh"        correct
+"Remind me to call Mukesh at nine"   ->  name "call Mukesh nine"   wrong
+```
+
+Same meaning, different result — and the time was extracted *correctly* in both cases, so
+`date_time` was right while the name was wrong.
+
+`parse` normalises spelled-out numbers to digits before it matches (`normalizeOrdinals` /
+`normalizeCardinals`). `strippingDateTime` did not, and all ten of its patterns are written
+in `\d`. So "at nine" was invisible to the stripper while `parse` had already read it as
+9:00. Step 9 then removed the bare "at" as a leftover connector, stranding the number — the
+exact failure step 4's comment warns about for digits ("dinner at 7" becoming "dinner 7"),
+reached by the spelled-out door.
+
+**Fix:** a `clockNumber` token that matches digits **or** spelled-out forms, built from
+`numberIndex` — the same table `normalizeCardinals` uses, so the two agree by construction —
+applied to the two patterns that carry a time marker (`<at|by> N`, `N am/pm`).
+
+Deliberately NOT fixed by calling `normalizeCardinals` inside `strippingDateTime`: this text
+becomes the reminder's NAME, and normalising it would rewrite every other number the user
+said ("buy nine apples" → "buy 9 apples"). Widening only the marked patterns leaves the rest
+verbatim.
+
+**Found by:** field report — device log, `'Remind me to call Mukesh at nine'`.
+**Test:** `OpenSlotNameDerivationTests.testASpelledOutTimeLeavesTheNameJustLikeADigitOne`.
+
+---
+
+## Open
+
+### VIK-041 — Politeness prefixes are not carriers (**High**) — Open, **pack-side**
+
+> **IMPORTANT — needs a pack change. Cannot be fixed in this repo.**
+
+```
+"Remind me to go for a walk"        ->  name "go for a walk"                        correct
+"Can you remind me to go for a walk" ->  name "Can you remind me to go for a walk"  wrong
+```
+
+`lexicons/en.json` ships six carriers, all anchored to the start of the utterance:
+
+```
+0: ^\s*please\s+
+1: ^\s*(?:do\s*n[o']?t|don't|dont)\s+let\s+me\s+forget\b\s*(?:to|about)?\s*
+2: ^\s*(?:remind|tell|alert|notify)\s+me\b\s*(?:to|that|about|of)?\s*
+3: ^\s*set(?:\s+up)?\s+(?:an?\s+)?(?:reminder|alarm)\b\s*(?:to|about)?\s*
+4: ^\s*make\s+sure\s+(?:i|to)\b\s*
+5: ^\s*i\s+(?:need|have|want)\s+to\b\s*
+```
+
+"Can you remind me…" starts with "Can you", so carrier 2 never matches and nothing is
+stripped. The whole sentence becomes the reminder's name. `^please` already sits at index 0,
+so the shape was understood — the polite-question form was simply never added.
+
+**Required change** — add to `lexicons/<lang>.json` `carriers`:
+
+```
+^\s*(?:can|could|would|will)\s+you\s+(?:please\s+)?
+^\s*i\s+want\s+you\s+to\s*
+```
+
+**ORDER IS LOAD-BEARING — they must go at the FRONT of the array, before carrier 2.**
+`deriveTopic` makes ONE pass in list order and each pattern is `^`-anchored, so a pattern is
+only ever tested against the string as it stands when its turn comes:
+
+```
+"can you" at the END:      ^remind me  -> no match ("can you …")
+                           ^can you    -> strips   -> "remind me to go for a walk"
+                           loop ends   -> ^remind me is never retried    STILL WRONG
+
+"can you" at the FRONT:    ^can you    -> strips   -> "remind me to go for a walk"
+                           ^remind me  -> strips   -> "go for a walk"    CORRECT
+```
+
+This is why `^please` is index 0 today. Any future politeness prefix has the same
+requirement.
+
+`lexicons/en.json` is listed in `integrity/manifest.sha256`, so this needs a pack recompile
+and re-sign — it cannot be hand-edited into the vendored pack.
+
+**Applies to every language pack**, not just English.
+
+**Found by:** field report — device log, `'Can you remind me to go for a walk'`.
+
+---
+
+### VIK-042 — A bare hour's AM/PM side is decided by a hardcoded rule (Med) — Open
+
+> **Language behaviour living in the engine instead of the pack — the VIK-001 shape.**
+
+"remind me to go for a walk tomorrow at 3" schedules **15:00**. There is no way for a pack
+to ask for anything else.
+
+`PackDateTimeParser.pickFutureHour`, line 627 — the branch taken when the user gave no
+am/pm and no period word:
+
+```swift
+default:
+    h24 = (1...6).contains(hour) ? hour + 12 : hour
+```
+
+| the user says | resolves to | |
+|---|---|---|
+| at 1, 2, 3, 4, 5, 6 | 13:00 … 18:00 | +12, assumed PM |
+| at 7, 8, 9, 10, 11, 12 | 07:00 … 12:00 | left alone, assumed AM |
+
+As a heuristic it is mostly right — "meet me at 3" usually is 15:00, "at 9" usually is 09:00.
+It breaks at the edge: **"wake me at 6" becomes 18:00.**
+
+The same-day escape hatch does not apply to a named day:
+
+```swift
+if candidate <= now, calendar.isDate(day, inSameDayAs: now), period == nil { …try the other half… }
+```
+
+`isDate(day, inSameDayAs: now)` is false for "tomorrow", so a future day always keeps the
+biased hour — which is exactly the reported case.
+
+**Why this is a defect and not a preference:** the constant is in Swift, not in the pack.
+`grep -rn "1\.\.\.6" Pack/ NLU/` returns this one line, and `datetime_grammar` carries no
+field that could override it — it has `time_format: "12h"` and `am_pm`, nothing about which
+half of the clock a bare hour belongs to. So every language pack inherits an English-speaking
+assumption it cannot express disagreement with. That is VIK-001's shape: a language decision
+compiled into the engine, invisible, with no error when it is wrong for a locale.
+
+**Two possible fixes:**
+
+1. *Narrow the range* (`1...4`?). Fixes "at 6", still hardcoded, still not pack-driven. A
+   patch, not a fix.
+2. *Move it to the pack.* Add to `datetime_grammar.grammar`, e.g.
+   `"bare_hour_pm_range": [1, 6]`, read it in `PackDateTimeParser.init`, and default to the
+   current `1...6` when a pack omits it so no existing pack changes behaviour. One engine
+   line plus a pack field, and a 24-hour or non-English pack can then state its own
+   convention.
+
+(2) is the one that matches this package's contract. It needs a pack recompile and re-sign,
+so it lands with the other pack-side items (VIK-041).
+
+**Found by:** field report — "remind me to go for a walk tomorrow at 3" scheduled 15:00, and
+the user expected the morning.
