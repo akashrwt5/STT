@@ -1,1 +1,0 @@
-{"intents":{"Cmd.TranscribeStart":{"completion":{"action":"transcribe.open","response":"Cmd.TranscribeStart.done"},"confirmation":{"prompt":"Cmd.TranscribeStart.confirm","required":false}}}}

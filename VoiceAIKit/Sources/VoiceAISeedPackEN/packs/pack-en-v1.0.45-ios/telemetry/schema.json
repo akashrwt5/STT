@@ -1,1 +1,0 @@
-{"enums":{"lifecycle":["discovered","downloaded","verified","warmed","active","retired","rolled_back"],"outcome":["fulfilled","confirmed","cancelled","abandoned","fallback"],"routing_reason":["confident","low_confidence","oos","unavailable"],"stages":["keyword","tfidf","semantic","fallback"]},"telemetry_schema_version":1}

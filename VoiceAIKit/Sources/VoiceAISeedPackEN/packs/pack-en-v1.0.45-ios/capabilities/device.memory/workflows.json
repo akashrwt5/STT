@@ -1,1 +1,0 @@
-{"intents":{"Cmd.MemoryChange":{"completion":{"action":"memory.change","response":"Cmd.MemoryChange.done"},"confirmation":{"prompt":"Cmd.MemoryChange.confirm","required":false},"slots":[{"entity":"memory","name":"memory_name","prompt":"Cmd.MemoryChange.ask_memory_name","required":true}]}}}

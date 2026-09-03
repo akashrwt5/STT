@@ -1,1 +1,0 @@
-{"intents":{"Cmd.FindMyPhone":{"completion":{"action":"phone.find","response":"Cmd.FindMyPhone.done"},"confirmation":{"prompt":"Cmd.FindMyPhone.confirm","required":false}}}}

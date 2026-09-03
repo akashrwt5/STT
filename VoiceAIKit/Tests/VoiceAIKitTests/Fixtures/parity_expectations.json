@@ -12,36 +12,60 @@
  "fire_boundary": [
   {
    "text": "turn up the volume",
+   "classifier_intent": "Cmd.VolumeIncrease",
+   "classifier_confidence": 0.999764,
+   "arbitration": "corroborated",
+   "stage": "keyword",
    "type": "FULFILL",
    "intent": "Cmd.VolumeIncrease",
    "confidence": 0.999764
   },
   {
    "text": "increase the volume",
+   "classifier_intent": "Cmd.VolumeIncrease",
+   "classifier_confidence": 0.99703,
+   "arbitration": "corroborated",
+   "stage": "keyword",
    "type": "FULFILL",
    "intent": "Cmd.VolumeIncrease",
    "confidence": 0.99703
   },
   {
    "text": "turn it up its too quiet",
+   "classifier_intent": "Cmd.VolumeIncrease",
+   "classifier_confidence": 0.692246,
+   "arbitration": "corroborated",
+   "stage": "keyword",
    "type": "FULFILL",
    "intent": "Cmd.VolumeIncrease",
    "confidence": 0.692246
   },
   {
    "text": "set a reminder to take my pills",
+   "classifier_intent": "reminders.add",
+   "classifier_confidence": 0.986859,
+   "arbitration": "corroborated",
+   "stage": "keyword",
    "type": "PROMPT",
    "intent": "reminders.add",
    "confidence": 1.0
   },
   {
    "text": "what is the weather in bangalore tomorrow",
+   "classifier_intent": "Default Fallback Intent",
+   "classifier_confidence": 0.90952,
+   "arbitration": null,
+   "stage": "tfidf",
    "type": "FALLBACK",
    "intent": "GENAI",
    "confidence": 0.90952
   },
   {
    "text": "mmm hmm okay so",
+   "classifier_intent": "Default Fallback Intent",
+   "classifier_confidence": 0.977889,
+   "arbitration": null,
+   "stage": "tfidf",
    "type": "FALLBACK",
    "intent": "GENAI",
    "confidence": 0.977889

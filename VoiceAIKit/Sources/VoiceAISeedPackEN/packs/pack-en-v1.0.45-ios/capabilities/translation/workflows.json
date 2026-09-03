@@ -1,1 +1,0 @@
-{"intents":{"Cmd.TranslationStart":{"completion":{"action":"translate.open","response":"Cmd.TranslationStart.done"},"confirmation":{"prompt":"Cmd.TranslationStart.confirm","required":false}}}}
