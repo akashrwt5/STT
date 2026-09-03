@@ -9,7 +9,7 @@ here is iOS-side, or a contract gap that bites iOS specifically.
 place, so an item marked Fixed can appear under `## Open`. The table above and
 each `###` heading are the authority; the two are checked against each other.
 
-**Summary:** 41 fixed, 16 open.
+**Summary:** 42 fixed, 16 open.
 
 Two of the fixes (VIK-015, VIK-016) were found by the parity suite on its first
 run, in code that compiled cleanly and had been read against the reference twice.
@@ -81,6 +81,7 @@ evidence here.
 | VIK-055 | parity | Med | `thresholds.agreement`, `thresholds.semantic` and `limits.session_timeout_s` are shipped by every pack and read by nothing in this package | Open |
 | VIK-056 | packaging | Low | iOS packs ship both `.mlpackage` (source) and `.mlmodelc` (compiled) for each head; iOS never opens the packaged form | **Fixed** |
 | VIK-057 | packaging | Low | Every pack shipped both CoreML heads, including channels where only one is ever bound | **Fixed** |
+| VIK-058 | security | Low | A placeholder GenAI endpoint was signed into every pack inside the weights blob, read by nothing | **Fixed** |
 
 ---
 
@@ -767,8 +768,8 @@ utterance needs no special-casing on the host side at all. `genaiURL` is gone fr
 `PackClassifierAdapter` was substituting `""` on the vacuous-prediction path
 (VIK-011), and an empty label matched nothing downstream.
 
-Follow-on for the compiler team: drop `genai_base_url` from the weights blob, and
-replace the `Default Fallback Intent.done` response — it currently reads "Done.",
+Follow-on for the compiler team: `genai_base_url` is gone from the weights blob
+(VIK-058). Still open: replace the `Default Fallback Intent.done` response — it currently reads "Done.",
 which is what a hearing aid would say aloud to a user it did not understand.
 
 ### VIK-030 — `runtime/routing.json` is decoded and never read (Med)
@@ -2002,4 +2003,39 @@ way. If that debug need arrives, it arrives as an explicit override flag.
 `PackLoadingTests.testFullVariantBindsItsOwnWeightsAndTemperature` loads it with
 `variant: .pruned`, which only a dev pack carries — the test now doubles as the
 statement of what a dev pack is.
+
+### VIK-058 — a placeholder endpoint was signed into every pack (Low) — Fixed
+
+`models/intent/<lang>/intent_classifier_weights*.json` carried:
+
+```json
+"genai_base_url": "https://genai.yourcompany.com/chat?query="
+```
+
+A host that does not exist, written by both exporters, hashed into
+`manifest.sha256`, covered by the Ed25519 signature, and delivered to every
+device — and read by NOTHING. Not this package (the string `genai_base_url` does
+not appear in Sources or Tests), not the reference engine, not a test.
+
+Low severity because nothing consumed it, and recorded anyway because the class
+matters twice over:
+
+* **An endpoint is deployment configuration, not a property of a trained model.**
+  Burying one in a signed artifact means it can only be changed by retraining and
+  re-signing. And a pack is meant to be portable across deployments, which it
+  stops being the moment it names one deployment's address.
+* **VIK-031 is what this class already cost.** Unresolved turns returned a URL
+  built from pack data with the user's transcript in its query string. That fix
+  removed the CONSUMER; this removes the DATA, so the next person wiring a
+  fallback has nothing convenient to reach for.
+
+Removed from `export_ios_weights.py` and `export_weights.py`, and guarded by
+`test_exported_weights_carry_no_endpoint`: an AST scan of every exporter for
+string constants beginning `http://` or `https://`. Asserted at the source rather
+than on a built payload, because building one needs trained artifacts and this
+has to fail in every environment. Verified red before the change and green after.
+
+Note for whoever ships the real thing: the endpoint belongs in host
+configuration, alongside the consent state that ADR-004 makes a per-user runtime
+availability condition — not in the pack, which cannot express either.
 
