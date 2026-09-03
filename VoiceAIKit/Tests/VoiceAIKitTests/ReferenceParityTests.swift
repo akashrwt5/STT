@@ -218,13 +218,20 @@ final class ReferenceParityTests: XCTestCase {
                 confirmationGates: PackEngineFactory.confirmationGates(from: pack))
             let response = await engine.handle(probe.text)
 
-            let actual: String
-            switch response {
-            case .fulfill:  actual = "FULFILL"
-            case .fallback: actual = "FALLBACK"
-            case .confirm:  actual = "CONFIRM"
-            case .prompt:   actual = "PROMPT"
+            // `.interrupted` wraps the response the new intent produced, and the
+            // reference reports the same shape — a result type plus a separate
+            // `interrupted_intent`. So unwrap to the inner result and compare
+            // that, rather than inventing a sixth type the fixture never records.
+            func kind(of response: NLUResponse) -> String {
+                switch response {
+                case .fulfill:  return "FULFILL"
+                case .fallback: return "FALLBACK"
+                case .confirm:  return "CONFIRM"
+                case .prompt:   return "PROMPT"
+                case .interrupted(_, let inner): return kind(of: inner)
+                }
             }
+            let actual = kind(of: response)
 
             if actual == probe.type { continue }
 
