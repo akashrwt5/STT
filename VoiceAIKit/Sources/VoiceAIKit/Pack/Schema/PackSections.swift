@@ -139,11 +139,25 @@ struct PackPolicies: Decodable, Sendable {
         /// Lower bound. Under this the utterance is too weak to confirm at all,
         /// and the turn is decided by the fire threshold like any other.
         let uncertainConfirmFloor: Double?
+        /// Out-of-vocabulary guard — BOTH halves, or neither.
+        ///
+        /// `oovReject` is the share of unrepresentable tokens above which the
+        /// turn goes to fallback whatever the confidence. `oovBypass` is the
+        /// confidence above which that guard stands down, and it is NOT
+        /// optional in the behavioural sense: entity values are out-of-vocabulary
+        /// by nature — "send a message to john" is 25% unknown and entirely real —
+        /// so the ratio alone refuses commands. The compiler emits the two from
+        /// one statement for that reason. Optional only so a pack predating them
+        /// still decodes; `NLUEngine` requires both before it applies either.
+        let oovReject: Double?
+        let oovBypass: Double?
 
         enum CodingKeys: String, CodingKey {
             case confidence, interrupt, semantic, agreement
             case uncertainConfirmBelow = "uncertain_confirm_below"
             case uncertainConfirmFloor = "uncertain_confirm_floor"
+            case oovReject = "oov_reject"
+            case oovBypass = "oov_bypass"
         }
     }
 

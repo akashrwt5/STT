@@ -131,6 +131,10 @@ actor PackIntentClassifier {
 
     // MARK: - Classification
 
+    /// Share of the utterance's tokens this head's vocabulary cannot represent.
+    /// See `PackTFIDFVectorizer.oovRatio(_:)`.
+    func oovRatio(_ text: String) -> Double { vectorizer.oovRatio(text) }
+
     func classify(_ text: String) -> Prediction {
         let vector = vectorizer.vectorize(text)
 

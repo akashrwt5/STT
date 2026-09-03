@@ -100,6 +100,8 @@ final class OpenSlotNameDerivationTests: XCTestCase {
             carriers: pack.lexicon.carriers,
             interruptThreshold: pack.policies.thresholds.interrupt,
             maxSlotAttempts: pack.policies.limits.maxSlotAttempts,
+            oovReject: pack.policies.thresholds.oovReject,
+            oovBypass: pack.policies.thresholds.oovBypass,
             leadingConnectors: pack.lexicon.leadingConnectors,
             confirmationGates: PackEngineFactory.confirmationGates(from: pack))
     }
@@ -121,6 +123,8 @@ final class OpenSlotNameDerivationTests: XCTestCase {
             carriers: pack.lexicon.carriers,
             interruptThreshold: pack.policies.thresholds.interrupt,
             maxSlotAttempts: pack.policies.limits.maxSlotAttempts,
+            oovReject: pack.policies.thresholds.oovReject,
+            oovBypass: pack.policies.thresholds.oovBypass,
             leadingConnectors: pack.lexicon.leadingConnectors,
             confirmationGates: PackEngineFactory.confirmationGates(from: pack))
     }
@@ -142,6 +146,8 @@ final class OpenSlotNameDerivationTests: XCTestCase {
             carriers: pack.lexicon.carriers,
             interruptThreshold: pack.policies.thresholds.interrupt,
             maxSlotAttempts: pack.policies.limits.maxSlotAttempts,
+            oovReject: pack.policies.thresholds.oovReject,
+            oovBypass: pack.policies.thresholds.oovBypass,
             leadingConnectors: pack.lexicon.leadingConnectors,
             confirmationGates: PackEngineFactory.confirmationGates(from: pack))
     }

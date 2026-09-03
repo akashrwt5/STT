@@ -103,6 +103,9 @@ enum PackEngineFactory {
             // same number out of `interrupt_threshold`; that is the parity.
             interruptThreshold: pack.policies.thresholds.interrupt,
             maxSlotAttempts: pack.policies.limits.maxSlotAttempts,
+            // The pair the compiler emits from one statement; passed the same way.
+            oovReject: pack.policies.thresholds.oovReject,
+            oovBypass: pack.policies.thresholds.oovBypass,
             trailingFunctionWords: effectiveTrailingWords,
             leadingConnectors: lexicon.leadingConnectors,
             confirmationGates: confirmationGates(from: pack))
@@ -232,6 +235,10 @@ actor PackClassifierAdapter: IntentClassifying {
         self.classifier = try PackIntentClassifier(artifacts: pack.classifier)
         self.outOfScopeIntent = pack.outOfScopeIntent ?? ""
         self.semanticEnabled = pack.stageEnabled(.semantic)
+    }
+
+    func oovRatio(_ text: String) async -> Double {
+        await classifier.oovRatio(text)
     }
 
     func classifyAsync(_ text: String) async -> ClassificationResult {

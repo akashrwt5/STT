@@ -43,9 +43,47 @@ struct PackTFIDFVectorizer: Sendable {
     /// Inverse document frequency, one per column.
     let idf: [Double]
 
+    /// The single-word terms only. Bigram keys carry a space, so they are the
+    /// ones excluded — the OOV guard asks "can the featurizer represent this
+    /// WORD?", and a bigram is not an answer to that. Precomputed because the
+    /// guard runs on every turn and the vocabulary is up to 4718 entries.
+    let unigrams: Set<String>
+
     init(vocabulary: [String: Int], idf: [Double]) {
         self.vocabulary = vocabulary
         self.idf = idf
+        var single = Set<String>()
+        single.reserveCapacity(vocabulary.count)
+        for term in vocabulary.keys where !term.contains(" ") { single.insert(term) }
+        self.unigrams = single
+    }
+
+    /// Share of this utterance's tokens the featurizer cannot represent.
+    ///
+    /// A token outside the vocabulary is not weighed and dismissed — there is no
+    /// column to put it in, so the sentence reaches the model without it:
+    ///
+    ///     "turn off"          -> 3 non-zero features
+    ///     "turn off toshiba"  -> 3 non-zero features, cosine 1.000000
+    ///
+    /// The two vectors are bit-identical, so no threshold or training row can
+    /// separate them: the model is never asked the question. And the word that
+    /// puts an utterance out of scope is almost always a rare, specific one — a
+    /// brand, an object, a topic — exactly what a finite vocabulary lacks.
+    ///
+    /// Mirrors the reference `IntentClassifier.oov_ratio`, which tokenises with
+    /// `(?u)\b\w\w+\b` — the same rule `tokenize(_:)` implements — and counts
+    /// against the model's UNIGRAM vocabulary.
+    ///
+    /// Returns 0 when there is no vocabulary or no token, which DISABLES the
+    /// guard rather than rejecting everything. The reference does the same.
+    func oovRatio(_ text: String) -> Double {
+        guard !unigrams.isEmpty else { return 0 }
+        let tokens = tokenize(text)
+        guard !tokens.isEmpty else { return 0 }
+        var unknown = 0
+        for token in tokens where !unigrams.contains(token) { unknown += 1 }
+        return Double(unknown) / Double(tokens.count)
     }
 
     /// Feature width the head expects.

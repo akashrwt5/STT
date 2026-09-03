@@ -31,6 +31,17 @@ protocol IntentClassifying: Actor {
     func loadStage3() async
     /// Releases Stage 3 refs. Stage 3 is skipped on future classifications.
     func releaseStage3() async
+    /// Share of the utterance's tokens the featurizer cannot represent, for the
+    /// out-of-vocabulary guard. See `PackTFIDFVectorizer.oovRatio(_:)`.
+    func oovRatio(_ text: String) async -> Double
+}
+
+extension IntentClassifying {
+    /// A classifier that cannot report a vocabulary DISABLES the guard rather
+    /// than having every turn refused — which is what the reference engine does
+    /// ("Returns 0.0 when the backend cannot report a vocabulary"). Test doubles
+    /// and any future non-TF-IDF stage land here.
+    func oovRatio(_ text: String) async -> Double { 0 }
 }
 
 // MARK: - ConversationEngine

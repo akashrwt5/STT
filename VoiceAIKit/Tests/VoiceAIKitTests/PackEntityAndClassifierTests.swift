@@ -159,6 +159,43 @@ final class PackIntentClassifierTests: XCTestCase {
     /// VIK-002: sklearn drops 1-character tokens BEFORE forming bigrams, so
     /// "set a reminder" trains on `set reminder`. Keeping the "a" produces
     /// `set a` + `a reminder` and the trained feature is never generated.
+    /// VIK-054. The out-of-vocabulary ratio, against the pack's real vocabulary.
+    ///
+    /// Pins the numbers the guard was fitted on. The first and third case have
+    /// the SAME ratio and opposite correct answers — "john" is an entity value,
+    /// "paper" puts the utterance out of scope — which is the whole reason the
+    /// guard needs `oov_bypass` as well as `oov_reject`, and the reason this test
+    /// asserts the ratio rather than the verdict.
+    ///
+    /// Measured identically by the reference `IntentClassifier.oov_ratio`, which
+    /// tokenises with `(?u)\b\w\w+\b` and counts against the UNIGRAM vocabulary.
+    func testOutOfVocabularyRatioMatchesTheReference() async throws {
+        let cases: [(String, Double)] = [
+            ("send a message to john", 1.0 / 4.0),   // a real command
+            ("stream from netflix",    1.0 / 3.0),   // a real command
+            ("help me find a paper",   1.0 / 4.0),   // out of scope
+            ("increase the volume",    0.0),
+        ]
+        for (utterance, expected) in cases {
+            let ratio = await classifier.oovRatio(utterance)
+            XCTAssertEqual(ratio, expected, accuracy: 1e-9,
+                           "oov ratio changed for '\(utterance)'")
+        }
+    }
+
+    /// The guard asks "can the featurizer represent this WORD?", so a bigram is
+    /// not an answer to it and must not be counted as vocabulary.
+    func testOnlyUnigramsCountAsKnownVocabulary() throws {
+        let vectorizer = PackTFIDFVectorizer(
+            vocabulary: ["set": 0, "reminder": 1, "set reminder": 2],
+            idf: [1, 1, 1])
+        XCTAssertEqual(vectorizer.unigrams, ["set", "reminder"])
+        // "tomorrow" is unknown; "set" and "reminder" are not.
+        XCTAssertEqual(vectorizer.oovRatio("set reminder tomorrow"), 1.0 / 3.0, accuracy: 1e-9)
+        // No vocabulary at all disables the guard rather than refusing everything.
+        XCTAssertEqual(PackTFIDFVectorizer(vocabulary: [:], idf: []).oovRatio("anything"), 0)
+    }
+
     func testTokenizerMatchesTheTrainer() throws {
         let vectorizer = PackTFIDFVectorizer(
             vocabulary: ["set": 0, "reminder": 1, "set reminder": 2],

@@ -88,6 +88,11 @@ actor NLUEngine: ConversationEngine {
         interruptThreshold: Double,
         /// `policies.limits.max_slot_attempts`. No default, same reasoning.
         maxSlotAttempts: Int,
+        /// `policies.thresholds.oov_reject` and `oov_bypass`. A PAIR — the guard
+        /// runs only when both are present, because half of it is worse than
+        /// neither. Nil disables it, which is what a pack predating them means.
+        oovReject: Double?,
+        oovBypass: Double?,
         /// Language-specific trailing function words. `nil` → the English default set,
         /// preserving prior behaviour for English packs.
         trailingFunctionWords: Set<String>? = nil,
@@ -108,6 +113,8 @@ actor NLUEngine: ConversationEngine {
         self.carrierPatterns = carriers
         self.interruptThreshold = interruptThreshold
         self.maxSlotAttempts = maxSlotAttempts
+        self.oovReject = oovReject
+        self.oovBypass = oovBypass
         self.confirmationGates = confirmationGates
         self.trailingFunctionWords = trailingFunctionWords ?? []
 
@@ -272,6 +279,11 @@ actor NLUEngine: ConversationEngine {
     /// 3s that agreed only by coincidence, and a pack field no one could change.
     /// Python now reads it from the content too (`self.max_slot_attempts`).
     private let maxSlotAttempts: Int
+
+    /// Out-of-vocabulary guard, `policies.thresholds.oov_reject` / `oov_bypass`.
+    /// Read as a pair or not at all — see `handleNewIntent`.
+    private let oovReject: Double?
+    private let oovBypass: Double?
 
     private func handleSlotFilling(_ text: String) async -> NLUResponse {
         guard let intent = session.pendingIntent, let cfg = schema.intents[intent] else {
@@ -487,7 +499,48 @@ actor NLUEngine: ConversationEngine {
         // utterance matched the vocabulary, so `PackClassifierAdapter` substitutes
         // `pack.outOfScopeIntent`, which now resolves to the pack's real fallback
         // label instead of "".
+        // VIK-054. OUT-OF-VOCABULARY GUARD. A confident reading of the words the
+        // featurizer CAN see says nothing about the words it cannot.
+        //
+        // The TF-IDF vocabulary is a fixed set of columns. A token outside it is
+        // not weighed and dismissed — there is nowhere to put it, so the sentence
+        // reaches the model without it. "help me find a paper" arrives as "help
+        // me find", on which `Help_FindMyHearingAids` at 0.771 is a correct
+        // answer to a question the user did not ask. The confidence is honest
+        // about the input the model was GIVEN, which is why no threshold can fix
+        // this and a separate signal is needed.
+        //
+        // Both halves or neither. Entity values are out-of-vocabulary BY NATURE —
+        // a contact name, a brand, a free-text reminder topic can never all be in
+        // a finite vocabulary — so the ratio alone refuses real commands. Measured
+        // on this pack's own weights:
+        //
+        //     'send a message to john'   oov 0.25, conf 1.000   <- a real command
+        //     'stream from netflix'      oov 0.33, conf 0.996   <- a real command
+        //     'help me find a paper'     oov 0.25, conf 0.771   <- out of scope
+        //
+        // The first and third have the SAME ratio; only the confidence separates
+        // them, which is what `oovBypass` is for. Adding that condition kept the
+        // out-of-scope reduction (10 -> 5) and returned 7 correct commands the
+        // bare ratio was refusing.
+        //
+        // Placed immediately before the fire test, as in the reference engine, so
+        // it can only ever WITHHOLD an action and never cause one. One knowing
+        // difference from Python: there, the guard runs before semantic rescue is
+        // attempted, so a blocked turn never reaches it. Here rescue has already
+        // happened inside `classifyAsync`, so a rescued turn is guarded on the
+        // rescue's confidence. Moot while the pack disables the semantic stage;
+        // recorded because it is the kind of ordering that becomes a divergence
+        // the day it is enabled.
         let outOfScope = intent == "OUT_OF_SCOPE" || intent == schema.fallbackIntent
+        if let reject = oovReject, let bypass = oovBypass, !outOfScope, conf < bypass {
+            let ratio = await classifier.oovRatio(text)
+            if ratio >= reject {
+                return .fallback(intent: schema.fallbackIntent,
+                                 confidence: conf, breakdown: breakdown)
+            }
+        }
+
         if !rescued && (outOfScope || conf < schema.confidenceThreshold) {
             return .fallback(intent: schema.fallbackIntent,
                              confidence: conf, breakdown: breakdown)
