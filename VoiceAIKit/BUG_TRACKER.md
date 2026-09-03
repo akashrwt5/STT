@@ -9,7 +9,7 @@ here is iOS-side, or a contract gap that bites iOS specifically.
 place, so an item marked Fixed can appear under `## Open`. The table above and
 each `###` heading are the authority; the two are checked against each other.
 
-**Summary:** 40 fixed, 16 open.
+**Summary:** 41 fixed, 16 open.
 
 Two of the fixes (VIK-015, VIK-016) were found by the parity suite on its first
 run, in code that compiled cleanly and had been read against the reference twice.
@@ -80,6 +80,7 @@ evidence here.
 | VIK-054 | parity | **High** | The out-of-vocabulary guard is Python-only. `oov_reject`/`oov_bypass` are not even decoded here, so this runtime fires on utterances the reference engine refuses | **Fixed** |
 | VIK-055 | parity | Med | `thresholds.agreement`, `thresholds.semantic` and `limits.session_timeout_s` are shipped by every pack and read by nothing in this package | Open |
 | VIK-056 | packaging | Low | iOS packs ship both `.mlpackage` (source) and `.mlmodelc` (compiled) for each head; iOS never opens the packaged form | **Fixed** |
+| VIK-057 | packaging | Low | Every pack shipped both CoreML heads, including channels where only one is ever bound | **Fixed** |
 
 ---
 
@@ -1943,4 +1944,62 @@ environment-conditional split the packaging review asked for (its P1-NEW-2).
 
 Measured on the shipped pack: **7.1 MB → 5.6 MB**, with the manifest still
 schema-valid and every declared artifact present on disk.
+
+### VIK-057 — the channel now decides which heads ride along (Low) — Fixed
+
+A pack carries two CoreML heads: the RFE-pruned one (~1317 features, 88.57% on
+the honest holdout) and the full-vocabulary one (~4718, 90.20%).
+`BundleDataLoader` defaults to `.full` and NO production path passes a variant —
+`VoiceIntentPack.swift` and `VoiceIntentSession.swift` both call `load` without
+one — so outside an A/B experiment or a test, the pruned head is loaded by
+nobody and shipped to everybody.
+
+Now:
+
+| channel | heads |
+|---|---|
+| `dev` | both, so a variant can be flipped without republishing |
+| `beta`, `production` | the full head only (production cannot be fatter than beta) |
+
+**No change in this package.** The `.full` path needs
+`coreml_full_compiled_artifact`, `intent_classifier_weights_full.json` and
+`calibration.json`'s `temperature_coreml_full`; all three are present in every
+channel, so an unchanged SDK loads a beta pack. Verified against the schema and
+the shipped pack rather than reasoned about.
+
+Three things make it safe rather than merely smaller:
+
+**The pruned head is a TRIPLE, not a file.** Its `.mlmodelc`, its own
+vocabulary/idf in `intent_classifier_weights.json`, and its own fitted
+`temperature_coreml`. `ClassifierVariant` says why: "Mixing legs produces a shape
+mismatch at best and plausible-looking wrong confidences at worst, which is why
+`resolveClassifier` binds all three together or throws." All three leave, or
+none — asserted per channel in the compiler's own check.
+
+**`artifact` is repointed LAST.** An earlier revision of this change set
+`artifact` to the pruned `.mlmodelc` and then deleted it two blocks later — the
+exact VIK-051 defect, reintroduced one channel over, caught by the invariant
+check and not by reading. It now names the head the runtime actually binds (the
+full one) and is computed after every strip.
+
+**CI refuses the bad build.** A non-dev build without the full compiled head
+would produce a pack with no head the device can bind. That fails at load with
+`declaredArtifactMissing` — loud, but on a device instead of in CI —
+so `assemble_pack` refuses it up front.
+
+Measured on the shipped pack: dev ~5.6 MB, beta/production ~4.5 MB.
+
+**The cost, recorded rather than buried.** This rides on `channel`, which is a
+TRUST axis — ADR-005 Part 11: "channel + signing-key id in the manifest lets
+production runtimes refuse dev-signed artifacts categorically." Overloading it
+means there is no way to build "dev channel, production contents", which is
+exactly what isolates whether a field bug comes from the artifact set. Accepted
+deliberately: the alternative is a second axis every reader must keep straight,
+and `bundle.json` is `additionalProperties: false` so it is a spec change either
+way. If that debug need arrives, it arrives as an explicit override flag.
+
+**Consequence for this repo:** the vendored seed pack must stay `channel: dev`.
+`PackLoadingTests.testFullVariantBindsItsOwnWeightsAndTemperature` loads it with
+`variant: .pruned`, which only a dev pack carries — the test now doubles as the
+statement of what a dev pack is.
 
