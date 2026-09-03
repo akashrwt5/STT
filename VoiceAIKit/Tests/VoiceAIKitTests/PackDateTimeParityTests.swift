@@ -115,11 +115,36 @@ final class PackDateTimeParityTests: XCTestCase {
     // regression names the rule it broke instead of appearing as one of N
     // failures in a list.
 
-    /// Hours 1–6 with no am/pm are PM. "nobody sets 3am reminders".
-    func testAmbiguousEveningHourResolvesToPM() throws {
-        let match = try XCTUnwrap(parser.parse("saturday at 6", now: now))
-        XCTAssertEqual(match.date, PackTestSupport.instant("2026-08-08T18:00:00Z"),
-                       "6 with no am/pm must be 18:00, not 06:00 — a 12-hour error")
+    /// A bare hour takes the EARLIEST reading still ahead of the clock.
+    ///
+    /// This replaced `1-6 -> PM, 7-12 -> AM`, which guessed the half of the clock
+    /// before consulting `now` and only looked at the time to rescue a guess that
+    /// had landed in the past. "wake me at 6" said at 05:41 scheduled 18:00, with
+    /// 06:00 nineteen minutes away and in the future. The old rule was also an
+    /// English-speaking assumption compiled into the engine that no language pack
+    /// could disagree with, and narrowing its range would only have retuned the
+    /// magic number. There is no constant now: the answer comes from the clock.
+    ///
+    /// Both branches are asserted, because the rule is only legible as a pair:
+    ///
+    ///   * a NAMED DAY — both readings are ahead, so the earliest wins and
+    ///     "saturday at 6" is 06:00. This is the accepted cost of the rule,
+    ///     documented at the implementation: saying "6 pm" is the user's half of
+    ///     the contract.
+    ///   * TODAY with the morning reading already past — "at 5" at 10:00 can only
+    ///     mean 17:00.
+    ///
+    /// The corpus test above covers both from the reference fixture; they are
+    /// named here so a regression says which half of the rule it broke.
+    func testBareHourTakesTheEarliestReadingStillAhead() throws {
+        let namedDay = try XCTUnwrap(parser.parse("saturday at 6", now: now))
+        XCTAssertEqual(namedDay.date, PackTestSupport.instant("2026-08-08T06:00:00Z"),
+                       "on a named day both readings are ahead, so 6 is 06:00 — "
+                       + "18:00 would be the old 1-6-means-PM guess")
+
+        let today = try XCTUnwrap(parser.parse("at 5", now: now))
+        XCTAssertEqual(today.date, PackTestSupport.instant("2026-08-03T17:00:00Z"),
+                       "05:00 is already past at 10:00, so 5 can only mean 17:00")
     }
 
     /// A colon supplies minutes, not a half of the clock.
