@@ -1,0 +1,1 @@
+{"conf_threshold":0.7,"ece_calibrated":0.0126,"ece_raw":0.1113,"fitted_on":"803a97d57a5397b1db522b18c982fe0a70092719265aabbe375830b55da6074b","method":"temperature_scaling","temperature":0.671457,"temperature_coreml":0.822109,"temperature_coreml_full":0.54399,"temperature_int8":0.529646}

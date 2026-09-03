@@ -1,0 +1,1 @@
+{"actions":[{"descriptor":"Cmd.SendMessage — Ready to record your message.","key":"message.compose","params":[]},{"descriptor":"Cmd.ListenMessage — Playing your message.","key":"message.listen","params":[]}],"id":"messaging.ptt","languages":["en"],"owner":"platform-team","platforms":["ios","android","server"],"status":"active","version":"1.0"}

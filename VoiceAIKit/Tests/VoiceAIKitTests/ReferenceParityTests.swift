@@ -55,9 +55,25 @@ final class ReferenceParityTests: XCTestCase {
         }
         struct Turn: Decodable {
             let text: String
+            /// The classifier's VERDICT — the input to the engine's decision.
+            /// Distinct from `intent` below, which is the OUTCOME: the reference
+            /// invents `GENAI` at fallback time, and it is not a label the model
+            /// can produce. Scripting the outcome back in as a verdict is exactly
+            /// the mistake the first version of this test made.
+            let classifierIntent: String
+            let classifierConfidence: Double
+            /// "corroborated" when a keyword rule and the model agree — which is
+            /// what drops the reference's fire bar to `agreement` (VIK-055).
+            let arbitration: String?
             let type: String
             let intent: String?
             let confidence: Double
+
+            enum CodingKeys: String, CodingKey {
+                case text, arbitration, type, intent, confidence
+                case classifierIntent = "classifier_intent"
+                case classifierConfidence = "classifier_confidence"
+            }
         }
         struct OOVCase: Decodable {
             let text: String
@@ -196,7 +212,7 @@ final class ReferenceParityTests: XCTestCase {
         var divergences: [String] = []
 
         for probe in fixture.fireBoundary {
-            guard let intent = probe.intent else { continue }
+            let intent = probe.classifierIntent
 
             // Built the way `PackEngineFactory` builds it, with only the
             // classifier swapped — the same discipline ConfirmationAndSlotFlowTests
@@ -205,8 +221,8 @@ final class ReferenceParityTests: XCTestCase {
             let schema = PackEngineFactory.schema(from: pack)
             let engine = NLUEngine(
                 schema: schema,
-                classifier: ScriptedParityClassifier(label: intent,
-                                                     confidence: probe.confidence),
+                classifier: ScriptedParityClassifier(
+                    label: intent, confidence: probe.classifierConfidence),
                 entities: PackSlotResolver(pack: pack),
                 uncertain: [],
                 noIdioms: [],
@@ -251,11 +267,17 @@ final class ReferenceParityTests: XCTestCase {
 
             if actual == probe.type { continue }
 
-            // Corroborated below the bar — the reference fires, we cannot yet.
-            if probe.type == "FULFILL", actual == "FALLBACK", probe.confidence < bar {
-                divergences.append("""
-                    \(probe.text.debugDescription): reference FULFILL at                     \(probe.confidence) (corroborated, bar drops to                     \(fixture.thresholds.agreement)); this engine FALLBACK at bar \(bar)
-                    """)
+            // Corroborated: a keyword rule and the model agreed, so the
+            // reference dropped its bar to `agreement`. This engine has no such
+            // concept and applies a flat bar (VIK-055), so it falls back where
+            // the reference fires. Read off the RECORDED arbitration rather than
+            // inferred from the confidence — inferring it would also swallow a
+            // genuine gate bug that happens to sit below the bar.
+            if probe.arbitration == "corroborated",
+               probe.type == "FULFILL", actual == "FALLBACK" {
+                divergences.append("\(probe.text.debugDescription): reference FULFILL at "
+                    + "\(probe.classifierConfidence) (corroborated, bar drops to "
+                    + "\(fixture.thresholds.agreement)); this engine FALLBACK at bar \(bar)")
                 continue
             }
 

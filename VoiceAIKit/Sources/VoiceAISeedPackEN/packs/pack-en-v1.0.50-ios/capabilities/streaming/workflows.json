@@ -1,0 +1,1 @@
+{"intents":{"Cmd.StreamingStart":{"completion":{"action":"streaming.start","response":"Cmd.StreamingStart.done"},"confirmation":{"prompt":"Cmd.StreamingStart.confirm","required":false}},"Cmd.StreamingStop":{"completion":{"action":"streaming.stop","response":"Cmd.StreamingStop.done"},"confirmation":{"prompt":"Cmd.StreamingStop.confirm","required":false}}}}
