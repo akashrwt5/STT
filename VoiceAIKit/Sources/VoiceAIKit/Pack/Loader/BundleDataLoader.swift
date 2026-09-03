@@ -105,6 +105,9 @@ enum BundleDataLoader {
         let (manifest, lang) = try verifiedManifest(
             packAt: url, language: language, trust: trust, policy: policy)
 
+        // 5b — every artifact the manifest declares is actually in the pack.
+        try verifyDeclaredArtifacts(root: url, manifest: manifest, policy: policy)
+
         // 6 — sections.
         let sections = try loadSections(root: url, language: lang, manifest: manifest, policy: policy)
 
@@ -119,6 +122,43 @@ enum BundleDataLoader {
             semantic stage \(resolved.stageEnabled(.semantic) ? "on" : "off", privacy: .public)
             """)
         return resolved
+    }
+
+    // MARK: - Declared artifacts
+
+    /// Refuse a pack whose `bundle.json` names a file it does not ship.
+    ///
+    /// `ModelSpec.declaredPaths` and `PackLoadPolicy.toleratedMissingArtifacts`
+    /// existed for exactly this, complete with a documented tolerance list and a
+    /// `declaredArtifactMissing` error — and NOTHING CALLED THEM. The check was a
+    /// shape, not a behaviour, which is why `models/intent/<lang>/model.onnx` sat
+    /// in every iOS pack's manifest, deleted from disk by the build that wrote it,
+    /// for as long as iOS packs have existed (VIK-051/052). A policy field that
+    /// documents a safety behaviour the code does not perform is worse than no
+    /// field: it is what stops a reviewer looking.
+    ///
+    /// Runs AFTER integrity and BEFORE any section is read, so a pack fails on
+    /// the manifest's own promise rather than at the first artifact that happens
+    /// to be needed.
+    ///
+    /// `existsAtPath` is used without `isDirectory:` deliberately: `.mlmodelc` and
+    /// `.mlpackage` are DIRECTORIES, and a check that demanded a regular file
+    /// would refuse every CoreML pack.
+    static func verifyDeclaredArtifacts(root: URL,
+                                        manifest: NLUBundle,
+                                        policy: PackLoadPolicy) throws {
+        var declared: [String] = []
+        for (_, byScope) in manifest.models.families {
+            for (_, spec) in byScope {
+                declared.append(contentsOf: spec.declaredPaths)
+            }
+        }
+        for path in declared where !policy.toleratedMissingArtifacts.contains(path) {
+            let url = root.appendingPathComponent(path)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                throw VoiceIntentError.declaredArtifactMissing(path: path)
+            }
+        }
     }
 
     // MARK: - Language

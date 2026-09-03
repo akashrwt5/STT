@@ -72,17 +72,35 @@ public struct PackLoadPolicy: Sendable {
 
     /// Declared artifacts allowed to be absent.
     ///
-    /// `models/semantic_head/shared/head.json` is declared by every pack the
-    /// compiler currently emits and shipped by none (BUG-013). Nothing reads it
-    /// — the semantic head loads from `SemanticHead.mlpackage` — so refusing
-    /// the pack over it would block every release for a field with no consumer.
+    /// Both entries below are LEGACY, and both are fixed in the compiler as of
+    /// the change that turned `verifyDeclaredArtifacts` on. They are listed only
+    /// so that packs built BEFORE that fix — including the seed pack vendored in
+    /// this repo — still load while the first corrected pack is being built.
+    ///
+    /// **Delete both entries once no supported pack declares them**, and this set
+    /// goes back to being empty, which is the state it should live in. A
+    /// tolerance list that accumulates is how a check stops being one.
+    ///
+    ///   * `models/semantic_head/shared/head.json` — declared by every pack the
+    ///     compiler used to emit and shipped by none (VIK-010). The compiler now
+    ///     declares a semantic head only when it has one to ship;
+    ///     `models.semantic_head` is optional in the bundle schema, which is the
+    ///     way out the original code was looking for.
+    ///   * `models/intent/en/model.onnx` — the iOS slice deleted the ONNX and
+    ///     kept declaring it (VIK-051). `mod_ios` now repoints `artifact` at the
+    ///     compiled CoreML head (`format: "mlmodelc-ref"`) when it removes the
+    ///     ONNX. Exact path, not a pattern, so a second language cannot inherit
+    ///     the exemption by accident — `en` is the only pack this ever shipped in.
     public let toleratedMissingArtifacts: Set<String>
 
     /// Refuse a pack whose own report card says its gates did not pass.
     public let requiresPassingGates: Bool
 
     public init(ignoredFileNames: Set<String> = [".DS_Store", "Thumbs.db"],
-                toleratedMissingArtifacts: Set<String> = ["models/semantic_head/shared/head.json"],
+                toleratedMissingArtifacts: Set<String> = [
+                    "models/semantic_head/shared/head.json",   // VIK-010, delete after 1.0.46
+                    "models/intent/en/model.onnx",             // VIK-051, delete after 1.0.46
+                ],
                 requiresPassingGates: Bool = true) {
         self.ignoredFileNames = ignoredFileNames
         self.toleratedMissingArtifacts = toleratedMissingArtifacts
