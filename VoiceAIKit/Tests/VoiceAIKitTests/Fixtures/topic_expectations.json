@@ -43,7 +43,7 @@
     },
     {
       "text": "water plants each saturday",
-      "expected": "water plants each"
+      "expected": "water plants"
     },
     {
       "text": "dinner at 7",
@@ -95,7 +95,7 @@
     },
     {
       "text": "water plants every sunday",
-      "expected": "water plants every"
+      "expected": "water plants"
     },
     {
       "text": "book table for 4 people",

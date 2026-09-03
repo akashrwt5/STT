@@ -470,7 +470,16 @@ struct PackDateTimeParser: Sendable {
 
     // MARK: - 5/6. Clock
 
-    private struct Clock { var hour: Int; var minute: Int; var span: String; var explicitAMPM: Bool }
+    private struct Clock {
+        var hour: Int
+        var minute: Int
+        var span: String
+        var explicitAMPM: Bool
+        /// The hour came from a NAMED time ("noon", "midnight") with no digit in
+        /// the utterance, which makes it unambiguous — noon is 12:00 and says so.
+        /// Defaulted false so only that one construction site sets it.
+        var isNamedTime: Bool = false
+    }
 
     private func time(in t: String, period: String?) -> Clock? {
         // Idioms first — "half past 9" must not be read as a bare "9".
@@ -565,7 +574,8 @@ struct PackDateTimeParser: Sendable {
         // hint still drives disambiguation — "in the morning" at 10:00 must roll
         // to 08:00 TOMORROW, not resolve to a time already past today.
         if let period, let h = periodHours[period] {
-            return Clock(hour: h, minute: 0, span: period, explicitAMPM: false)
+            return Clock(hour: h, minute: 0, span: period, explicitAMPM: false,
+                         isNamedTime: true)
         }
         return nil
     }
@@ -591,8 +601,21 @@ struct PackDateTimeParser: Sendable {
         guard (0...59).contains(clock.minute) else { return nil }
 
         let resolved: Date?
-        if (1...12).contains(clock.hour) && !clock.explicitAMPM && !is24Hour {
+        if (1...12).contains(clock.hour) && !clock.explicitAMPM && !is24Hour
+            && !clock.isNamedTime {
             // Ambiguous 12-hour input — use the period hint to pick a side.
+            //
+            // `isNamedTime` is excluded because noon is not ambiguous: the hour
+            // came from the word, not from a digit the user spoke. Sending it
+            // here reads the 12 as a bare clock hour and offers 00:00 as its
+            // other half, landing "at noon" on midnight. The rule this file
+            // used to carry kept noon by leaving 7-12 alone — luck, not
+            // handling, and it stopped being lucky when the bare-hour rule
+            // changed.
+            //
+            // It must be the flag and NOT `periodHours[period] != nil`: "3 in
+            // the afternoon" also carries a named period, but the 3 came from
+            // the user and the period is what says which 3 they meant.
             resolved = pickFutureHour(clock.hour, clock.minute, on: baseDay, now: now, period: period)
         } else {
             guard (0...23).contains(clock.hour) else { return nil }
@@ -624,21 +647,40 @@ struct PackDateTimeParser: Sendable {
         case "pm", "afternoon", "evening", "night":
             h24 = hour % 12 + 12                  // 12pm → 12
         default:
-            h24 = (1...6).contains(hour) ? hour + 12 : hour
+            // AMBIGUOUS bare hour — "at 6" is 06:00 or 18:00, and the utterance
+            // does not say which. Take the EARLIEST reading still ahead of us.
+            // One rule everywhere: today, tomorrow, a named weekday.
+            //
+            // Deliberately literal rather than clever. The engine cannot know
+            // whether "at 6" is a wake-up or a dinner, so it does not pretend to:
+            // the user said six, six is what they get, and "6 pm" is there for
+            // anyone who means the evening.
+            //
+            // This finishes VIK-042. The rule it replaces was `1-6 → PM,
+            // 7-12 → AM`, an English-speaking assumption compiled into the engine
+            // that no language pack could disagree with. Narrowing the range
+            // would only have retuned the magic number; there is now no constant
+            // to configure, because the answer comes from the clock.
+            //
+            // Accepted cost: on a named day both readings are ahead of us, so the
+            // earliest is always the morning one — "meeting tomorrow at 5" is
+            // 05:00. Saying "5 pm" fixes it; that is the user's half.
+            //
+            // PARITY: mirrors `entities.py::_pick_future_hour`, changed together.
+            let readings = [hour % 12, hour % 12 + 12]
+                .compactMap { at(hour: $0, minute: minute, on: day) }
+            if let soonest = readings.filter({ $0 > now }).min() { return soonest }
+            // Both readings are behind us (only possible when `day` is today):
+            // the same choice, one day on.
+            guard let earliest = readings.min(),
+                  let tomorrow = calendar.date(byAdding: .day, value: 1, to: earliest)
+            else { return nil }
+            return tomorrow
         }
         guard var candidate = at(hour: h24, minute: minute, on: day) else { return nil }
 
-        // Past, today, and no hint to go on — try the other half of the clock.
-        if candidate <= now,
-           calendar.isDate(day, inSameDayAs: now),
-           period == nil {
-            let alternative = h24 < 12 ? h24 + 12 : h24 - 12
-            if (0...23).contains(alternative),
-               let other = at(hour: alternative, minute: minute, on: day),
-               other > now {
-                return other
-            }
-        }
+        // Never hand back a time that has already passed — a reminder must not be
+        // created for a moment in the past.
         if candidate <= now {
             candidate = calendar.date(byAdding: .day, value: 1, to: candidate) ?? candidate
         }
@@ -731,21 +773,32 @@ struct PackDateTimeParser: Sendable {
             strip(#"\b(?:\#(anchors))\b"#)
         }
 
-        // 6 — weekdays, with an optional plural.
-        if let weekdays = Self.alternationOrNil(stripWeekdays) {
-            strip(#"\b(?:\#(weekdays))s?\b"#)
-        }
-
-        // 7 — recurrence takes the word it governs ("every morning").
+        // 6 — recurrence takes the word it governs ("every morning"), and it runs
+        //     BEFORE weekdays. The order is the whole point.
         //
-        //     `\w+`, not `\S+`. It runs AFTER weekdays, so "each saturday" has
-        //     already lost its day and this matches nothing, leaving a bare
-        //     "each" behind. That looks like a bug and is faithfully the
-        //     reference's behaviour; the ordering is what produces it, and
-        //     changing either half here diverges from the engine the model was
-        //     trained against.
+        //     `\w+`, not `\S+`. This used to run AFTER weekdays, so by the time it
+        //     matched, the weekday was already gone and the `\w+` swallowed whatever
+        //     real word had moved up behind it:
+        //
+        //       "every friday take the bins out" -> "the bins out"   ("take" eaten)
+        //
+        //     and where nothing followed at all it simply failed, stranding the cue:
+        //     "take the bins out every friday" -> "take the bins out every". The
+        //     previous comment here recorded the stranded cue as a faithful quirk of
+        //     the reference; it did not notice that the same ordering also eats a
+        //     content word out of the reminder's name.
+        //
+        //     Running it first consumes "every friday" as the one unit it is, and
+        //     whatever the cue does not take, step 7 below still removes.
+        //
+        // PARITY: `entities.py::_en_strip_patterns` was reordered in the same change.
         if let recurrence = Self.alternationOrNil(stripRecurrence) {
             strip(#"\b(?:\#(recurrence))\s+\w+\b"#)
+        }
+
+        // 7 — weekdays, with an optional plural.
+        if let weekdays = Self.alternationOrNil(stripWeekdays) {
+            strip(#"\b(?:\#(weekdays))s?\b"#)
         }
 
         // 8 — a period, optionally with the "in the" that introduces it. The
@@ -776,6 +829,19 @@ struct PackDateTimeParser: Sendable {
         //      English topic today, for a language that does not exist yet.
         if let markers = Self.alternationOrNil(clockHourMarkers) {
             strip(#"\b\d{1,2}\s+(?:\#(markers))\b"#)
+            // 11 — the marker ON ITS OWN ("6 o'clock" → the "o'clock").
+            //
+            //      By this point the digit is gone: step 4 removes "at 6"
+            //      together, so the `\d{1,2}\s+marker` form above cannot fire on
+            //      "at 6 o'clock" and the word survives into the reminder's name
+            //      ("take medicine o'clock"). A marker is only ever a time word,
+            //      so removing it alone is safe.
+            //
+            //      No `\b` around it: "o'clock" ends in a word character but the
+            //      apostrophe makes the leading boundary unreliable across
+            //      engines. The alternation is built from pack data that contains
+            //      no partial words, so a bare match is exact enough.
+            strip(#"(?:\#(markers))"#)
         }
 
         t = t.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)

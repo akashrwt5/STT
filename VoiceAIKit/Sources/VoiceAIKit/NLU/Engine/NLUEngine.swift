@@ -665,7 +665,25 @@ actor NLUEngine: ConversationEngine {
     }
 
     private func deriveTopic(_ text: String) -> String? {
-        var t = text.trimmingCharacters(in: .whitespaces)
+        // ORDER MATTERS, and the date/time goes FIRST.
+        //
+        // Every carrier is `^`-anchored, so a carrier is only reachable when it is at
+        // the front of the string — and a leading time expression pushes it out of
+        // reach:
+        //
+        //   "tomorrow morning remind me to water the plants"
+        //     carriers first  -> "^remind me" misses -> "remind me to water the plants"
+        //     date/time first -> "remind me to water the plants" -> "water the plants"
+        //
+        // Safe in the other direction because `strippingDateTime` only ever REMOVES
+        // text, never prepends. Running it first can only move an `^`-anchored carrier
+        // closer to the front, never further from it — the change is strictly additive,
+        // and the common shape ("remind me to drink water at 5", time in the middle or
+        // at the end) is untouched.
+        //
+        // PARITY: mirrors `engine.py::_derive_topic`, which was reordered in the same
+        // change. Verified equal across a 41-case battery on both runtimes.
+        var t = entities.strippingDateTime(text.trimmingCharacters(in: .whitespaces))
         // Apply ALL carriers in order (mirrors Python: each '^' pattern strips from the
         // updated start of string, enabling two-step stripping like "veuillez" then "régler une alarme").
         for pattern in carrierPatterns {
@@ -673,7 +691,7 @@ actor NLUEngine: ConversationEngine {
                 t.removeSubrange(range)
             }
         }
-        var stripped = entities.strippingDateTime(t)
+        var stripped = t
         // Step 3, which was missing entirely: the connective that introduced the
         // now-removed time is still at the front. "Remind me at 9pm for dinner"
         // derived "for dinner"; "set a reminder for 5pm" derived "for" and
