@@ -246,9 +246,9 @@
     {
       "entity": "recurrence",
       "text": "every 3 months",
-      "value": "3 Months",
+      "value": "Every 3 Months",
       "span": "every 3 months",
-      "confidence": 0.95
+      "confidence": 1.0
     },
     {
       "entity": "recurrence",
