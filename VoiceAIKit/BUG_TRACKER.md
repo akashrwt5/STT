@@ -9,7 +9,7 @@ here is iOS-side, or a contract gap that bites iOS specifically.
 place, so an item marked Fixed can appear under `## Open`. The table above and
 each `###` heading are the authority; the two are checked against each other.
 
-**Summary:** 36 fixed, 19 open.
+**Summary:** 40 fixed, 16 open.
 
 Two of the fixes (VIK-015, VIK-016) were found by the parity suite on its first
 run, in code that compiled cleanly and had been read against the reference twice.
@@ -33,7 +33,7 @@ evidence here.
 | VIK-007 | contract | **High** | Fuzzy-matching rules exist only in Python; stopword list is English | Open |
 | VIK-008 | contract | **High** | Vectorizer parameters not in the pack | Open |
 | VIK-009 | NLU | **High** | `EntityExtractor` is ~890 lines of hardcoded English | **Fixed** |
-| VIK-010 | data layer | Med | `head.json` declared by every pack, shipped by none | Open |
+| VIK-010 | data layer | Med | `head.json` declared by every pack, shipped by none | **Fixed** |
 | VIK-011 | NLU | Med | Empty-feature utterances can clear the confidence gate | Open |
 | VIK-012 | data layer | Low | Grammar lookup tables rebuild on every access | Open |
 | VIK-013 | contract | Med | No golden parity fixtures in the pack | Open |
@@ -75,10 +75,11 @@ evidence here.
 | VIK-049 | contract | Low | "in quarter of an hour" does not resolve, while "in half an hour" does | Open |
 | VIK-050 | parity | **High** | The interrupt bar was a constant in this package (0.75) while the pack and Python said 0.68 — a topic switch happened on one runtime and not the other | **Fixed** |
 | VIK-051 | contract | Med | Every iOS pack declared a `model.onnx` the build had just deleted, and shipped a Python pickle no iOS code reads | **Fixed** |
-| VIK-052 | contract | Med | The loader's artifact-existence check is fully written and never called, so a manifest can name files the pack does not ship | Open |
+| VIK-052 | contract | Med | The loader's artifact-existence check is fully written and never called, so a manifest can name files the pack does not ship | **Fixed** |
 | VIK-053 | contract | Med | The slot-attempt budget existed as three independent hardcoded `3`s — the compiler's literal, Python's class constant and a `>= 3` in this engine — so `policies.limits.max_slot_attempts` was a number no one could change | **Fixed** |
-| VIK-054 | parity | **High** | The out-of-vocabulary guard is Python-only. `oov_reject`/`oov_bypass` are not even decoded here, so this runtime fires on utterances the reference engine refuses | Open |
+| VIK-054 | parity | **High** | The out-of-vocabulary guard is Python-only. `oov_reject`/`oov_bypass` are not even decoded here, so this runtime fires on utterances the reference engine refuses | **Fixed** |
 | VIK-055 | parity | Med | `thresholds.agreement`, `thresholds.semantic` and `limits.session_timeout_s` are shipped by every pack and read by nothing in this package | Open |
+| VIK-056 | packaging | Low | iOS packs ship both `.mlpackage` (source) and `.mlmodelc` (compiled) for each head; iOS never opens the packaged form | **Fixed** |
 
 ---
 
@@ -1823,4 +1824,123 @@ is flipped rather than after.
 `compile_policies` (see VIK-053), so unlike the others it is not even content-owned
 yet. Decide what it means before wiring it: session expiry is a facade concern here,
 not an NLU-engine one.
+
+### VIK-054 — the out-of-vocabulary guard is Python-only (**High**) — Fixed
+
+(Statement of the defect is in the entry above; this records the fix.)
+
+Implemented where the reference implements it, with both halves or neither.
+
+`PackTFIDFVectorizer` gained `unigrams` — the vocabulary minus bigram keys,
+precomputed, because the guard runs every turn over up to 4718 entries — and
+`oovRatio(_:)` over the tokenizer that was already there. That tokenizer is
+`(?u)\b\w\w+\b`, the same rule the reference uses, which is what makes the two
+ratios the same number rather than two approximations of one.
+
+Verified by transcribing the Swift implementation into Python and running it
+against the SHIPPED `intent_classifier_weights_full.json` (5896 terms, 1472 of
+them unigrams) beside the reference tokenizer:
+
+```
+utterance                                       swift  python  match
+send a message to john                          0.250   0.250    YES
+stream from netflix                             0.333   0.333    YES
+help me find a paper                            0.250   0.250    YES
+turn off toshiba                                0.000   0.000    YES
+what is the weather in bangalore tomorrow       0.143   0.143    YES
+```
+
+Those are the numbers the guard was fitted on, reproduced exactly. At
+`oov_reject: 0.25` / `oov_bypass: 0.97` the verdicts come out as designed: the
+two real commands pass on confidence, and "help me find a paper" (0.771) is
+withheld.
+
+`IntentClassifying` gained `oovRatio(_:)` with a protocol-extension default of
+`0`, which DISABLES the guard for any conformer that cannot report a
+vocabulary — the reference says the same in as many words ("Returns 0.0 when the
+backend cannot report a vocabulary, which disables the guard rather than
+rejecting everything"). Test doubles and any future non-TF-IDF stage land there.
+
+`policies.thresholds.oov_reject` / `oov_bypass` are now decoded, as Optionals,
+and `NLUEngine` applies the guard only when it has BOTH. That is not defensive
+style: shipping one half is worse than shipping neither, because the ratio alone
+refuses entity values, which are out-of-vocabulary by nature.
+
+Placed immediately before the fire test, as in the reference, so it can only
+withhold an action and never cause one.
+
+One knowing difference, recorded rather than hidden: the reference runs this
+guard BEFORE semantic rescue is attempted, so a blocked turn never reaches
+rescue. Here rescue already happened inside `classifyAsync`, so a rescued turn is
+guarded on the rescue's confidence. Moot while the pack disables the semantic
+stage — and it is exactly the kind of ordering that becomes a divergence the day
+it is enabled, which is why it is written down.
+
+### VIK-010 — `head.json` declared by every pack, shipped by none (Med) — Fixed
+
+The compiler declared `models/semantic_head/shared/head.json` whenever a
+`SemanticHead.mlpackage` existed, and produced that JSON never. The original code
+carries the author working the problem and giving up:
+
+```python
+# `artifact`, `format`, and `model_version` are REQUIRED by the schema.
+# So we can't just add a semantic_head with ONLY a coreml_artifact.
+```
+
+The premise is right and the conclusion is not. Those three keys are required
+*within* a model entry — but `models.semantic_head` ITSELF is optional:
+`bundle.schema.json` requires only `models.intent`. The way out was one level up.
+
+So a semantic head is now declared when there is one to declare — when
+`semantic_head.json` exists beside the trained model, in which case it is copied
+to `head.json` and the `.mlpackage` rides along as `coreml_artifact` — and is not
+declared or shipped otherwise. The stage is disabled in every pack we build
+(`semantic_rescue_enabled: false`), and enabling it needs a new pack regardless,
+because `cascade.json` lives inside the pack.
+
+Removes 92 KB from the pack and, with VIK-051, empties the reason
+`toleratedMissingArtifacts` existed.
+
+### VIK-052 — the artifact-existence check is written and never called (Med) — Fixed
+
+Wired as `BundleDataLoader.verifyDeclaredArtifacts`, running after integrity and
+before any section is read, so a pack fails on its manifest's own promise rather
+than at the first artifact that happens to be needed. `existsAtPath` without
+`isDirectory:` on purpose — `.mlmodelc` and `.mlpackage` are DIRECTORIES, and a
+check demanding a regular file would refuse every CoreML pack.
+
+`toleratedMissingArtifacts` is now a LEGACY list of exactly two exact paths —
+`head.json` (VIK-010) and `models/intent/en/model.onnx` (VIK-051) — both fixed in
+the compiler, both listed only so that packs built before those fixes, including
+the seed pack vendored in this repo, keep loading while the first corrected pack
+is built. **Both entries are to be deleted once no supported pack declares
+them**, returning the set to empty, which is the state it should live in. A
+tolerance list that accumulates is how a check stops being one.
+
+Verified against the vendored `pack-en-v1.0.45-ios`: 7 declared artifacts, 2
+missing, both in the legacy list, nothing else — so the check is live for any NEW
+drift today and refuses nothing that ships today.
+
+Not covered by a test yet: asserting the refusal needs a mutated pack, and
+`checksums_root` binds `bundle.json` to the manifest, so the mutation has to go
+through the same helper `PackLoadingTests` uses for its integrity cases. Worth
+adding; not worth blocking this on.
+
+### VIK-056 — iOS packs shipped the source form of every model (Low) — Fixed
+
+Each CoreML head shipped twice: `.mlpackage` (source) and `.mlmodelc` (compiled).
+iOS never opens the packaged form when the compiled one is present —
+`ModelSpec.iOSModel(_:)` returns `coreml_compiled_artifact` first, and
+`MLModel(contentsOf:)` REQUIRES `.mlmodelc` while `compileModel(at:)` REJECTS
+one, so the two are not interchangeable and the source form has no device
+consumer at all.
+
+The iOS slice now drops each `.mlpackage` and its manifest key, each conditional
+on its OWN compiled counterpart having shipped, so a slice built without
+`--coreml-compiled` keeps the only model it has. The universal slice is
+untouched: that is what model tooling and OTA debug read, which is the
+environment-conditional split the packaging review asked for (its P1-NEW-2).
+
+Measured on the shipped pack: **7.1 MB → 5.6 MB**, with the manifest still
+schema-valid and every declared artifact present on disk.
 
