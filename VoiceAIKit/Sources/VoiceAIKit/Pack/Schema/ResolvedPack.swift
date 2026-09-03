@@ -78,7 +78,6 @@ struct ResolvedPack: Sendable {
 
     let policies: PackPolicies
     let cascade: PackCascade
-    let routing: PackRouting
     let guards: PackGuards
     let telemetry: PackTelemetrySchema
 

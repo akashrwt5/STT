@@ -148,7 +148,6 @@ enum BundleDataLoader {
         var keywords: PackKeywords
         var policies: PackPolicies
         var cascade: PackCascade
-        var routing: PackRouting
         var guards: PackGuards
         var telemetry: PackTelemetrySchema
     }
@@ -217,9 +216,9 @@ enum BundleDataLoader {
             cascade: try decode(PackCascade.self,
                                 at: root.appendingPathComponent("runtime/cascade.json"),
                                 relative: "runtime/cascade.json"),
-            routing: try decode(PackRouting.self,
-                                at: root.appendingPathComponent("runtime/routing.json"),
-                                relative: "runtime/routing.json"),
+            // `runtime/routing.json` is NOT read — see the note where PackRouting
+            // used to be. Packs that still ship the file load unchanged; it is
+            // covered by the manifest like any other file and simply not decoded.
             // Additive: a pack predating the guards section simply has none.
             guards: (try? decode(PackGuards.self,
                                  at: root.appendingPathComponent("runtime/guards.json"),
@@ -336,7 +335,6 @@ enum BundleDataLoader {
             keywordRules: sections.keywords.rules,
             policies: sections.policies,
             cascade: sections.cascade,
-            routing: sections.routing,
             guards: sections.guards,
             telemetry: sections.telemetry,
             classifier: classifier)

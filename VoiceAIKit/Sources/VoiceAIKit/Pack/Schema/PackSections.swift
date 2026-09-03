@@ -136,8 +136,8 @@ struct PackPolicies: Decodable, Sendable {
         /// the gated set but not the band, so it confirms always or never —
         /// both wrong.
         let uncertainConfirmBelow: Double?
-        /// Lower bound. Under this the utterance is too weak to confirm and
-        /// falls through to the routing ladder.
+        /// Lower bound. Under this the utterance is too weak to confirm at all,
+        /// and the turn is decided by the fire threshold like any other.
         let uncertainConfirmFloor: Double?
 
         enum CodingKeys: String, CodingKey {
@@ -205,58 +205,50 @@ struct PackCascade: Decodable, Sendable {
     }
 }
 
-// MARK: - runtime/routing.json
-
-struct PackRouting: Decodable, Sendable {
-    let ladder: [Step]
-    let assistCloud: AssistCloud?
-
-    enum CodingKeys: String, CodingKey {
-        case ladder
-        case assistCloud = "assist_cloud"
-    }
-
-    struct Step: Decodable, Sendable {
-        let step: String
-        let when: When
-        let budgetPerSession: Int?
-
-        enum CodingKeys: String, CodingKey {
-            case step, when
-            case budgetPerSession = "budget_per_session"
-        }
-
-        struct When: Decodable, Sendable {
-            let belowConfidence: Double?
-            let afterAttempts: Int?
-            let requiresFeature: String?
-            let requiresConsent: Bool?
-
-            enum CodingKeys: String, CodingKey {
-                case belowConfidence = "below_confidence"
-                case afterAttempts = "after_attempts"
-                case requiresFeature = "requires_feature"
-                case requiresConsent = "requires_consent"
-            }
-        }
-    }
-
-    struct AssistCloud: Decodable, Sendable {
-        let enabled: Bool
-        let timeoutMS: Int?
-
-        enum CodingKeys: String, CodingKey {
-            case enabled
-            case timeoutMS = "timeout_ms"
-        }
-    }
-}
+// MARK: - runtime/routing.json — deliberately not modelled
+//
+// There was a `PackRouting` here: `ladder: [Step]` and `assist_cloud`, decoded
+// on every load and stored on `ResolvedPack`. NOTHING READ IT. Not one call
+// site, in Sources or Tests, ever touched `pack.routing`.
+//
+// It is gone rather than wired because the file it decoded was never authored.
+// The compiler carries `runtime/routing.json` VERBATIM out of a spec example
+// (`content_bundle.py`: `CARRIED = (...)`, "Files taken verbatim from the
+// fixture"), re-deriving exactly one number in it. So the ladder every pack
+// shipped — `reprompt` below 0.7, `give_up` after 3 — was documentation for a
+// minimal example, and it contradicted all three of:
+//
+//   * the engines. Both runtimes are binary below the fire threshold: the
+//     reference `engine.py` returns the fallback intent and says so —
+//     "The decision ladder is BINARY: `confidence_threshold` and below it the
+//     fallback intent." There is no reprompt step in either.
+//   * ADR-004, the design. Its ladder is eight rules; `reprompt` is not one of
+//     them. Re-prompting is rule 1's MID-FLOW behaviour ("a garbled slot answer
+//     is a re-prompt"), which has nothing to do with a confidence threshold.
+//     Low confidence is rule 5 (clarify) or rule 6 (escalate).
+//   * ADR-005, which assigns this file to the Platform team as the output of a
+//     policy-resolution stage that does not exist in this compiler yet.
+//
+// And `assist_cloud.enabled` is worse than unread: it looks like the switch that
+// governs sending an utterance to a cloud LLM. ADR-004 makes consent a per-user,
+// revocable AVAILABILITY condition checked at runtime — a fleet-wide signed pack
+// cannot express it. A field that reads as a privacy control and controls
+// nothing is the one kind of dead config worth deleting rather than tolerating.
+//
+// Every value the file carried already has a real owner:
+//   below_confidence -> policies.thresholds.confidence
+//   after_attempts   -> policies.limits.max_slot_attempts
+//   reprompt         -> the per-slot `reprompt` response key in the schema,
+//                       which is a different mechanism that shares the word.
+//
+// When the escalation ladder is genuinely implemented, it comes back as a
+// section with a consumer. Until then the pack does not claim to have one.
 
 // MARK: - runtime/guards.json
 
 /// Corrections applied to a classified intent BEFORE the dispatcher sees it.
-/// Distinct from routing: routing decides what to do when confidence is LOW,
-/// a guard fires regardless of confidence.
+/// Distinct from the confidence thresholds: those decide whether an intent fires
+/// at all, whereas a guard fires regardless of confidence.
 ///
 /// Additive section — a pack without it simply has no guards.
 struct PackGuards: Decodable, Sendable {
