@@ -364,8 +364,17 @@ The SDK doesn’t hardcode business logic. Each capability (e.g., `capabilities/
 
 **The Solution:** The `/runtime/` folder acts as the NLU Engine’s "Control Panel". It keeps the SDK logic-free by defining the rules OTA:
 - **`runtime/cascade.json`**: Tells the SDK the exact order of execution (e.g., check keywords first, then run TF-IDF/CoreML).
-- **`runtime/routing.json`**: Defines confidence thresholds and fallbacks. For example, it dictates that if the ML confidence is below 70% (0.7), the engine must trigger a fallback intent (which the SDK then delegates to the Host App).
-- **`runtime/policies.json` & `plan_facts.json`**: Defines systemic constraints, such as how many concurrent intents can run at once and capability mappings.
+- **`runtime/policies.json`**: Owns the decision thresholds and the confirmation policy. `thresholds.confidence` (0.7) is the fire bar — below it the engine returns a fallback, which the SDK hands to the Host App; `thresholds.interrupt` (0.68) is the bar a new intent must clear to abandon a slot flow in progress; `confirmation` says which intents ask before acting. `limits` carries `max_slot_attempts` and the session timeout.
+- **`runtime/plan_facts.json`**: Capability mappings and systemic constraints.
+
+> There is no `runtime/routing.json`. Packs used to ship one — a two-step
+> `reprompt`/`give_up` escalation ladder plus an `assist_cloud` switch — that this
+> SDK decoded and never consulted, and that the compiler copied verbatim out of a
+> spec EXAMPLE rather than authoring. Its `reprompt`-below-confidence step described
+> behaviour neither runtime has: both are binary at the fire bar. It was removed from
+> both sides rather than wired, so that nothing in the pack looks tunable that is not.
+> See VIK-030. The escalation ladder ADR-004 actually designs is a separate, unbuilt
+> piece of work; when it lands it comes back as a section with a consumer.
 
 This allows Data Scientists to tweak and optimize the engine’s behavior directly from the cloud without iOS developer intervention.
 

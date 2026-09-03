@@ -9,7 +9,7 @@ here is iOS-side, or a contract gap that bites iOS specifically.
 place, so an item marked Fixed can appear under `## Open`. The table above and
 each `###` heading are the authority; the two are checked against each other.
 
-**Summary:** 32 fixed, 17 open.
+**Summary:** 36 fixed, 19 open.
 
 Two of the fixes (VIK-015, VIK-016) were found by the parity suite on its first
 run, in code that compiled cleanly and had been read against the reference twice.
@@ -53,7 +53,7 @@ evidence here.
 | VIK-027 | testing | Med | Facade turn state-machine (external-TTS handoff) not unit-tested — needs a mockable engine/coordinator seam | Open |
 | VIK-028 | STT | **Critical** | Apple `isFinal` at a grammatical boundary treated as end-of-turn — mic cut off mid-sentence, wrong intent on an incomplete phrase | **Fixed** |
 | VIK-029 | concurrency | **High** | Result loop in the task-group body could hang (and swallow the error) when `analyzer.start()` fails | **Fixed** |
-| VIK-030 | contract | Med | `runtime/routing.json` is decoded and never read — the pack's ladder and `assist_cloud` switch do nothing | Open |
+| VIK-030 | contract | Med | `runtime/routing.json` is decoded and never read — the pack's ladder and `assist_cloud` switch do nothing | **Fixed** |
 | VIK-031 | security | **High** | Unresolved turns returned a URL built from pack data, with the user's transcript in its query string | **Fixed** |
 | VIK-032 | STT | **High** | A locale the device cannot transcribe was swallowed by `try?` — pack in one language, recogniser in another, silently | **Fixed** |
 | VIK-033 | packaging | Med | The package persisted the transcription locale in the HOST app's `UserDefaults.standard` | **Fixed** |
@@ -73,6 +73,12 @@ evidence here.
 | VIK-047 | NLU | Med | A day-only answer re-asks the identical question, then discards a correctly-extracted reminder after three tries | Open |
 | VIK-048 | contract | Med | `interrupt_threshold` is fitted against negatives the engine no longer produces | Open |
 | VIK-049 | contract | Low | "in quarter of an hour" does not resolve, while "in half an hour" does | Open |
+| VIK-050 | parity | **High** | The interrupt bar was a constant in this package (0.75) while the pack and Python said 0.68 — a topic switch happened on one runtime and not the other | **Fixed** |
+| VIK-051 | contract | Med | Every iOS pack declared a `model.onnx` the build had just deleted, and shipped a Python pickle no iOS code reads | **Fixed** |
+| VIK-052 | contract | Med | The loader's artifact-existence check is fully written and never called, so a manifest can name files the pack does not ship | Open |
+| VIK-053 | contract | Med | The slot-attempt budget existed as three independent hardcoded `3`s — the compiler's literal, Python's class constant and a `>= 3` in this engine — so `policies.limits.max_slot_attempts` was a number no one could change | **Fixed** |
+| VIK-054 | parity | **High** | The out-of-vocabulary guard is Python-only. `oov_reject`/`oov_bypass` are not even decoded here, so this runtime fires on utterances the reference engine refuses | Open |
+| VIK-055 | parity | Med | `thresholds.agreement`, `thresholds.semantic` and `limits.session_timeout_s` are shipped by every pack and read by nothing in this package | Open |
 
 ---
 
@@ -780,12 +786,55 @@ and declares a two-step ladder that the engine approximates with a hardcoded
 shipped by every pack and applied by nothing, which means the pack cannot change the
 behaviour it appears to control.
 
-**Ask:** wire the ladder — `below_confidence` → reprompt (bounded by
-`budget_per_session`), `after_attempts` → give up — and honour `assist_cloud.enabled`
-as the gate on whether a below-gate turn is offered to the host as a hand-off
-candidate at all. Today all three routes (out of scope, below gate, three failed slot
-attempts) collapse into one `.fallback(intent:)`, so a host that wants the ladder has
-to rebuild it from confidence alone.
+**That Ask was wrong, and this entry is the correction.** It assumed the ladder was a
+design this package had failed to implement. It is not a design at all.
+
+`runtime/routing.json` is not authored anywhere. `content_bundle.py` carries it
+VERBATIM out of `spec/examples/3.0/minimal` — its own comment reads "Files taken
+verbatim from the fixture" — and re-derives exactly one number inside it. Every pack
+ever published shipped a spec EXAMPLE's ladder. Wiring it would have made a fixture
+into product behaviour.
+
+It also contradicts everything around it:
+
+* **The engines.** Both are binary below the fire threshold. The reference
+  `engine.py` says so in its own words — *"The decision ladder is BINARY:
+  `confidence_threshold` and below it the fallback intent"* — and returns
+  `NLUResult(type="FALLBACK", intent="GENAI", ...)`. Neither runtime has ever had a
+  reprompt step keyed on confidence.
+* **ADR-004, the actual design.** Its ladder is eight rules and contains no
+  `reprompt` step. Re-prompting is rule 1's MID-FLOW behaviour — *"a garbled slot
+  answer is a re-prompt (attempt budget exists for exactly this)"* — which is about a
+  frame expecting an answer, not about a confidence score. Low confidence is rule 5
+  (clarify) or rule 6 (escalate). So `{"step":"reprompt","when":{"below_confidence"}}`
+  pairs a mid-flow verb with a condition from a different rule entirely.
+* **ADR-005, the ownership.** It lists `runtime/routing.json` under the Platform
+  team, produced by a policy-resolution stage the compiler does not implement.
+
+`assist_cloud.enabled` is the part worth naming separately. It reads as the switch
+governing whether an utterance leaves the device for a cloud LLM. ADR-004 makes that
+consent a per-user, revocable AVAILABILITY condition resolved at runtime — a
+fleet-wide signed pack cannot carry it, and this copy gated nothing. A field that
+looks like a privacy control and controls nothing is worse than an absent one.
+
+**Fixed** by deleting it from both sides rather than wiring it: `PackRouting`,
+`ResolvedPack.routing` and the loader's decode are gone (replaced by a note at the
+declaration site), and the compiler drops `runtime/routing.json` from `CARRIED`. Each
+value it duplicated already had exactly one owner — `below_confidence` is
+`policies.thresholds.confidence`, `after_attempts` is
+`policies.limits.max_slot_attempts`, and the per-slot `reprompt` response key in the
+schema is a different mechanism that merely shares the word. The spec and
+`routing.schema.json` still define the section; when the ladder is genuinely built it
+returns with a consumer.
+
+Two consequences worth knowing:
+
+* `nlu_langpack`'s loader listed `routing` in `_RUNTIME_TABLES`, which is
+  `strict`-required — so it would have refused every new pack over a table nothing
+  read. Removed there too.
+* A pack built after this change has no `runtime/routing.json`, and an SDK build
+  from BEFORE this change requires one. New pack + old SDK fails to load. Ship the
+  SDK first, or accept that the two move together.
 
 ### VIK-032 — An unsupported locale was swallowed, not surfaced (**High**) — Fixed
 
@@ -1491,4 +1540,287 @@ relative-duration path needs a digit ("in 15 minutes" works). Same class as VIK-
 phrase the grammar could express and does not.
 
 **Ask:** add the idiom to `clock_idioms` in `datetime.json`, in every language.
+
+### VIK-050 — the interrupt bar was a constant here and a number in the pack (**High**) — Fixed
+
+`NLUEngine` carried:
+
+```swift
+/// Mirrors Python NLUEngine.INTERRUPT_THRESHOLD = 0.75.
+private static let interruptThreshold: Double = 0.75
+```
+
+The comment is what makes this hard to see: it claims parity, and it is wrong. 0.75 is
+Python's `DEFAULT_INTERRUPT_THRESHOLD` — the fallback for a schema that OMITS the key
+— and `engine.py` puts a warning directly above it:
+
+> "The live value is CONTENT-OWNED (`content/platform.yaml`, per-language via
+> overlay) and fitted by `nlu_training.fit_slot_thresholds`; read it from
+> `self.interrupt_threshold`, not from here."
+
+Python reads `interrupt_threshold` out of the schema. `pack-en` carries **0.68**, and
+`runtime/policies.json` carries the same 0.68 under `thresholds.interrupt`. So Swift
+mirrored Python's fallback instead of Python's value, and the two runtimes disagreed
+on every probe scoring in **[0.68, 0.75)**.
+
+What that looks like. The user is part-way through changing a memory — the flow has
+asked *"which memory?"* — and says "increase the volume", which the classifier scores
+0.71:
+
+```
+Python:  0.71 >= 0.68  ->  topic switch, volume goes up
+Swift:   0.71 <  0.75  ->  ignored, asks "which memory?" again
+```
+
+Same pack, same words, two answers — the VIK-025 family. The blast radius is bounded
+by the VIK-038 gate: the probe only runs for CLOSED gazetteer slots, so the reminder
+flow (open name + date-time) never reached this code and only the memory flow could
+diverge. Bounded is not harmless; it is one of the two flows the product ships.
+
+**Fixed** by making the bar a required initializer parameter with no default —
+matching the rule this file already states for its word lists ("NOTHING HERE DEFAULTS
+TO ENGLISH ANY MORE", VIK-001) — and having `PackEngineFactory` pass
+`pack.policies.thresholds.interrupt`. `testTheInterruptBarComesFromThePackNotTheEngine`
+pins both sides of the bar and reads its bounds from the pack, so retuning the content
+retunes the test rather than breaking it.
+
+Correction to this tracker: VIK-048 ends "the value it produces ships in the pack and
+this runtime reads it." That was not true when it was written. It is true now.
+
+### VIK-051 — every iOS pack declared a model it had just deleted (Med) — Fixed
+
+`bundle.json` in `pack-en-v1.0.45-ios`:
+
+```json
+"artifact": "models/intent/en/model.onnx",
+"format": "onnx",
+```
+
+There is no `model.onnx` in the pack, and there never was one in any iOS pack. The
+compiler's `assemble_pack.py` builds three slices from one staged tree, and its iOS
+slice deleted the ONNX from disk while leaving the manifest entry that names it:
+
+```python
+def mod_ios(s_dir, s_man):
+    onnx_file = ...model.onnx
+    if onnx_file.exists():
+        onnx_file.unlink()          # file gone
+    for key in ["tflite_artifact", "tflite_int8_artifact"]:
+        intent.pop(key, None)       # ...but "artifact"/"format" left behind
+```
+
+`mod_android`, ten lines below, does both halves correctly. The bug is one function's
+asymmetry. The same function never removed `labels.pkl` either — a Python pickle,
+1.1 KB, with no iOS consumer: the labels iOS reads are `labels.json`, which the
+compiler DERIVES from that pickle precisely so the two cannot disagree. Shipping the
+source pickle puts a deserialization-primitive artifact in a signed medical bundle for
+no runtime benefit.
+
+**Fixed** in the compiler, not here. `artifact`/`format` cannot simply be dropped the
+way the tflite keys can — both are `required` in `bundle.schema.json` and
+non-optional in this package's `ModelSpec` — so they are made true instead. The format
+enum already admits `mlmodelc-ref`, which is exactly what ADR-005's bundle layout
+means by `model.{onnx|mlmodelc-ref}`:
+
+```json
+"artifact": "models/intent/en/IntentClassifier.mlmodelc",
+"format": "mlmodelc-ref",
+```
+
+That names the file `iOSModel(_:)` actually opens. The swap and the ONNX deletion are
+now conditional on the compiled head being present in the slice, so a slice built
+without one keeps its ONNX and keeps describing it — the manifest is never wrong in
+either direction. `labels.pkl` is dropped from the iOS slice; `labels.json` stays.
+
+Not fixed here: `models/semantic_head/shared/head.json` (VIK-010) is declared by every
+pack and shipped by none. That one is a different shape — the compiler emits the
+declaration because the schema requires `artifact` and there is no JSON head to point
+at — and closing it needs a spec change, not a slice fix.
+
+### VIK-052 — the artifact-existence check is written and never called (Med)
+
+This package contains everything needed to have caught VIK-051 at load time:
+
+```swift
+/// Every artifact path this spec declares, for existence checking.
+var declaredPaths: [String] { ... }                       // NLUBundle.swift
+
+/// Declared artifacts allowed to be absent.
+public let toleratedMissingArtifacts: Set<String>         // PackIntegrity.swift
+```
+
+plus a dedicated error case, `declaredArtifactMissing(path:)`, whose documentation
+explains that `head.json` is tolerated "by policy". Nothing calls `declaredPaths`, and
+nothing reads `toleratedMissingArtifacts`. Both are dead. `declaredArtifactMissing` IS
+thrown, but only from two specific places in `BundleDataLoader` — the weights path and
+the variant's own model choice — never over the manifest as a whole.
+
+So the tolerance list is not what let `model.onnx` through. Nothing looked. A public
+policy field that documents a safety behaviour the code does not perform is worse than
+no field: it is what makes a reviewer stop looking.
+
+**Ask:** walk `manifest.models`' `declaredPaths` after integrity verification and
+throw `declaredArtifactMissing` for anything absent and not tolerated.
+
+**Order matters, and this is the reason it is still open.** `model.onnx` is NOT in
+`toleratedMissingArtifacts`. Turning the check on before the compiler fix in VIK-051
+reaches a published pack would refuse EVERY iOS pack, including whatever is live over
+OTA. The compiler fix ships first; this follows. When it does, `.mlmodelc` and
+`.mlpackage` are directories, so the check has to test for existence, not for a
+regular file.
+
+### VIK-053 — the slot-attempt budget was three independent 3s (Med) — Fixed
+
+`runtime/policies.json` declares the budget:
+
+```json
+"limits": {"max_slot_attempts": 3, "session_timeout_s": 120}
+```
+
+`PackPolicies.Limits` decoded `maxSlotAttempts` correctly. Nothing read it. The engine
+counted against a literal instead:
+
+```swift
+// NLUEngine.swift, before
+session.slotAttempts += 1
+if session.slotAttempts >= 3 {
+```
+
+Same shape as VIK-050, but with a third copy. Tracing it back, the number was
+hardcoded at every hop:
+
+| Where | Was |
+|---|---|
+| `content_bundle.compile_policies` | `"limits": {"max_slot_attempts": 3, ...}` — a literal in the compiler, not read from content |
+| `engine.py` | `MAX_SLOT_ATTEMPTS = 3` — a bare class constant, so no language pack could override it |
+| `NLUEngine.swift` | `session.slotAttempts >= 3` |
+
+Three values that only agreed because all three were typed as `3`. The pack field
+looked authoritative and was decorative — change it to 5 and every runtime would still
+abandon at 3.
+
+Unlike VIK-050 this was NOT a live divergence: both engines abandon after three failed
+turns today, and they agree. It is the mechanism that was broken, not the behaviour —
+and it is the mechanism that decides whether the next content change lands.
+
+**Fixed** end to end, in the shape the other content-owned values already use:
+
+```
+language_packs/en/platform.yaml   max_slot_attempts: 3          (SOURCE, authored)
+   └─ content_source assemble  →  nlu_schema.json
+        ├─ engine.py            self.max_slot_attempts = schema.get(...)
+        └─ compile_policies    →  runtime/policies.json  limits.max_slot_attempts
+                                   └─ NLUEngine(maxSlotAttempts:) via PackEngineFactory
+```
+
+Python keeps `DEFAULT_MAX_SLOT_ATTEMPTS = 3` and the `MAX_SLOT_ATTEMPTS` alias
+(`scripts/test_sprint1_hardening.py` reads it), and this package keeps `Limits()`'s
+`?? 3`, but both are now the pack-omits-the-section fallback rather than the live
+value — the same distinction `engine.py` already drew for the interrupt threshold.
+
+Also fixed while in there: `compile_policies` reads `schema["max_slot_attempts"]`
+instead of a literal, and `content_source` carries the key. That second half matters —
+`PLATFORM_KEYS` and the compiled layout are two hand-maintained lists of the same keys,
+and the assert between them exists because `interrupt_threshold` was once accepted by
+one and dropped by the other, silently sending the engine back to its fallback.
+
+`limits.session_timeout_s` is deliberately left as a literal: no runtime reads it on
+either side. See VIK-055.
+
+### VIK-054 — the out-of-vocabulary guard is Python-only (**High**)
+
+`runtime/policies.json` ships both halves of the OOV guard:
+
+```json
+"oov_reject": 0.25, "oov_bypass": 0.97
+```
+
+`PackPolicies.Thresholds` does not have them. Its `CodingKeys` are `confidence`,
+`interrupt`, `semantic`, `agreement`, `uncertain_confirm_below`,
+`uncertain_confirm_floor` — the two OOV keys are not decoded, and the string `oov`
+does not appear anywhere in this package, Sources or Tests.
+
+**What the guard is for.** The TF-IDF vocabulary is finite (1317 entries for the pruned
+head). A word outside it is not "weighted low" — it does not reach the model at all:
+
+```
+user said:      "help me find a paper"
+model received: "help me find"            "paper" has no slot in the vocabulary
+model answered: Help_FindMyHearingAids @ 0.771
+```
+
+0.771 is an honest score for the input the model was given. The input was not what the
+user said. `engine.py` states the consequence directly: *"This cannot be done by tuning
+a threshold — the confidence is honest about the input the model was given."* So the
+unknown words are consulted separately: at or above `oov_reject` of the tokens being
+unrepresentable, the turn goes to fallback whatever the confidence.
+
+**Why the second half is not optional.** Entity values are out-of-vocabulary BY NATURE
+— a contact name, a brand, a free-text reminder topic can never all be in a finite
+vocabulary. Measured on this pack's own weights:
+
+```
+'send a message to john'   oov 0.25, conf 1.000   <- a real command
+'stream from netflix'      oov 0.33, conf 0.996   <- a real command
+'help me find a paper'     oov 0.25, conf 0.771   <- out of scope
+```
+
+The first and third have the SAME ratio. The ratio cannot separate a slot value from a
+foreign topic; the confidence can, which is why the guard stands down above
+`oov_bypass`. Adding that condition kept the out-of-scope reduction (10 → 5) and
+returned 7 correct commands the bare ratio was refusing.
+
+The compiler emits the pair from one statement and says why:
+
+> "A runtime that ignores these fires on utterances the reference engine refuses...
+> `oov_bypass` is not optional. A client that reads the ratio without it refuses entity
+> values... Shipping one half of a pair is how the device/server temperature diverged
+> (B8); the two are emitted from the same statement so they cannot separate."
+
+**Today's divergence.** "help me find a paper" is routed to fallback by Python and
+fires `Help_FindMyHearingAids` here. That is a wrong action, which is the metric the
+pack is gated on (`report_card.wrong_action_count: 28`), and it is the failure mode
+this guard was fitted to remove.
+
+**Ask:** decode both keys, add an `oovRatio(_:)` to `PackIntentClassifier` over the
+vocabulary it already holds, and apply the guard where Python does — after the guards,
+before the fire test, so it can only ever withhold an action and never cause one.
+Implement both halves in one change; one half alone is worse than neither.
+
+### VIK-055 — three more policy fields nothing here reads (Med)
+
+Same shape as VIK-050/053, smaller stakes, recorded so the set is complete.
+
+**`thresholds.agreement` (0.5).** The relaxed bar for a turn two INDEPENDENT
+recognisers agree on. Python applies it twice — `fire_bar = agreement if corroborated
+else threshold`, and as the semantic-rescue accept bar when TF-IDF and the head land on
+the same real intent. Over a 57-class head a correct prediction diffuses across sibling
+classes: `"turn it up its too quiet"` has the keyword rule and the model both saying
+`volume.increase`, but "quiet" splits mass with `volume.decrease` and the top sits at
+0.66. Python fires it; this engine's bar is flat (`conf < schema.confidenceThreshold`,
+`NLUEngine.swift`) and drops it. Measured: corroborated keyword turns are 99.2% correct
+(n=118) and 100% correct in the 0.50–0.70 band.
+
+Note the value is EVIDENCE STRENGTH, not a confidence — `engine.py` is explicit that
+the reported confidence stays the calibrated probability and only the bar moves.
+Implementing this as "raise the score for corroborated turns" would put a second scale
+back into the confidence field, which is the defect that ladder was rebuilt to remove.
+
+This package has no corroboration concept to hang it on yet. Its gate is
+`confidence >= confidenceThreshold && margin >= gapThreshold`, a different mechanism —
+and worth noting on its own: `gap` is read from the WEIGHTS blob
+(`weights["conf_gap_threshold"] as? Double ?? 0.20`) directly beneath a comment saying
+*"Thresholds come from the pack's policy table; the weights carry their own copy but
+policy is the contract."* The code does the opposite of its comment, and
+`conf_gap_threshold` is in no policy table at all.
+
+**`thresholds.semantic` (0.4).** Decoded, never read. Not a defect while
+`cascade.json` has the semantic stage disabled — but it is live the moment the pack
+enables it, and the pack is what decides that, so it must be wired before that switch
+is flipped rather than after.
+
+**`limits.session_timeout_s` (120).** Read by neither runtime. It is also a literal in
+`compile_policies` (see VIK-053), so unlike the others it is not even content-owned
+yet. Decide what it means before wiring it: session expiry is a facade concern here,
+not an NLU-engine one.
 
