@@ -202,8 +202,9 @@ final class ReferenceParityTests: XCTestCase {
             // classifier swapped — the same discipline ConfirmationAndSlotFlowTests
             // states: if the factory's wiring changes and this does not, the test
             // stops describing production and starts describing itself.
+            let schema = PackEngineFactory.schema(from: pack)
             let engine = NLUEngine(
-                schema: PackEngineFactory.schema(from: pack),
+                schema: schema,
                 classifier: ScriptedParityClassifier(label: intent,
                                                      confidence: probe.confidence),
                 entities: PackSlotResolver(pack: pack),
@@ -233,6 +234,21 @@ final class ReferenceParityTests: XCTestCase {
             }
             let actual = kind(of: response)
 
+            // What the engine DECIDED, not just the kind. Without this a failure
+            // reads "FULFILL instead of FALLBACK" and leaves three causes
+            // indistinguishable: a keyword rule fired before the classifier,
+            // `fallbackIntent` did not resolve to the pack's label, or the intent
+            // has no workflow and fell through to the no-config fulfil. Each needs
+            // a different fix, so the message has to say which.
+            let actualIntent: String
+            switch response {
+            case .fulfill(let i, _, _, _, _, _, _): actualIntent = i
+            case .fallback(let i, _, _):            actualIntent = i
+            case .confirm(let i, _, _, _):          actualIntent = i
+            case .prompt(let i, _, _):              actualIntent = i
+            case .interrupted(let i, _):            actualIntent = "interrupted:" + i
+            }
+
             if actual == probe.type { continue }
 
             // Corroborated below the bar — the reference fires, we cannot yet.
@@ -244,7 +260,7 @@ final class ReferenceParityTests: XCTestCase {
             }
 
             XCTFail("""
-                \(probe.text.debugDescription): reference said \(probe.type),                 this engine said \(actual) at confidence \(probe.confidence)
+                \(probe.text.debugDescription): reference said \(probe.type) (\(probe.intent ?? "-")), this engine said \(actual) (\(actualIntent)) at confidence \(probe.confidence). Pack fallbackIntent is \(schema.fallbackIntent.debugDescription); the classifier was scripted to return \(intent.debugDescription) — if those two are equal the fire test should have caught it, so look at the keyword stage first.
                 """)
         }
 
