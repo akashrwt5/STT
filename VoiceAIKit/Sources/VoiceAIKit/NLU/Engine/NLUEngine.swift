@@ -83,6 +83,11 @@ actor NLUEngine: ConversationEngine {
         uncertain: [String],
         noIdioms: [String],
         carriers: [String],
+        /// `policies.thresholds.interrupt`. Deliberately has no default: see the
+        /// property's note, and the VIK-001 paragraph below.
+        interruptThreshold: Double,
+        /// `policies.limits.max_slot_attempts`. No default, same reasoning.
+        maxSlotAttempts: Int,
         /// Language-specific trailing function words. `nil` → the English default set,
         /// preserving prior behaviour for English packs.
         trailingFunctionWords: Set<String>? = nil,
@@ -101,6 +106,8 @@ actor NLUEngine: ConversationEngine {
         self.uncertain = uncertain
         self.noIdioms = noIdioms
         self.carrierPatterns = carriers
+        self.interruptThreshold = interruptThreshold
+        self.maxSlotAttempts = maxSlotAttempts
         self.confirmationGates = confirmationGates
         self.trailingFunctionWords = trailingFunctionWords ?? []
 
@@ -241,9 +248,30 @@ actor NLUEngine: ConversationEngine {
     // MARK: - Slot filling (priority 2)
 
     /// Confidence required for a new intent to interrupt an in-progress slot flow.
-    /// Higher than the base 0.70 to avoid abandoning a flow on an ambiguous answer.
-    /// Mirrors Python NLUEngine.INTERRUPT_THRESHOLD = 0.75.
-    private static let interruptThreshold: Double = 0.75
+    ///
+    /// CONTENT-OWNED — `policies.thresholds.interrupt`. There is no default here,
+    /// for the reason the initializer gives: a constant in this file is a value no
+    /// language pack can override.
+    ///
+    /// It was `private static let interruptThreshold: Double = 0.75`, documented as
+    /// "Mirrors Python NLUEngine.INTERRUPT_THRESHOLD = 0.75". That mirrored the
+    /// wrong number. 0.75 is Python's DEFAULT_INTERRUPT_THRESHOLD, the fallback for
+    /// a schema that omits the key, and `engine.py` says so in as many words:
+    /// "The live value is CONTENT-OWNED ... read it from `self.interrupt_threshold`,
+    /// not from here." pack-en carries 0.68, so on every probe scoring in
+    /// [0.68, 0.75) Python abandoned the flow and Swift did not — same pack, same
+    /// utterance, two answers. The VIK-038 gate bounds the blast radius to closed
+    /// enum slots (`memory`), because open and date-time slots never probe at all.
+    private let interruptThreshold: Double
+
+    /// Consecutive failed turns on one awaited slot before the flow is abandoned.
+    ///
+    /// CONTENT-OWNED — `policies.limits.max_slot_attempts`. It was a bare `3`
+    /// written into the comparison below, next to a pack that declared the same
+    /// budget and a reference engine that hardcoded its own: three independent
+    /// 3s that agreed only by coincidence, and a pack field no one could change.
+    /// Python now reads it from the content too (`self.max_slot_attempts`).
+    private let maxSlotAttempts: Int
 
     private func handleSlotFilling(_ text: String) async -> NLUResponse {
         guard let intent = session.pendingIntent, let cfg = schema.intents[intent] else {
@@ -264,7 +292,7 @@ actor NLUEngine: ConversationEngine {
         //     "start my workout"       -> Cmd.ActivityExercise  0.995
         //
         // cancelled the reminder the user was in the middle of setting. Raising the
-        // 0.75 threshold does not help: "start my workout" (a legitimate reminder)
+        // interrupt threshold does not help: "start my workout" (a legitimate reminder)
         // outscores "start transcribing" (a real command, 0.962).
         //
         // What DOES carry evidence is the slot itself, so the gate is the awaited
@@ -295,7 +323,7 @@ actor NLUEngine: ConversationEngine {
             let isNewIntent = probe.label != intent
                 && probe.label != schema.fallbackIntent
                 && probe.label != "OUT_OF_SCOPE"
-                && probe.confidence >= Self.interruptThreshold
+                && probe.confidence >= interruptThreshold
                 && schema.intents[probe.label] != nil
             if isNewIntent {
                 let abandoned = intent
@@ -357,14 +385,15 @@ actor NLUEngine: ConversationEngine {
         // double-advanced) by anchoring it to itself.
         extractAllSlots(cfg, text, into: &session.pendingSlots, skip: awaiting)
 
-        // Track consecutive failures on the awaited slot. Mirrors Python MAX_SLOT_ATTEMPTS = 3:
-        // after 3 turns without progress we abandon the flow so the user is never trapped.
+        // Track consecutive failures on the awaited slot. The budget is the PACK's
+        // (`policies.limits.max_slot_attempts`); Python reads the same content value.
+        // After it is spent the flow is abandoned so the user is never trapped.
         if let awaiting {
             if session.pendingSlots[awaiting] != nil {
                 session.slotAttempts = 0
             } else {
                 session.slotAttempts += 1
-                if session.slotAttempts >= 3 {
+                if session.slotAttempts >= maxSlotAttempts {
                     session.resetSlotFilling()
                     return .fallback(intent: schema.fallbackIntent, confidence: 0)
                 }

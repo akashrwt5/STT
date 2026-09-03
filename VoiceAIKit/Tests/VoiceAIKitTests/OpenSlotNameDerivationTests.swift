@@ -98,13 +98,15 @@ final class OpenSlotNameDerivationTests: XCTestCase {
             uncertain: [],
             noIdioms: [],
             carriers: pack.lexicon.carriers,
+            interruptThreshold: pack.policies.thresholds.interrupt,
+            maxSlotAttempts: pack.policies.limits.maxSlotAttempts,
             leadingConnectors: pack.lexicon.leadingConnectors,
             confirmationGates: PackEngineFactory.confirmationGates(from: pack))
     }
 
 
     /// An engine whose classifier answers `switchUtterance` with a DIFFERENT
-    /// intent at a confidence far above the 0.75 interrupt threshold.
+    /// intent at a confidence far above the pack's interrupt threshold.
     private func makeEngine(routingTo intent: String,
                             butClassifying switchUtterance: String,
                             as other: String) -> NLUEngine {
@@ -117,6 +119,29 @@ final class OpenSlotNameDerivationTests: XCTestCase {
             uncertain: [],
             noIdioms: [],
             carriers: pack.lexicon.carriers,
+            interruptThreshold: pack.policies.thresholds.interrupt,
+            maxSlotAttempts: pack.policies.limits.maxSlotAttempts,
+            leadingConnectors: pack.lexicon.leadingConnectors,
+            confirmationGates: PackEngineFactory.confirmationGates(from: pack))
+    }
+
+    /// As above, with the probe's confidence chosen by the caller, so a test can
+    /// sit exactly on the pack's interrupt bar instead of far above it.
+    private func makeEngine(routingTo intent: String,
+                            butClassifying switchUtterance: String,
+                            as other: String,
+                            probing confidence: Double) -> NLUEngine {
+        NLUEngine(
+            schema: schema,
+            classifier: ScriptedClassifier(
+                fallback: .init(label: intent, confidence: 0.95),
+                script: [switchUtterance: .init(label: other, confidence: confidence)]),
+            entities: PackSlotResolver(pack: pack),
+            uncertain: [],
+            noIdioms: [],
+            carriers: pack.lexicon.carriers,
+            interruptThreshold: pack.policies.thresholds.interrupt,
+            maxSlotAttempts: pack.policies.limits.maxSlotAttempts,
             leadingConnectors: pack.lexicon.leadingConnectors,
             confirmationGates: PackEngineFactory.confirmationGates(from: pack))
     }
@@ -345,5 +370,39 @@ final class OpenSlotNameDerivationTests: XCTestCase {
                 """)
         }
         XCTAssertEqual(cancelled, memory)
+    }
+
+    /// The interrupt bar is the PACK's, not a constant in this package.
+    ///
+    /// Regression guard for a two-runtime divergence. `NLUEngine` carried
+    /// `private static let interruptThreshold: Double = 0.75`, documented as
+    /// "Mirrors Python NLUEngine.INTERRUPT_THRESHOLD = 0.75" — but that constant is
+    /// Python's FALLBACK for a schema that omits the key, and `engine.py` says so
+    /// outright. Python reads `interrupt_threshold` from the schema; pack-en carries
+    /// 0.68. So every probe scoring in [0.68, 0.75) abandoned the flow on Python and
+    /// did not on Swift: same pack, same utterance, two answers.
+    ///
+    /// Bounds are read from the pack rather than written as literals, so retuning the
+    /// content retunes the test instead of breaking it.
+    func testTheInterruptBarComesFromThePackNotTheEngine() async throws {
+        let bar = pack.policies.thresholds.interrupt
+        let switchLike = "increase volume"
+        let other = try someOtherIntent()
+
+        let atBar = makeEngine(routingTo: memory, butClassifying: switchLike,
+                               as: other, probing: bar)
+        await arriveAtPrompt(atBar, opening: openMemory, intent: memory, slot: "memory_name")
+        let onTheBar = await atBar.handle(switchLike)
+        guard case .interrupted = onTheBar else {
+            return XCTFail("a probe at the pack's bar (\(bar)) must switch topic — got \(onTheBar)")
+        }
+
+        let underBar = makeEngine(routingTo: memory, butClassifying: switchLike,
+                                  as: other, probing: bar - 0.01)
+        await arriveAtPrompt(underBar, opening: openMemory, intent: memory, slot: "memory_name")
+        let belowTheBar = await underBar.handle(switchLike)
+        if case .interrupted = belowTheBar {
+            XCTFail("a probe below the pack's bar (\(bar)) must not switch topic")
+        }
     }
 }

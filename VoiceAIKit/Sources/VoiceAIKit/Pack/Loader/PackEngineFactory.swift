@@ -99,6 +99,10 @@ enum PackEngineFactory {
             uncertain: [],
             noIdioms: [],
             carriers: lexicon.carriers,
+            // The pack's own bar, not a constant in the engine. Python reads the
+            // same number out of `interrupt_threshold`; that is the parity.
+            interruptThreshold: pack.policies.thresholds.interrupt,
+            maxSlotAttempts: pack.policies.limits.maxSlotAttempts,
             trailingFunctionWords: effectiveTrailingWords,
             leadingConnectors: lexicon.leadingConnectors,
             confirmationGates: confirmationGates(from: pack))

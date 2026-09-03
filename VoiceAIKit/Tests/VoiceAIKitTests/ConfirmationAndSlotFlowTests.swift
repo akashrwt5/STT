@@ -117,6 +117,8 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
             uncertain: [],
             noIdioms: [],
             carriers: pack.lexicon.carriers,
+            interruptThreshold: pack.policies.thresholds.interrupt,
+            maxSlotAttempts: pack.policies.limits.maxSlotAttempts,
             leadingConnectors: pack.lexicon.leadingConnectors,
             confirmationGates: gates)
     }
