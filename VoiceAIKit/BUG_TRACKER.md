@@ -1903,6 +1903,53 @@ because `cascade.json` lives inside the pack.
 Removes 92 KB from the pack and, with VIK-051, empties the reason
 `toleratedMissingArtifacts` existed.
 
+**Correction — the first version of this fix broke the release build.** It gated
+shipping on "does `semantic_head.json` exist beside the trained model?", which is
+not the same question as "should a head ship". That file is absent in a fresh
+clone and PRESENT on a build machine, so it was copied for the first time in CI
+and the bundle validator saw it for the first time there:
+
+```
+[stage 1] SCHEMA_INVALID        'embedder' unexpected / 'embedder_id' required
+[stage 8] EMBEDDER_ID_MISMATCH  head 'onnx' vs manifest 'minilm-l6-v2'
+[stage 8] HEAD_LABEL_MISMATCH   57 labels; stage 8 wants the intents plus OOS
+```
+
+Only the first was visible before the build stopped; the other two were found by
+running stage 8's comparison by hand. All three are the validator being right.
+`train_semantic_head` writes `embedder: "onnx"` to record WHICH EMBED PATH BUILT
+THE HEAD — its own comment says so — and that is not `embedder_id`, which the
+schema defines as the tie to "the exact encoder+vocab pair it was trained
+against", the thing whose mismatch is the silent-wrong-vector-space bug class.
+And the head carries the 57 classifier labels with no OOS class.
+
+So the head as trained today is not shippable, and `semantic_rescue_enabled` is
+false. The gate is now the stage, not the file, and
+`test_semantic_head_gating` pins both directions plus the premise — it builds its
+own stub model tree, because a test that can only fail on the machine where the
+bug already shipped is not a regression test, and that is exactly how this
+reached CI.
+
+**Before a semantic head can ever ship**, three things must be true, and all
+three are fixes to the TRAINER, not to the schema: a real `embedder_id` naming
+the encoder the head was trained against, an OOS class in its label set, and
+labels matching the bundle's intents.
+
+**Two follow-up commits in the compiler repo relaxed checks to accommodate the
+broken artifact**, before the real cause was found. One is right and one is
+worth revisiting:
+
+* `fix(compiler): allow shared language for semantic_head in schema validation`
+  — **keep**. `shared` is a legitimate scope: `ModelCatalog` is keyed "by a
+  language code, or the literal `shared`", and the compiler writes to
+  `models/semantic_head/shared/`. The path regex was genuinely too narrow.
+* `fix(schema): allow 'embedder' key in semantic_head instead of strictly
+  'embedder_id'` — **revisit**. It makes the file validate while the value in it
+  is still the wrong kind of thing, which defeats what the schema says that field
+  is for. It is not dangerous today (nothing ships a head, and stage 8 catches
+  the mismatch regardless), but it is permissiveness with no live case behind it.
+  The honest fix belongs in the trainer.
+
 ### VIK-052 — the artifact-existence check is written and never called (Med) — Fixed
 
 Wired as `BundleDataLoader.verifyDeclaredArtifacts`, running after integrity and
