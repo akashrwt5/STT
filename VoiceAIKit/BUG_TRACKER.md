@@ -4,7 +4,12 @@ Defects found while making the package data-driven. The pack compiler's own
 tracker lives in the IntentClassifier repo (`docs/BUG_TRACKER.md`); anything
 here is iOS-side, or a contract gap that bites iOS specifically.
 
-**Summary:** 30 fixed, 12 open.
+**Status lives on the entry, not on the section it sits under.** The `## Fixed` /
+`## Open` split stopped being maintained once entries started being fixed in
+place, so an item marked Fixed can appear under `## Open`. The table above and
+each `###` heading are the authority; the two are checked against each other.
+
+**Summary:** 32 fixed, 17 open.
 
 Two of the fixes (VIK-015, VIK-016) were found by the parity suite on its first
 run, in code that compiled cleanly and had been read against the reference twice.
@@ -59,8 +64,15 @@ evidence here.
 | VIK-038 | NLU | **High** | Slot answers were re-classified and cancelled the flow — "Need to go to walk" scored 0.994 as a command and killed the reminder being set | **Fixed** |
 | VIK-039 | NLU | **High** | A follow-up answer skipped topic derivation — the carrier, the time and the gazetteer rewrite all survived into the reminder name | **Fixed** |
 | VIK-040 | NLU | **High** | Spelled-out times were read into `date_time` AND left in the name — "at nine" gave "call Mukesh nine", "at 9" gave "call Mukesh" | **Fixed** |
-| VIK-041 | contract | **High** | Politeness prefixes are not carriers — "Can you remind me to go for a walk" stores the whole sentence as the reminder name | Open — **pack-side** |
-| VIK-042 | NLU | Med | A bare hour 1–6 is assumed PM by a rule hardcoded in Swift — "at 3" is always 15:00, and no pack can change it | Open |
+| VIK-041 | contract | **High** | Politeness prefixes are not carriers — "Can you remind me to go for a walk" stores the whole sentence as the reminder name | **Fixed** |
+| VIK-042 | NLU | Med | A bare hour 1–6 is assumed PM by a rule hardcoded in Swift — "at 3" is always 15:00, and no pack can change it | **Fixed** |
+| VIK-043 | NLU | **High** | "tonight" said after its hour resolves to a time already past — a reminder created for a moment that has gone | Open |
+| VIK-044 | packaging | Med | `SeedPack.url` picks the vendored pack by STRING sort, so 1.0.9 would beat 1.0.45 | Open |
+| VIK-045 | parity | Med | Rolling to the next day: Python adds 24 hours, Swift adds a calendar day — they diverge across a DST boundary | Open |
+| VIK-046 | testing | Med | The Swift parity fixtures say "regenerate, never hand-edit" and ship no generator | Open |
+| VIK-047 | NLU | Med | A day-only answer re-asks the identical question, then discards a correctly-extracted reminder after three tries | Open |
+| VIK-048 | contract | Med | `interrupt_threshold` is fitted against negatives the engine no longer produces | Open |
+| VIK-049 | contract | Low | "in quarter of an hour" does not resolve, while "in half an hour" does | Open |
 
 ---
 
@@ -523,7 +535,7 @@ the assertion flips to a failure the moment a pack gains the vocabulary.
 **Ask:** add a `clock_minutes` table (or extend the numbers table to 0–59 and
 rename it) to `datetime_grammar`.
 
-### VIK-017 — v3 drops the `open` entity flag (**High**)
+### VIK-017 — v3 drops the `open` entity flag (**High**) — Fixed
 
 **CLOSED end to end.** The compiler emits `open`; `EntityDefinition` decodes it;
 `BundleDataLoader` carries it across the flatten into `ResolvedPack.openEntities`
@@ -565,7 +577,7 @@ Currently a parameter on `PackSlotResolver.init` / `PackEngineFactory.makeEngine
 It already exists upstream — it is dropped in the v3 projection, not absent from
 the source.
 
-### VIK-019 — `dynamic_source` does not say which builtin (Med)
+### VIK-019 — `dynamic_source` does not say which builtin (Med) — Fixed
 
 **CLOSED end to end.** `PackSlotResolver` now dispatches on the pack's declared
 `dynamic_source`, not on how an entity id is spelled. Id matching survives only as
@@ -598,7 +610,7 @@ and logged at load when a slot names a builtin this runtime cannot resolve.
 `runtime.builtin.integer` — so the id is free to change and an unknown builtin
 is detectable rather than merely unresolvable.
 
-### VIK-022 — Pack lexicon is missing the "set a reminder" carrier (**High**)
+### VIK-022 — Pack lexicon is missing the "set a reminder" carrier (**High**) — Fixed
 
 **CLOSED end to end.** The portable carrier ships in `pack-en-v1.0.30`;
 `additionalCarriers` and `PackContentGaps` are deleted. The test now asserts the
@@ -1054,9 +1066,27 @@ example — "change memory to Car" — is command-shaped, so the feature was onl
 against interruptions that look like commands. It shipped with no test, and none of the 142
 tests covered interruption until now. Live ~2.5 months.
 
-**Open question:** the commit claims it mirrors Python's `_handle_slot_filling`. That source
-is not in this repo. If Python fills first and probes second, this was purely a porting
-error and the server side is fine; if it probes first, the same bug is live there.
+**Open question — ANSWERED, and the answer was the bad one.** The commit claimed it
+mirrors Python's `_handle_slot_filling`. That source was read and RUN: Python probes
+first (`engine.py`, classify 38 lines above the fill), so the same defect was live on
+the reference side, not merely mis-ported.
+
+Its guard `_answers_awaited_slot` rules itself out for exactly this flow — its own
+docstring says *"Only CLOSED enum entities are consulted. For an OPEN free-text entity
+(e.g. @remind) every utterance is a valid value… there the confidence bar remains the
+only signal."* Both of the reminder's required slots (`remind` open, `sys.date-time`)
+are unprotected by it.
+
+Reproduced end to end on the real engine with this pack's own weights: "set a reminder"
+→ "clean my hearing aids" fulfilled `Help_CleanCare` and lost the reminder. A case the
+table above does not list turned out to be the worst of them — **"walk the dog" scores
+1.000**. Fixed on the Python side with the same gate as here (the awaited slot's KIND,
+never the intent's name), and pinned by `tests/test_slot_interruption_gate.py`.
+
+The lesson worth keeping: this was the first of three defects found in this session
+where a fix had landed in Swift and never reached the reference the Swift is
+parity-tested against (VIK-040 and VIK-042 were the others). Parity drifts one way
+unless something checks.
 
 **Found by:** field report — "set reminder" then "Need to go to walk" started a walk.
 **Tests:** `OpenSlotNameDerivationTests.testTheOpenNameSlotNeverInterrupts`,
@@ -1127,11 +1157,30 @@ verbatim.
 
 ---
 
-## Open
+### VIK-041 — Politeness prefixes are not carriers (**High**) — Fixed
 
-### VIK-041 — Politeness prefixes are not carriers (**High**) — Open, **pack-side**
+**CLOSED end to end.** The two patterns below ship in `pack-en-v1.0.45`, at the
+FRONT of the carrier list, and the ordering is asserted rather than assumed —
+`_derive_topic` makes one pass in list order, so a prefix-stripper that runs late
+never gets its turn back. Verified against the vendored pack's own bytes:
+"Can you remind me to go for a walk" derives "go for a walk".
 
-> **IMPORTANT — needs a pack change. Cannot be fixed in this repo.**
+Two things were fixed alongside it, in the same list, because they are the same
+class of defect:
+
+* the optional connector group `(?:to|that|about|of)?` carried no `\b`, so it ate
+  the start of the following word — "remind me tomorrow" derived "morrow",
+  "remind me office party" derived "fice". Three shipped carriers were affected,
+  and so was the first draft of the politeness pattern added here.
+* the list named its VERBS (`remind|tell|alert|notify`), so every other phrasing
+  kept its wrapper: "nudge me to stretch" was stored verbatim. Three carriers by
+  SHAPE replace it. `^\s*\w+\s+me\s+(?:to|about|that|when)\b` is safe because
+  of WHERE it runs, not because it is narrow — topic derivation only happens for
+  an OPEN slot and `remind` is the only open entity, so the classifier has already
+  decided this is a reminder before any of it executes.
+
+The original diagnosis below stands; it is kept because the ordering argument is
+the part that is easy to get wrong twice.
 
 ```
 "Remind me to go for a walk"        ->  name "go for a walk"                        correct
@@ -1185,9 +1234,46 @@ and re-sign — it cannot be hand-edited into the vendored pack.
 
 ---
 
-### VIK-042 — A bare hour's AM/PM side is decided by a hardcoded rule (Med) — Open
+### VIK-042 — A bare hour's AM/PM side is decided by a hardcoded rule (Med) — Fixed
 
-> **Language behaviour living in the engine instead of the pack — the VIK-001 shape.**
+**CLOSED, and without the pack field this ticket asked for.** The ask was to move
+the `1...6` constant into the pack so a language could disagree with it. There is
+no constant left to move: a bare hour now takes the EARLIEST reading still ahead
+of us, and the answer comes from the clock.
+
+    05:41  "at 6"                     06:00 today       (was 18:00)
+    15:00  "at 3"                     03:00 tomorrow
+    any    "medicine tomorrow at 6"   06:00 tomorrow    (was 18:00)
+
+Two rules were measured and rejected before this one, over 288 (now, hour) pairs:
+
+* the old rule guessed the half of the clock BEFORE consulting `now` and looked
+  at the time only to rescue a guess that had landed in the past. "wake me at 6"
+  at 05:41 was not in the past, so nothing rescued it.
+* plain "next future occurrence" breaks 51 cases and fixes 33. Say "at 2" at
+  16:00 and both readings fall tomorrow — 02:00 in ten hours, 14:00 in
+  twenty-two — so nearest picks 02:00. That is arithmetic, not evidence.
+
+**ACCEPTED COST, on the record:** on a NAMED day both readings are ahead of us,
+so the earliest is always the morning one — "meeting tomorrow at 5" resolves to
+05:00. Saying "5 pm" fixes it. There is genuinely no signal on a named day; the
+guess was not removed, its scope was narrowed to the cases where nothing else
+could decide. Asking ("Monday, 5 in the morning or the evening?") is the honest
+answer there and belongs with the confirmation work.
+
+**Two bugs this fix introduced, both caught by regenerating the golden corpus and
+reading the diff rather than by the suite going red:**
+
+* `"at noon"` resolved to midnight. The old rule left 7–12 alone, so noon
+  survived by luck. Read as a bare 12 it is offered 00:00 as its other half. A
+  named time is not ambiguous; `Clock.isNamedTime` now says which hours came from
+  a word rather than a digit.
+* `"3 in the afternoon"` resolved to 03:00. The first attempt at the noon fix
+  excluded every named period — but the 3 came from the user and the period is
+  what says which 3 they meant. It has to be the flag, set only where the hour
+  itself came from the name.
+
+The original analysis below is kept for the reasoning, not the remedy.
 
 "remind me to go for a walk tomorrow at 3" schedules **15:00**. There is no way for a pack
 to ask for anything else.
@@ -1239,3 +1325,170 @@ so it lands with the other pack-side items (VIK-041).
 
 **Found by:** field report — "remind me to go for a walk tomorrow at 3" scheduled 15:00, and
 the user expected the morning.
+
+---
+
+## Open
+
+### VIK-043 — "tonight" said after its hour resolves into the past (**High**)
+
+```
+20:17   "remind me tonight"   ->   18:00 TODAY      already gone
+```
+
+`tonight` is bridged onto the `evening` period (VIK-016), whose hour is 18. Said at
+any point after 18:00 the resolved time is behind the caller, and a reminder is
+created for a moment that has passed.
+
+Both runtimes, same shape. The guard that exists compares DATES only:
+
+```python
+if explicit_day and base_day.date() < now.date():   # entities.py
+```
+```swift
+if dayExplicit, calendar.startOfDay(for: baseDay) < calendar.startOfDay(for: now)
+```
+
+A spent hour earlier the same day passes it. The push-to-tomorrow one line above is
+skipped because `explicit_day` / `dayExplicit` is true — "tonight" names a day.
+
+Found while verifying VIK-042's "never resolves into the past" invariant: 7080
+combinations produced exactly six past results and all six were this. Deliberately
+not fixed inside that change — a bare-hour commit is the wrong place for it, and the
+right answer is a product decision. At 22:00 "remind me tonight" could mean tomorrow
+evening (but the user said *tonight*), or it could be the case to ask about. Note the
+engine already has the machinery: a day with no usable time can be returned with
+`time_explicit=False`, which parks the day and prompts for the hour.
+
+**Needs:** a decision, then the same change in both runtimes.
+
+### VIK-044 — the seed pack is chosen by string sort (Med)
+
+`VoiceAISeedPackEN.url` scans the resource directory and takes the last name in
+lexicographic order:
+
+```swift
+names.filter({ $0.hasPrefix("pack-en-v") }).sorted().last
+```
+
+Scanning is deliberate and correct — the API that splits a name into stem and
+extension returns a silent nil on `pack-en-v1.0.45`, which is indistinguishable from
+"the resource is missing". The SORT is the problem: it compares strings, so
+`pack-en-v1.0.9` beats `pack-en-v1.0.45` because `9` > `4`.
+
+Harmless today — one pack ships, and 1.0.38 vs 1.0.45 happens to sort correctly. It
+bites the first time two packs sit side by side across a version boundary like 9 → 10,
+and it bites silently: the app loads an older pack and everything still works, slightly
+wrong.
+
+**Fix:** compare version components numerically.
+
+### VIK-045 — the two runtimes roll to the next day differently (Med)
+
+Python adds twenty-four hours; Swift adds a calendar day:
+
+```python
+dt += timedelta(days=1)                                    # entities.py, 5 sites
+```
+```swift
+calendar.date(byAdding: .day, value: 1, to: candidate)     # PackDateTimeParser, 3
+```
+
+Identical except across a DST boundary, where they differ by an hour. Pre-existing on
+both sides and untouched by the VIK-042 work, which followed each file's existing
+pattern rather than introducing a third.
+
+No impact for a pack in a zone without DST, which is why it has not surfaced. It is a
+parity defect the fixtures cannot see: the golden corpus is captured at one fixed
+instant, and neither runtime's tests cross a transition.
+
+**Fix:** pick one semantic — a calendar day is the right one for a wall-clock reminder
+— and make both do it, with a fixture on each side of a transition.
+
+### VIK-046 — the parity fixtures say "regenerate, never hand-edit" and ship no generator (Med)
+
+`Tests/VoiceAIKitTests/Fixtures/topic_expectations.json` carries:
+
+> "Generated from packages/runtime/nlu_engine/entities.py + engine.py::_derive_topic.
+> Regenerate, never hand-edit."
+
+There is no script in either repo that does it. The IntentClassifier side has
+`scripts/ci/capture_en_datetime_golden.py` for its own corpus; this one has nothing,
+so "regenerate" means someone reconstructing the procedure from the note.
+
+That is not theoretical: both Swift fixtures went stale twice in one session and were
+caught only because they were checked by hand against the reference before building.
+`reference_expectations.json` needs the same script.
+
+**Fix:** commit the capture script next to the fixtures, and run it in CI so a
+reference change that moves a fixture fails the build instead of waiting to be noticed.
+
+### VIK-047 — a day-only answer re-asks the same question, then throws the reminder away (Med)
+
+```
+USER   "remind me to pay rent on friday"
+ASSIST "When should I remind you? You can say things like '9am', ..."
+USER   "friday"
+ASSIST "When should I remind you? You can say things like '9am', ..."     identical
+USER   "friday"
+ASSIST  ... same again
+USER   "friday"
+ASSIST "Sorry, I'm having trouble with that. Let's try something else."
+```
+
+The parked day survives correctly — answering "9am" at any point still yields Friday
+09:00 — so the state machine is sound. Two things are not:
+
+* the re-prompt is byte-identical to the first ask. It does not say that the day is
+  already known, or that a time of day is the missing part, so a user who believes
+  they answered has nothing to correct.
+* at `MAX_SLOT_ATTEMPTS` the flow is abandoned and the NAME goes with it, though
+  "pay rent" was extracted correctly on turn one. Only the hour was ever missing.
+
+Anything carrying a time works: "9am", "9", "friday at 9", "friday morning", "in the
+morning". Only a bare day does not.
+
+**Needs:** a second prompt that names what is already held ("What time on Friday?"),
+and a decision about whether a spent budget should discard a half-filled reminder or
+hand it back. Both are content and product changes, not engine ones.
+
+### VIK-048 — `interrupt_threshold` is fitted against negatives the engine no longer produces (Med)
+
+`slot_thresholds.json` documents its own fit:
+
+> "negatives: OPEN free-text entity surface forms … Closed enum slots are protected by
+> precedence instead (`NLUEngine._answers_awaited_slot`), not by this bar."
+
+and `fit_slot_thresholds.py` selects them accordingly (`if not spec.get("open"): continue`).
+
+After VIK-038 an open slot is never probed at all, so the entire negative set the value
+was fitted against can no longer occur. The bar now applies only to CLOSED enum slots —
+the ones its own provenance says are protected by precedence rather than by it.
+
+Nothing is broken: 0.68 still functions and errs conservative, since a higher bar means
+fewer interruptions and the fit's objective was "fewest flows destroyed". But the
+number describes a situation that no longer exists, and with those negatives gone the
+constraint relaxes — the bar could likely be lower and catch more genuine topic
+switches.
+
+Blocked in practice: `fit_slot_thresholds.py` reads `content/nlu_entities.json`, which
+does not exist (the file lives at `language_packs/<lang>/nlu_entities.json`), so the
+refit cannot be run as it stands. That belongs in the IntentClassifier tracker; it is
+noted here because the value it produces ships in the pack and this runtime reads it.
+
+**Fix:** repair the path, refit against a negative set that matches how the value is
+now used, and update the provenance note.
+
+### VIK-049 — "in quarter of an hour" does not resolve (Low)
+
+```
+"remind me in half an hour"          ->  +30 min      ✓
+"remind me in quarter of an hour"    ->  no match
+```
+
+`clock_idioms` carries `half_an_hour` but no quarter-hour equivalent, and the
+relative-duration path needs a digit ("in 15 minutes" works). Same class as VIK-014: a
+phrase the grammar could express and does not.
+
+**Ask:** add the idiom to `clock_idioms` in `datetime.json`, in every language.
+
