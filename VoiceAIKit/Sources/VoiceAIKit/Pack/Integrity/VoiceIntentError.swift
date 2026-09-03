@@ -35,11 +35,17 @@ public enum VoiceIntentError: Error, Equatable, Sendable {
 
     /// `bundle.json` declares an artifact that is not in the pack.
     ///
-    /// Known offender: `models/semantic_head/shared/head.json` is declared but
-    /// never emitted (BUG-013 in the compiler repo). The loader tolerates that
-    /// one by policy — see `PackLoadPolicy.toleratedMissingArtifacts` — because
-    /// refusing every current pack over a field nothing reads would be pedantry,
-    /// not safety.
+    /// Thrown by `BundleDataLoader.verifyDeclaredArtifacts`, after integrity and
+    /// before any section is read, so a pack fails on its own manifest's promise
+    /// rather than at whichever artifact happens to be needed first.
+    ///
+    /// This used to name two standing offenders that the loader forgave by
+    /// policy. Both were compiler defects, both are fixed, and
+    /// `PackLoadPolicy.toleratedMissingArtifacts` is empty again — so reaching
+    /// this error now means a genuinely broken pack, not a known wart.
+    ///
+    /// A frequent cause while iterating on the compiler: a slice function that
+    /// deletes a file and forgets to drop the manifest key that names it.
     case declaredArtifactMissing(path: String)
 
     // MARK: - Integrity (ADD §8)

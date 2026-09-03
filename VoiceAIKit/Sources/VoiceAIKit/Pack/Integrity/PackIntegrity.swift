@@ -72,35 +72,29 @@ public struct PackLoadPolicy: Sendable {
 
     /// Declared artifacts allowed to be absent.
     ///
-    /// Both entries below are LEGACY, and both are fixed in the compiler as of
-    /// the change that turned `verifyDeclaredArtifacts` on. They are listed only
-    /// so that packs built BEFORE that fix — including the seed pack vendored in
-    /// this repo — still load while the first corrected pack is being built.
+    /// **EMPTY, and that is the state it should stay in.** A pack that names a
+    /// file it does not ship is a broken pack, and `verifyDeclaredArtifacts`
+    /// refuses it.
     ///
-    /// **Delete both entries once no supported pack declares them**, and this set
-    /// goes back to being empty, which is the state it should live in. A
-    /// tolerance list that accumulates is how a check stops being one.
+    /// It briefly held two entries, both for compiler defects fixed in the same
+    /// session that turned the check on: `models/semantic_head/shared/head.json`
+    /// (declared by every pack, shipped by none — VIK-010) and
+    /// `models/intent/en/model.onnx` (the iOS slice deleted the ONNX and kept
+    /// declaring it — VIK-051). They were there only so packs built before those
+    /// fixes kept loading while the first corrected pack was built. That pack has
+    /// shipped and declares nothing it does not carry, so the entries are gone.
     ///
-    ///   * `models/semantic_head/shared/head.json` — declared by every pack the
-    ///     compiler used to emit and shipped by none (VIK-010). The compiler now
-    ///     declares a semantic head only when it has one to ship;
-    ///     `models.semantic_head` is optional in the bundle schema, which is the
-    ///     way out the original code was looking for.
-    ///   * `models/intent/en/model.onnx` — the iOS slice deleted the ONNX and
-    ///     kept declaring it (VIK-051). `mod_ios` now repoints `artifact` at the
-    ///     compiled CoreML head (`format: "mlmodelc-ref"`) when it removes the
-    ///     ONNX. Exact path, not a pattern, so a second language cannot inherit
-    ///     the exemption by accident — `en` is the only pack this ever shipped in.
+    /// The parameter stays, because a host may one day have a real reason to
+    /// forgive one artifact. Adding an entry should need that reason written next
+    /// to it and an end date — a tolerance list that accumulates is how a check
+    /// stops being one.
     public let toleratedMissingArtifacts: Set<String>
 
     /// Refuse a pack whose own report card says its gates did not pass.
     public let requiresPassingGates: Bool
 
     public init(ignoredFileNames: Set<String> = [".DS_Store", "Thumbs.db"],
-                toleratedMissingArtifacts: Set<String> = [
-                    "models/semantic_head/shared/head.json",   // VIK-010, delete after 1.0.46
-                    "models/intent/en/model.onnx",             // VIK-051, delete after 1.0.46
-                ],
+                toleratedMissingArtifacts: Set<String> = [],
                 requiresPassingGates: Bool = true) {
         self.ignoredFileNames = ignoredFileNames
         self.toleratedMissingArtifacts = toleratedMissingArtifacts
