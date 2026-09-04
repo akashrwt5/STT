@@ -87,9 +87,44 @@ struct IntentWorkflow: Decodable, Sendable {
         let response: String
     }
 
+    /// How this intent asks permission, and what each answer does.
+    ///
+    /// `yes`/`no` are optional in the spec because packs built before they
+    /// existed cannot have them — but a runtime must not quietly paper over
+    /// their absence. VoiceAIKit used to synthesise them, taking
+    /// `completion.action` for yes and an empty string for no, and that guess
+    /// was silently wrong the moment content authored a decline with its own
+    /// action: the reference engine fired `message.cancel` while the device
+    /// fired nothing, on the same pack, for the same words. `PackEngineFactory`
+    /// now throws instead of guessing.
     struct Confirmation: Decodable, Sendable {
         let prompt: String
         let required: Bool
+        let yes: Branch?
+        let no: Branch?
+
+        enum CodingKeys: String, CodingKey { case prompt, required, yes, no }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            prompt = try c.decode(String.self, forKey: .prompt)
+            required = try c.decode(Bool.self, forKey: .required)
+            yes = try c.decodeIfPresent(Branch.self, forKey: .yes)
+            no = try c.decodeIfPresent(Branch.self, forKey: .no)
+        }
+
+        /// One answer's outcome: what to do, what to say, and what the host
+        /// calls it.
+        struct Branch: Decodable, Sendable {
+            let action: String
+            /// Response key, not text.
+            let response: String
+            /// The host's single name for this outcome — the Dialogflow-era
+            /// `Cmd.SendMessage - yes`. Optional and compat-only: absent means
+            /// report the intent id unchanged. Not a model class, and cannot
+            /// become one, because polarity is decided after classification.
+            let label: String?
+        }
     }
 
     struct SlotSpec: Decodable, Sendable {

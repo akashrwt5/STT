@@ -82,7 +82,7 @@ final class TopicDerivationParityTests: XCTestCase {
         var failures: [String] = []
 
         for testCase in expectations.deriveTopic {
-            let engine = makeEngine()
+            let engine = try makeEngine()
             let response = await engine.handle(testCase.text)
             let actual = filledName(from: response)
 
@@ -104,7 +104,7 @@ final class TopicDerivationParityTests: XCTestCase {
     /// is the connector itself. The reference had this bug too; it is fixed on
     /// both sides rather than reproduced.
     func testConnectorThatIsTheEntireRemainderIsRemoved() async throws {
-        let engine = makeEngine()
+        let engine = try makeEngine()
         let response = await engine.handle("set a reminder for 5pm")
         XCTAssertNil(filledName(from: response),
                      "\"for\" is not a reminder name — the slot should still be unfilled")
@@ -115,9 +115,9 @@ final class TopicDerivationParityTests: XCTestCase {
     /// Wired as `PackEngineFactory` wires it, with the pack's own carriers and
     /// connectors, and a classifier stubbed to be confident so no confirmation
     /// intervenes.
-    private func makeEngine() -> NLUEngine {
+    private func makeEngine() throws -> NLUEngine {
         NLUEngine(
-            schema: PackEngineFactory.schema(from: pack),
+            schema: try PackEngineFactory.schema(from: pack),
             classifier: TopicStubClassifier(label: reminderIntent),
             entities: PackSlotResolver(pack: pack),
             uncertain: [],

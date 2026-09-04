@@ -218,7 +218,7 @@ final class ReferenceParityTests: XCTestCase {
             // classifier swapped — the same discipline ConfirmationAndSlotFlowTests
             // states: if the factory's wiring changes and this does not, the test
             // stops describing production and starts describing itself.
-            let schema = PackEngineFactory.schema(from: pack)
+            let schema = try PackEngineFactory.schema(from: pack)
             let engine = NLUEngine(
                 schema: schema,
                 classifier: ScriptedParityClassifier(

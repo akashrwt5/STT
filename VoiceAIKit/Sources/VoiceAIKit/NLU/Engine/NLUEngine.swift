@@ -226,7 +226,8 @@ actor NLUEngine: ConversationEngine {
                 return advanceSlots(intent, cfg, breakdown: session.pendingBreakdown)
             }
             session.resetSlotFilling()
-            return .fulfill(intent: intent, action: fu.yes.action,
+            return .fulfill(intent: fu.yes.label ?? intent,
+                            action: fu.yes.action,
                             parameters: [:], message: fu.yes.fulfillment, confidence: 1.0)
 
         case .some(false):
@@ -234,7 +235,8 @@ actor NLUEngine: ConversationEngine {
             // resumes a flow the user just cancelled.
             session.clearContext(fu.context)
             session.resetSlotFilling()
-            return .fulfill(intent: intent, action: fu.no.action,
+            return .fulfill(intent: fu.no.label ?? intent,
+                            action: fu.no.action,
                             parameters: [:], message: fu.no.fulfillment, confidence: 1.0)
         }
     }
@@ -279,6 +281,7 @@ actor NLUEngine: ConversationEngine {
     /// 3s that agreed only by coincidence, and a pack field no one could change.
     /// Python now reads it from the content too (`self.max_slot_attempts`).
     private let maxSlotAttempts: Int
+
 
     /// Out-of-vocabulary guard, `policies.thresholds.oov_reject` / `oov_bypass`.
     /// Read as a pair or not at all — see `handleNewIntent`.

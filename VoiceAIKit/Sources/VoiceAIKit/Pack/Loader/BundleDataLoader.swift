@@ -265,7 +265,14 @@ enum BundleDataLoader {
                                  relative: "runtime/guards.json")) ?? .empty,
             telemetry: try decode(PackTelemetrySchema.self,
                                   at: root.appendingPathComponent("telemetry/schema.json"),
-                                  relative: "telemetry/schema.json")
+                                  relative: "telemetry/schema.json"),
+            // No confirmation-label section any more. The host's name for a
+            // resolved confirmation now arrives on the confirmation BRANCH in
+            // `capabilities/<id>/workflows.json`, beside that branch's action
+            // and response — one fact in one place. Two artifacts held it
+            // before (`runtime/legacy_labels.json`, then
+            // `runtime/confirmation_labels.json`) and both described half a turn
+            // from a second file.
         )
     }
 
@@ -298,6 +305,19 @@ enum BundleDataLoader {
             if let confirmation = wf.confirmation {
                 guard sections.responses[confirmation.prompt] != nil else {
                     throw VoiceIntentError.danglingResponseKey(intent: intent, key: confirmation.prompt)
+                }
+                // The branches get the SAME check as `completion`, and for the
+                // same reason: a response key with no string is a silent empty
+                // prompt, and an action no capability owns is a key the host
+                // dispatches on and nothing answers. They went unchecked only
+                // because they did not exist in a bundle until now.
+                for branch in [confirmation.yes, confirmation.no].compactMap({ $0 }) {
+                    guard sections.responses[branch.response] != nil else {
+                        throw VoiceIntentError.danglingResponseKey(intent: intent, key: branch.response)
+                    }
+                    guard actionOwners[branch.action] != nil else {
+                        throw VoiceIntentError.danglingActionKey(intent: intent, action: branch.action)
+                    }
                 }
             }
             for slot in wf.slots {

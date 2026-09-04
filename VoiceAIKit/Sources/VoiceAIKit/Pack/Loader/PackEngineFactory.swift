@@ -77,7 +77,7 @@ enum PackEngineFactory {
         // for a language that does not use a mechanism — it is NOT a signal to
         // substitute English, which is exactly what the predecessor did.
         let engine = NLUEngine(
-            schema: schema(from: pack),
+            schema: try schema(from: pack),
             classifier: classifier,
             entities: entities,
             // EMPTY, not `lexicon.negationCues` (VIK-023).
@@ -166,7 +166,7 @@ enum PackEngineFactory {
     /// v3 surface separates them: the engine wants strings, the pack stores
     /// structure plus a per-language catalog, and the join happens once, after
     /// the language is known.
-    static func schema(from pack: ResolvedPack) -> NLUSchema {
+    static func schema(from pack: ResolvedPack) throws -> NLUSchema {
         var intents: [String: IntentDef] = [:]
 
         for (id, workflow) in pack.intents {
@@ -179,15 +179,49 @@ enum PackEngineFactory {
             var followup: FollowupDef?
             if let confirmation = workflow.confirmation,
                let prompt = pack.responses[confirmation.prompt] {
-                let done = workflow.completion.flatMap { pack.responses[$0.response] } ?? ""
-                followup = FollowupDef(
-                    context: id,
-                    lifespan: 1,
-                    prompt: prompt,
-                    yes: FollowupBranch(action: workflow.completion?.action ?? "", fulfillment: done),
-                    // The pack has no cancel text per intent; the confirm-gate's
-                    // shared message is `sys.confirm.cancelled`.
-                    no: FollowupBranch(action: "", fulfillment: pack.responses["sys.confirm.cancelled"] ?? ""))
+                // READ, not inferred. The branches used to be built from
+                // `completion`: `completion.action` for yes, and a literal ""
+                // plus the shared `sys.confirm.cancelled` text for no. The yes
+                // guess is the subtle one — it is right only while ACCEPTING a
+                // confirmation means the same thing as NEVER BEING ASKED. The
+                // moment content authored `message.send` for yes and
+                // `message.cancel` for no, Python fired those and iOS fired
+                // `message.compose` and nothing: same pack, same words, two
+                // answers, and nothing anywhere went red.
+                //
+                // But a `confirmation` block does NOT mean the intent is gated.
+                // The compiler writes one for every intent that authors a
+                // `confirm_prompt`, and pack-en has 13 of those whose policy is
+                // `never` — a prompt for a question that is never asked.
+                // `runtime/policies.json` decides, and the engine agrees: it
+                // arms a confirmation only `if let fu = cfg.followup`, so an
+                // intent with no branches simply never asks. Demanding branches
+                // from those refused a pack that was correct, which is how this
+                // first shipped.
+                //
+                // So the rule is the narrow one: a GATED intent must state both
+                // answers. Absent there, throw — the pack invariant at the top
+                // of `ResolvedPack` — because the alternative is the silent
+                // divergence above, on the intents most likely to act.
+                if let yes = confirmation.yes, let no = confirmation.no {
+                    guard let yesText = pack.responses[yes.response] else {
+                        throw VoiceIntentError.danglingResponseKey(intent: id, key: yes.response)
+                    }
+                    guard let noText = pack.responses[no.response] else {
+                        throw VoiceIntentError.danglingResponseKey(intent: id, key: no.response)
+                    }
+                    followup = FollowupDef(
+                        context: id,
+                        lifespan: 1,
+                        prompt: prompt,
+                        // `label` is the host's single name for this outcome,
+                        // absent for a pack whose host reads plain intent ids —
+                        // in which case the engine reports the intent unchanged.
+                        yes: FollowupBranch(action: yes.action, fulfillment: yesText, label: yes.label),
+                        no: FollowupBranch(action: no.action, fulfillment: noText, label: no.label))
+                } else if pack.confirmationPolicy(for: id) != .never {
+                    throw VoiceIntentError.confirmationBranchesMissing(intent: id)
+                }
             }
             intents[id] = IntentDef(
                 slots: slots,

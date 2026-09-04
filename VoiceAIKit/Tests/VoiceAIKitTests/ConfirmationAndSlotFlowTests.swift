@@ -85,7 +85,7 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
     override func setUpWithError() throws {
         try super.setUpWithError()
         pack = try PackTestSupport.loadPack()
-        schema = PackEngineFactory.schema(from: pack)
+        schema = try PackEngineFactory.schema(from: pack)
         // The reminder shape: a free-text name plus a time. `Cmd.MemoryChange` also
         // has a required slot, so "has required slots" alone selects the wrong flow.
         reminder = try PackTestSupport.intent(requiringSlots: ["name", "date_time"], in: pack)
@@ -450,5 +450,199 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
         guard case .confirm = turnAfterReset else {
             return XCTFail("Expected confirm after reset since 'yes' is treated as a new utterance, got \(turnAfterReset)")
         }
+    }
+}
+
+// MARK: - Confirmation branches
+
+/// A confirmation branch says what the answer DOES, what it SAYS, and what the
+/// host CALLS it — and the engine reports all three from the pack.
+///
+/// The factory used to infer two of them. `yes` took `completion.action`, which
+/// is right only while accepting a confirmation means the same thing as never
+/// being asked; `no` took a literal `""`. Content then authored `message.send`
+/// and `message.cancel`, and the reference engine fired those while this one
+/// fired `message.compose` and nothing — same pack, same words, and nothing
+/// anywhere went red, because no test compared the branch to what the content
+/// declared.
+///
+/// Everything here is read from the pack. A literal `"Cmd.SendMessage - yes"`
+/// in this file would pass if the engine invented the string itself.
+final class ConfirmationBranchTests: XCTestCase {
+
+    private var pack: ResolvedPack!
+    private var schema: NLUSchema!
+
+    /// The intent under test, resolved from the pack: one that actually reaches
+    /// a confirmation. Never named here, so a taxonomy change reports itself.
+    private var confirmed: String!
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        pack = try PackTestSupport.loadPack()
+        schema = try PackEngineFactory.schema(from: pack)
+        // The GATED intent, not merely one with a confirmation block. 13 intents
+        // in pack-en carry a `confirm_prompt` and a `never` policy — a prompt for
+        // a question never asked — and selecting on "has a confirmation" picked
+        // Cmd.SendMessage only by alphabetical luck.
+        confirmed = try XCTUnwrap(
+            pack.intents.keys
+                .filter { pack.intents[$0]?.confirmation != nil }
+                .filter { pack.confirmationPolicy(for: $0) != .never }
+                .sorted().first,
+            "no intent is gated, so this suite proves nothing")
+    }
+
+    private func makeEngine() -> NLUEngine {
+        NLUEngine(
+            schema: schema,
+            classifier: StubClassifier(label: confirmed, confidence: 0.99),
+            entities: PackSlotResolver(pack: pack),
+            uncertain: [],
+            noIdioms: [],
+            carriers: pack.lexicon.carriers,
+            interruptThreshold: pack.policies.thresholds.interrupt,
+            maxSlotAttempts: pack.policies.limits.maxSlotAttempts,
+            oovReject: pack.policies.thresholds.oovReject,
+            oovBypass: pack.policies.thresholds.oovBypass,
+            leadingConnectors: pack.lexicon.leadingConnectors,
+            confirmationGates: PackEngineFactory.confirmationGates(from: pack))
+    }
+
+    /// The premise: the pack states both answers rather than leaving them to be
+    /// inferred. If this fails, everything below is measuring a guess.
+    func testThePackStatesBothAnswers() throws {
+        let confirmation = try XCTUnwrap(pack.intents[confirmed]?.confirmation)
+        let yes = try XCTUnwrap(confirmation.yes, """
+            \(confirmed!) asks a question but the pack does not say what "yes" does. \
+            A pack built before the branches existed hits this; rebuild it.
+            """)
+        let no = try XCTUnwrap(confirmation.no, "no `no` branch")
+
+        XCTAssertNotEqual(yes.action, no.action,
+                          "both answers fire the same action, so the answer does not matter")
+        XCTAssertNotNil(pack.responses[yes.response], "\(yes.response) resolves to no text")
+        XCTAssertNotNil(pack.responses[no.response], "\(no.response) resolves to no text")
+        XCTAssertNotNil(pack.actionOwners[yes.action],
+                        "\(yes.action) is owned by no capability")
+        XCTAssertNotNil(pack.actionOwners[no.action],
+                        "\(no.action) is owned by no capability")
+    }
+
+    /// The regression the inference caused: `no` must not be the empty action,
+    /// and `yes` must not silently be the unasked-for one.
+    func testTheBranchesAreReadFromThePackNotInferredFromCompletion() throws {
+        let followup = try XCTUnwrap(schema.intents[confirmed]?.followup)
+        let confirmation = try XCTUnwrap(pack.intents[confirmed]?.confirmation)
+
+        XCTAssertEqual(followup.yes.action, confirmation.yes?.action)
+        XCTAssertEqual(followup.no.action, confirmation.no?.action)
+        XCTAssertFalse(followup.no.action.isEmpty, """
+            the decline carries no action — this is the inferred shape, which \
+            leaves a host with nothing to dispatch on when a user says no
+            """)
+        XCTAssertNotEqual(followup.no.action, schema.intents[confirmed]?.action,
+                          "declining fires the intent's own action")
+    }
+
+    /// A resolved confirmation reports the branch's label, both polarities,
+    /// through a real turn.
+    func testAResolvedConfirmationReportsTheBranchLabel() async throws {
+        let followup = try XCTUnwrap(schema.intents[confirmed]?.followup)
+
+        for (reply, branch) in [("yes", followup.yes), ("no", followup.no)] {
+            let engine = makeEngine()
+
+            let asked = await engine.handle("send a message to mom")
+            guard case .confirm = asked else {
+                return XCTFail("\(confirmed!) acted without asking: \(asked)")
+            }
+
+            let resolved = await engine.handle(reply)
+            guard case .fulfill(let intent, let action, _, let message, _, _, _) = resolved else {
+                return XCTFail("\(reply) did not resolve the confirmation: \(resolved)")
+            }
+            XCTAssertEqual(action, branch.action, "\(reply) fired the wrong branch")
+            XCTAssertEqual(message, branch.fulfillment)
+            XCTAssertEqual(intent, branch.label ?? confirmed,
+                           "a \(reply) must report the branch's own label")
+        }
+    }
+
+    /// A label is compat, not a class. If the head could emit one, the engine
+    /// must stop reporting a synthesised copy — two paths, one string, different
+    /// confidences.
+    func testALabelIsNeverAModelLabelOrAnIntentID() throws {
+        let followup = try XCTUnwrap(schema.intents[confirmed]?.followup)
+        let labels = Set(pack.classifier.labels)
+
+        for branch in [followup.yes, followup.no] {
+            guard let label = branch.label else { continue }
+            XCTAssertFalse(labels.contains(label), "\(label) is a classifier label")
+            XCTAssertNil(schema.intents[label], "\(label) is an intent id")
+        }
+    }
+
+    /// The degradation: no label means report the intent unchanged, not blank.
+    func testAnAbsentLabelReportsTheIntentID() {
+        let branch = FollowupBranch(action: "message.send", fulfillment: "ok")
+        XCTAssertNil(branch.label)
+        XCTAssertEqual(branch.label ?? "Cmd.SendMessage", "Cmd.SendMessage")
+    }
+
+    /// The shape that shipped broken: a confirmation block on an UNGATED intent.
+    ///
+    /// The compiler writes `workflows.confirmation` for every intent authoring a
+    /// `confirm_prompt`, whether or not it authors a followup — pack-en has 13
+    /// such intents, all `never`. The first version of this rule demanded
+    /// branches from every confirmation block and threw on the first one it met,
+    /// so a correct pack could not load at all. The engine never reaches them
+    /// (`if let fu = cfg.followup`), so there is nothing to state.
+    ///
+    /// Asserted over the WHOLE pack rather than one intent, because the defect
+    /// was in the intents this suite was not looking at.
+    func testUngatedConfirmationsWithoutBranchesLoad() throws {
+        let ungated = pack.intents.keys
+            .filter { pack.intents[$0]?.confirmation != nil }
+            .filter { pack.confirmationPolicy(for: $0) == .never }
+            .sorted()
+        try XCTSkipIf(ungated.isEmpty,
+                      "pack-en has 13 of these; if that changes, this guard is moot")
+
+        for id in ungated {
+            XCTAssertNil(schema.intents[id]?.followup, """
+                \(id) is `never` gated but built a followup. Nothing can reach it, \
+                and building one hides a pack whose policy and workflow disagree.
+                """)
+        }
+        // The real claim: the pack loads and the schema builds at all. The 13
+        // above made `schema(from:)` throw, so PackageView could not open.
+        XCTAssertEqual(schema.intents.count, pack.intents.count)
+    }
+
+    /// Every gated intent — not just the one this suite picked — states both
+    /// answers. This is the invariant the loader enforces, asserted over the
+    /// whole pack so a second gated intent is covered the day it is authored.
+    func testEveryGatedIntentStatesBothAnswers() throws {
+        for id in pack.intents.keys where pack.confirmationPolicy(for: id) != .never {
+            let confirmation = try XCTUnwrap(pack.intents[id]?.confirmation,
+                                             "\(id) is gated but has no confirmation block")
+            XCTAssertNotNil(confirmation.yes, "\(id) is gated but does not say what yes does")
+            XCTAssertNotNil(confirmation.no, "\(id) is gated but does not say what no does")
+        }
+    }
+
+    /// A pack that asks but does not answer is refused, not guessed at.
+    func testAConfirmationWithoutBranchesIsRefused() throws {
+        let json = Data("""
+        {"prompt": "Cmd.X.confirm", "required": true}
+        """.utf8)
+        let confirmation = try JSONDecoder().decode(
+            IntentWorkflow.Confirmation.self, from: json)
+
+        XCTAssertNil(confirmation.yes)
+        XCTAssertNil(confirmation.no,
+                     "a pre-branch pack decodes with no branches — the factory must throw "
+                     + "on it rather than fall back to inferring them")
     }
 }

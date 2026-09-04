@@ -84,7 +84,7 @@ final class OpenSlotNameDerivationTests: XCTestCase {
     override func setUpWithError() throws {
         try super.setUpWithError()
         pack = try PackTestSupport.loadPack()
-        schema = PackEngineFactory.schema(from: pack)
+        schema = try PackEngineFactory.schema(from: pack)
         reminder = try PackTestSupport.intent(requiringSlots: ["name", "date_time"], in: pack)
         memory   = try PackTestSupport.intent(requiringSlots: ["memory_name"], in: pack)
     }

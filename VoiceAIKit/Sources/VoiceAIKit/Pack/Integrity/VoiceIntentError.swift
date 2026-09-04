@@ -121,6 +121,19 @@ public enum VoiceIntentError: Error, Equatable, Sendable {
 
     /// The classifier's label set and the schema's intent set differ.
     case labelSchemaMismatch(missingFromSchema: [String], missingFromLabels: [String])
+
+    /// A GATED intent's workflow does not say what its answers do.
+    ///
+    /// The runtime used to fill this in from `completion` — yes did whatever the
+    /// intent does unasked, no did nothing. That is right only while accepting a
+    /// confirmation means the same thing as never being asked, and it stopped
+    /// being right the moment content authored a decline with its own action.
+    ///
+    /// Scoped to GATED intents deliberately. A `confirmation` block does not
+    /// mean an intent is confirmed: the compiler writes one for every intent
+    /// with a `confirm_prompt`, and pack-en has 13 whose policy is `never`.
+    /// Demanding branches from those refuses a pack that is correct.
+    case confirmationBranchesMissing(intent: String)
 }
 
 // MARK: - Diagnostics
@@ -161,6 +174,12 @@ extension VoiceIntentError: CustomStringConvertible, LocalizedError {
             return "Pack has no '\(requested)'; it carries: \(available.joined(separator: ", "))"
         case .languageAmbiguous(let available):
             return "Pack carries several languages (\(available.joined(separator: ", "))) — name one explicitly"
+        case .confirmationBranchesMissing(let intent):
+            return "Intent '\(intent)' is gated by runtime/policies.json but its workflow "
+                 + "states no yes/no branches — a pack that asks must say what each answer "
+                 + "does; inferring it from `completion` is how the reference engine and the "
+                 + "device diverged. (An UNGATED intent may carry a confirmation prompt with "
+                 + "no branches; that is not this error.)"
         case .languageIncomplete(let language, let missing):
             return "Language '\(language)' is declared but missing: \(missing.joined(separator: ", "))"
         case .danglingResponseKey(let intent, let key):

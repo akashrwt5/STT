@@ -45,14 +45,25 @@ struct SlotDef: Sendable {
     }
 }
 
-/// A yes/no branch of a confirmation.
+/// A yes/no branch of a confirmation: what this answer does, what it says, and
+/// what the host calls the outcome.
 struct FollowupBranch: Sendable {
     let action: String
     let fulfillment: String
+    /// The host's single name for this outcome — the Dialogflow-era
+    /// `Cmd.SendMessage - yes`. Nil for a pack whose host reads plain intent
+    /// ids, in which case the engine reports the intent unchanged.
+    ///
+    /// It travels WITH the branch rather than in a lookup beside the engine,
+    /// because it is the same fact as the action and the text: what happens when
+    /// the question is answered this way. Two artifacts held it before and each
+    /// stated half a turn.
+    let label: String?
 
-    init(action: String, fulfillment: String) {
+    init(action: String, fulfillment: String, label: String? = nil) {
         self.action = action
         self.fulfillment = fulfillment
+        self.label = label
     }
 }
 
