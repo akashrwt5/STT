@@ -321,7 +321,7 @@ actor NLUEngine: ConversationEngine {
         //                     be right about. DO NOT PROBE.
         //   date-time         the parser decides, not the classifier. DO NOT PROBE.
         //
-        // For `pack-en` that means the reminder flow (`remind` open + `sys.date_time`)
+        // For `pack-en` that means the reminder flow (`remind` open + `sys.date-time`)
         // never interrupts, and the memory flow (`memory`, 38 values) still does —
         // "increase volume" is not a memory, so it still switches topic correctly.
         let awaitedEntity = session.awaitingSlot
@@ -353,8 +353,8 @@ actor NLUEngine: ConversationEngine {
         if let awaiting,
            let slot = cfg.slots.first(where: { $0.name == awaiting }) {
             if entities.isDateTime(slot.entity) {
-                let (iso, filled) = resolveDateTime(text)
-                if filled, let iso { session.pendingSlots[slot.name] = iso }
+                let (match, filled) = resolveDateTime(text)
+                if filled, let match { session.pendingSlots[slot.name] = match.dialogflowJSONString }
             } else if entities.isOpen(slot.entity) {
                 // VIK-039, the half VIK-037 left open — its fix reached only the three
                 // opening-utterance paths that call `fillOpenTopics`, and said so.
@@ -372,7 +372,7 @@ actor NLUEngine: ConversationEngine {
                 //
                 // The time is NOT lost by stripping it here. `extractAllSlots` below
                 // runs over this same utterance and resolves the date-time slot from
-                // it, so "at 9am" leaves the name and arrives in `date_time`.
+                // it, so "at 9am" leaves the name and arrives in `date-time`.
                 //
                 // The gazetteer is deliberately NOT consulted for an open entity. Its
                 // value list is a HINT, not a value set — matching it returns the
@@ -604,8 +604,8 @@ actor NLUEngine: ConversationEngine {
                 // Only fill when a time was actually given; a day-only mention
                 // parks the day in session.partialDateTime and leaves the slot
                 // open so the engine prompts for the time.
-                let (iso, filled) = resolveDateTime(text)
-                if filled, let iso { slots[slot.name] = iso }
+                let (match, filled) = resolveDateTime(text)
+                if filled, let match { slots[slot.name] = match.dialogflowJSONString }
                 continue
             }
             // Speculative: this is a sweep of the whole utterance for any slot
@@ -682,7 +682,7 @@ actor NLUEngine: ConversationEngine {
     /// midnight) in `session.partialDateTime` and `(nil, false)` is returned so
     /// the engine prompts for the time; a later bare-time answer ("3pm") is
     /// anchored to that parked day so "tomorrow" is not lost.
-    private func resolveDateTime(_ text: String) -> (iso: String?, filled: Bool) {
+    private func resolveDateTime(_ text: String) -> (match: SlotDateTime?, filled: Bool) {
         // Probe with the real clock first. This reveals whether the answer
         // carries its OWN day ("tomorrow at 9am") — in which case it wins and we
         // must NOT anchor, or the parked day would advance.
@@ -698,7 +698,7 @@ actor NLUEngine: ConversationEngine {
         }
         if match.timeExplicit {
             session.partialDateTime = nil
-            return (match.iso, true)
+            return (match, true)
         }
         // Day given, no time — park the day at local midnight so a later answer
         // like "6am" stays on this day instead of rolling forward.

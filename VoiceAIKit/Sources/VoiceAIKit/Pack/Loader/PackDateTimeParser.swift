@@ -720,7 +720,7 @@ struct PackDateTimeParser: Sendable {
     /// (`normalizeOrdinals` / `normalizeCardinals`, step 3). This function does
     /// not, and every pattern below is written in `\d` — so "at nine" was
     /// invisible to all of them while `parse` had already read it as 9:00. The
-    /// time reached `date_time` and ALSO stayed in the topic: "remind me to call
+    /// time reached `date-time` and ALSO stayed in the topic: "remind me to call
     /// Mukesh at nine" produced the name "call Mukesh nine" (step 9 removed the
     /// bare "at", stranding the number), where "at 9" produced "call Mukesh".
     ///

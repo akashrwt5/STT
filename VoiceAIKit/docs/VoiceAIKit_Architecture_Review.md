@@ -317,25 +317,26 @@ The SDK doesn’t hardcode business logic. Each capability (e.g., `capabilities/
         "params": [
           { "name": "name", "required": true },
           { "name": "date_time", "required": true }
+          { "name": "date-time", "required": true }
         ]
       }
     ]
   }
   ```
-- **`workflows.json`**: The conversation state machine. It tells the SDK exactly what to do if a required slot is missing (e.g., if the user just says "Create a reminder", the SDK knows it needs to prompt for the `name` and `date_time`).
+- **`workflows.json`**: The conversation state machine. It tells the SDK exactly what to do if a required slot is missing (e.g., if the user just says "Create a reminder", the SDK knows Wait until `filled` contains both `name` and `date-time`, then read `action`.
   ```json
   {
     "intents": {
       "reminders.add": {
         "slots": [
           { "name": "name", "prompt": "reminders.add.ask_name", "required": true },
-          { "name": "date_time", "prompt": "reminders.add.ask_date_time", "required": true }
+          { "name": "date-time", "prompt": "reminders.add.ask_date-time", "required": true }
         ]
       }
     }
   }
   ```
-- **`responses/<language>.json`**: The localized text the assistant will actually speak. When the workflow says to trigger `reminders.add.ask_date_time`, the SDK looks up the exact string here. This means copy changes are shipped OTA without App Store updates.
+- **`responses/<language>.json`**: The localized text the assistant will actually speak. When the workflow says to trigger `reminders.add.ask_date-time`, the SDK looks up the exact string here. This means copy changes are shipped OTA without App Store updates.
   ```json
   {
     "reminders.add.ask_name": "What do you want to be reminded?",

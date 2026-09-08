@@ -72,7 +72,7 @@ enum PackTestSupport {
     ///
     /// Matching on "has any required slot" is not enough and was a bug in the first
     /// version of this helper: `pack-en` has two such intents — `Cmd.MemoryChange`
-    /// (`memory_name`) and `reminders.add` (`name`, `date_time`) — and taking the
+    /// (`memory_name`) and `reminders.add` (`name`, `date-time`) — and taking the
     /// first sorted one silently returned `Cmd.MemoryChange`, because uppercase sorts
     /// before lowercase. Every caller then tested the wrong flow, confidently.
     ///

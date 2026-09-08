@@ -48,7 +48,7 @@ struct ResolvedPack: Sendable {
     let actionOwners: [String: String]
     /// Entity id → canonical value → synonyms, already resolved for `language`.
     let entities: [String: [String: [String]]]
-    /// Entity ids the runtime must supply at match time (`sys.date_time`).
+    /// Entity ids the runtime must supply at match time (`sys.date-time`).
     let dynamicEntities: Set<String>
     /// Entity ids where approximate matching is permitted. Carried separately
     /// because `entities` is flattened to synonyms and would otherwise lose the

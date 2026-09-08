@@ -57,9 +57,9 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
 
     /// Every expected string comes from the pack through the schema, never from a
     /// literal in this file. The literals are what broke when the taxonomy moved:
-    /// `reminders.task.create.ask_date_time` is not a key any pack has any more,
+    /// `reminders.task.create.ask_date-time` is not a key any pack has any more,
     /// and a test asserting against one is testing its own memory.
-    private var askDateTime: String? { slotPrompt("date_time") }
+    private var askDateTime: String? { slotPrompt("date-time") }
     private var confirmPrompt: String? { schema.intents[reminder]?.followup?.prompt }
     private var fulfilment: String? { schema.intents[reminder]?.fulfillment }
     private var action: String? { schema.intents[reminder]?.action }
@@ -88,7 +88,7 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
         schema = try PackEngineFactory.schema(from: pack)
         // The reminder shape: a free-text name plus a time. `Cmd.MemoryChange` also
         // has a required slot, so "has required slots" alone selects the wrong flow.
-        reminder = try PackTestSupport.intent(requiringSlots: ["name", "date_time"], in: pack)
+        reminder = try PackTestSupport.intent(requiringSlots: ["name", "date-time"], in: pack)
     }
 
     /// An engine wired exactly as `PackEngineFactory` wires one, but with a
@@ -251,7 +251,7 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
         XCTAssertEqual(intent, reminder)
         XCTAssertEqual(filled["name"], "go to the airport",
                        "the name is in the opening utterance — asking for it again is the bug")
-        XCTAssertNil(filled["date_time"], "no time was given")
+        XCTAssertNil(filled["date-time"], "no time was given")
         XCTAssertEqual(question, askDateTime,
                        "the outstanding slot is the time, and the prompt is the pack's")
     }
@@ -350,7 +350,7 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
         XCTAssertEqual(intent, reminder)
         XCTAssertEqual(action, self.action, "the action is the pack's, not a literal")
         XCTAssertEqual(parameters["name"], "go to the airport")
-        XCTAssertNotNil(parameters["date_time"], "the time answer must be stored")
+        XCTAssertNotNil(parameters["date-time"], "the time answer must be stored")
         XCTAssertEqual(message, fulfilment)
 
         let collecting = await engine.isCollecting
@@ -429,7 +429,7 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
         }
         XCTAssertEqual(intent3, reminder)
         XCTAssertEqual(params["name"], "go to the airport")
-        XCTAssertNotNil(params["date_time"])
+        XCTAssertNotNil(params["date-time"])
     }
 
     func testResetSessionDoesNotInheritPreviousIntentOrSlots() async throws {

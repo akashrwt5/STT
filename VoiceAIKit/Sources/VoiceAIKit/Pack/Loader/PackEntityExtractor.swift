@@ -68,7 +68,7 @@ struct PackEntityExtractor: Sendable {
     private let tables: [String: [String: String]]
     /// entity id → whether approximate matching is permitted.
     private let fuzzyEnabled: [String: Bool]
-    /// Entities the host must resolve (`sys.date_time`, `sys.number_integer`).
+    /// Entities the host must resolve (`sys.date-time`, `sys.number_integer`).
     let dynamicEntities: Set<String>
     /// Entities whose gazetteer is a hint rather than a closed set, so a free-text
     /// answer is acceptable. **Not in the v3 surface** — see `openEntities` on the
@@ -176,7 +176,7 @@ struct PackEntityExtractor: Sendable {
     /// acceptable.
     ///
     /// A dynamic entity is NOT open. It has no table, so the previous
-    /// "absent from `tables`" rule reported `sys.date_time` as open — and the
+    /// "absent from `tables`" rule reported `sys.date-time` as open — and the
     /// engine's `fillOpenTopics` then wrote the derived free-text topic
     /// ("buy milk") straight into the date-time slot, satisfying it with a
     /// string that is not a date. The doc comment said "and not dynamic"; the

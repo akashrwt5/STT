@@ -38,7 +38,7 @@ final class TopicDerivationParityTests: XCTestCase {
     override func setUpWithError() throws {
         try super.setUpWithError()
         pack = try PackTestSupport.loadPack()
-        reminderIntent = try PackTestSupport.intent(requiringSlots: ["name", "date_time"], in: pack)
+        reminderIntent = try PackTestSupport.intent(requiringSlots: ["name", "date-time"], in: pack)
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .appendingPathComponent("Fixtures/topic_expectations.json")

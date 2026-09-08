@@ -8,7 +8,7 @@
 // to the slot's own prompt did not — it took the raw text, and consulted the
 // gazetteer first. So the same sentence produced two different names depending
 // on where it was said, and a time the user mentioned stayed inside the name
-// while also filling `date_time`.
+// while also filling `date-time`.
 
 import XCTest
 @testable import VoiceAIKit
@@ -85,7 +85,7 @@ final class OpenSlotNameDerivationTests: XCTestCase {
         try super.setUpWithError()
         pack = try PackTestSupport.loadPack()
         schema = try PackEngineFactory.schema(from: pack)
-        reminder = try PackTestSupport.intent(requiringSlots: ["name", "date_time"], in: pack)
+        reminder = try PackTestSupport.intent(requiringSlots: ["name", "date-time"], in: pack)
         memory   = try PackTestSupport.intent(requiringSlots: ["memory_name"], in: pack)
     }
 
@@ -197,12 +197,12 @@ final class OpenSlotNameDerivationTests: XCTestCase {
         }
         XCTAssertEqual(filled["name"], "buy milk",
                        "the carrier 'remind me to' must not survive into the name")
-        XCTAssertEqual(question, slotPrompt(reminder, "date_time"))
+        XCTAssertEqual(question, slotPrompt(reminder, "date-time"))
     }
 
     // MARK: - Time goes to the time slot
 
-    /// VIK-039. A time mentioned in the answer belongs in `date_time`, not in the name.
+    /// VIK-039. A time mentioned in the answer belongs in `date-time`, not in the name.
     ///
     /// Asserted as "the name does not contain the time" rather than an exact
     /// string: whether `strippingDateTime` also removes the preposition ("at")
@@ -227,8 +227,8 @@ final class OpenSlotNameDerivationTests: XCTestCase {
                        "the carrier leaked into the reminder name: '\(name)'")
         XCTAssertTrue(name.lowercased().contains("call mom"),
                       "the subject was lost from the name: '\(name)'")
-        XCTAssertNotNil(params["date_time"],
-                        "the time left the name but never reached the date_time slot")
+        XCTAssertNotNil(params["date-time"],
+                        "the time left the name but never reached the date-time slot")
     }
 
     // MARK: - The property that ties it together
@@ -281,7 +281,7 @@ final class OpenSlotNameDerivationTests: XCTestCase {
     ///
     /// They did not: `parse` normalises spelled-out numbers to digits before
     /// matching, `strippingDateTime` did not, and every one of its patterns was
-    /// written in `\d`. So the time was read into `date_time` AND left in the
+    /// written in `\d`. So the time was read into `date-time` AND left in the
     /// topic — "remind me to call Mukesh at nine" was named "call Mukesh nine".
     func testASpelledOutTimeLeavesTheNameJustLikeADigitOne() async throws {
         let digitEngine = makeEngine(routingTo: reminder)
@@ -302,8 +302,8 @@ final class OpenSlotNameDerivationTests: XCTestCase {
         XCTAssertEqual(digitParams["name"], wordParams["name"], """
             "at 9" and "at nine" produced different names
             """)
-        XCTAssertNotNil(wordParams["date_time"],
-                        "the spelled-out time never reached the date_time slot")
+        XCTAssertNotNil(wordParams["date-time"],
+                        "the spelled-out time never reached the date-time slot")
     }
 
     // MARK: - Interruption is gated on what the awaited slot can refuse
@@ -330,7 +330,7 @@ final class OpenSlotNameDerivationTests: XCTestCase {
             return XCTFail("expected the next slot prompt, got \(answer)")
         }
         XCTAssertNotNil(filled["name"], "the answer should have filled the name")
-        XCTAssertEqual(question, slotPrompt(reminder, "date_time"))
+        XCTAssertEqual(question, slotPrompt(reminder, "date-time"))
     }
 
     /// VIK-038. The reminder's DATE slot is judged by the date parser, not the classifier.
@@ -344,8 +344,8 @@ final class OpenSlotNameDerivationTests: XCTestCase {
 
         let named = await engine.handle("buy milk")
         guard case .prompt(_, let dateQuestion, _) = named,
-              dateQuestion == slotPrompt(reminder, "date_time") else {
-            return XCTFail("expected the date_time prompt after naming, got \(named)")
+              dateQuestion == slotPrompt(reminder, "date-time") else {
+            return XCTFail("expected the date-time prompt after naming, got \(named)")
         }
 
         let answer = await engine.handle(switchLike)
@@ -353,9 +353,9 @@ final class OpenSlotNameDerivationTests: XCTestCase {
             return XCTFail("a date-time slot must be judged by the parser, not the classifier")
         }
         guard case .prompt(_, let again, _) = answer else {
-            return XCTFail("expected the date_time prompt again, got \(answer)")
+            return XCTFail("expected the date-time prompt again, got \(answer)")
         }
-        XCTAssertEqual(again, slotPrompt(reminder, "date_time"))
+        XCTAssertEqual(again, slotPrompt(reminder, "date-time"))
     }
 
     /// VIK-038. The memory slot is a CLOSED gazetteer, so a miss is a fact — the one case

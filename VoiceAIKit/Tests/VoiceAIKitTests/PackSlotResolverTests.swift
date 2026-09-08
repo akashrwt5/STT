@@ -23,7 +23,7 @@ final class PackSlotResolverTests: XCTestCase {
 
     /// VIK-018. The engine used to test `slot.entity == "sys.date-time"` — the
     /// root shim's HYPHENATED spelling. Every pack-driven slot carries the v3
-    /// spelling `sys.date_time`, so under a pack that comparison was always
+    /// spelling `sys.date-time`, so under a pack that comparison was always
     /// false and date-time slots took the gazetteer path, which has no table for
     /// them and therefore never resolved.
     func testDateTimeEntityIsRecognisedUnderThePacksOwnSpelling() throws {
@@ -37,20 +37,18 @@ final class PackSlotResolverTests: XCTestCase {
             slotEntities.first { $0.contains("date") },
             "the pack should have a date-time slot to test against")
 
-        XCTAssertEqual(dateTimeSlot, "sys.date_time",
-                       "v3 spells this with an underscore")
-        XCTAssertNotEqual(dateTimeSlot, "sys.date-time",
-                          "the hyphenated form is the root shim's, which we do not bind to")
+        XCTAssertEqual(dateTimeSlot, "sys.date-time",
+                       "v3 now spells this with a hyphen again")
         XCTAssertTrue(resolver.isDateTime(dateTimeSlot),
                       "asking the resolver must work regardless of which spelling the pack uses")
     }
 
     /// A dynamic entity has no value table. Under the old rule — "open means
-    /// absent from `tables`" — that made `sys.date_time` report as OPEN, and
+    /// absent from `tables`" — that made `sys.date-time` report as OPEN, and
     /// `fillOpenTopics` then wrote the derived free-text topic ("buy milk")
     /// into the date-time slot, satisfying a required slot with a non-date.
     func testDynamicEntityIsNeverOpen() throws {
-        XCTAssertFalse(resolver.isOpen("sys.date_time"),
+        XCTAssertFalse(resolver.isOpen("sys.date-time"),
                        "a date-time slot must not accept an arbitrary topic string")
         XCTAssertFalse(resolver.isOpen("sys.number_integer"))
     }

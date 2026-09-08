@@ -99,8 +99,8 @@ final class PackEntityExtractorTests: XCTestCase {
 
     func testDynamicEntitiesAreNotGazetteerMatched() throws {
         let pack = try PackTestSupport.loadPack()
-        XCTAssertTrue(pack.dynamicEntities.contains("sys.date_time"),
-                      "sys.date_time is resolved by the datetime parser, not a value list")
+        XCTAssertTrue(pack.dynamicEntities.contains("sys.date-time"),
+                      "sys.date-time is resolved by the datetime parser, not a value list")
     }
 }
 

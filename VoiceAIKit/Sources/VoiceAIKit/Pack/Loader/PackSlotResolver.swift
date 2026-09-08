@@ -52,6 +52,40 @@ struct SlotDateTime: Sendable, Equatable {
         self.timeExplicit = timeExplicit
         self.explicitDay = explicitDay
     }
+
+    /// The JSON string representation of this date-time slot for Dialogflow parity.
+    var dialogflowJSONString: String {
+        return "{\"\(explicitDay ? "startDateTime" : "startTime")\": \"\(dialogflowISO)\"}"
+    }
+
+    /// `yyyy-MM-dd'T'HH:mm:ssZ` format for Dialogflow parity.
+    var dialogflowISO: String {
+        guard let matchDate = Self.parseLocalISO(iso) else { return iso }
+        return Self.formatDialogflowISO(matchDate)
+    }
+    
+    // Internal parser helper to retrieve the Date for formatting
+    private static func parseLocalISO(_ iso: String) -> Date? {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm"
+        return f.date(from: iso)
+    }
+    
+    private static func formatDialogflowISO(_ date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let c = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        
+        let seconds = TimeZone.current.secondsFromGMT(for: date)
+        let hours = abs(seconds / 3600)
+        let minutes = abs((seconds % 3600) / 60)
+        let sign = seconds >= 0 ? "+" : "-"
+        let tzString = String(format: "%@%02d%02d", sign, hours, minutes)
+        
+        return String(format: "%04d-%02d-%02dT%02d:%02d:%02d%@",
+                      c.year ?? 0, c.month ?? 1, c.day ?? 1, c.hour ?? 0, c.minute ?? 0, c.second ?? 0, tzString)
+    }
 }
 
 // MARK: - Contract

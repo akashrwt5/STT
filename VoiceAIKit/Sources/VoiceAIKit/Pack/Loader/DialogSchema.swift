@@ -25,7 +25,7 @@
 import Foundation
 
 /// One slot to collect for an intent — `reminders.task.create` needs `name` and
-/// `date_time`.
+/// `date-time`.
 struct SlotDef: Sendable {
     let name: String
     /// Entity id, verbatim from the pack. Never interpreted here: whether it is
