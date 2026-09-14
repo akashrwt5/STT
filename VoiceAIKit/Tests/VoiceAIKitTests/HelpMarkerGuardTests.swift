@@ -186,9 +186,20 @@ final class HelpMarkerGuardTests: XCTestCase {
     /// which is precisely how 11 of 12 guarded turns were lost on the holdout.
     func testARedirectRereadsTheConfidence() async throws {
         let text = "how do i use the transcribe feature?"
-        XCTAssertNil(pack.keywordRules.first { rule in
-            text.range(of: rule.pattern, options: [.regularExpression, .caseInsensitive]) != nil
-        }, "\(text) now matches a keyword rule, so it no longer tests the classifier path")
+        // GUARDS COUNT. `\btranscri(be|bing|ption)\b` matches this text, so a
+        // pattern-only check reports a keyword route that does not exist — the
+        // rule ships `\b(feature|function|explain|…)\b` as a guard and "feature"
+        // vetoes it. Asserting on the pattern alone failed a test whose subject
+        // was behaving correctly. `matches` mirrors the runtime rule exactly:
+        // pattern hits AND no guard hits.
+        func matches(_ rule: PackKeywords.Rule) -> Bool {
+            func hit(_ pattern: String) -> Bool {
+                text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+            }
+            return hit(rule.pattern) && !rule.guards.contains(where: hit)
+        }
+        XCTAssertNil(pack.keywordRules.first(where: matches),
+                     "\(text) now fires a keyword rule, so it no longer tests the classifier path")
 
         let engine = makeEngine(label: "Cmd.TranscribeStart", confidence: 0.600,
                                 distribution: ["Help_Transcribe": 0.999])

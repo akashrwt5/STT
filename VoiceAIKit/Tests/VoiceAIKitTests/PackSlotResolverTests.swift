@@ -50,7 +50,12 @@ final class PackSlotResolverTests: XCTestCase {
     func testDynamicEntityIsNeverOpen() throws {
         XCTAssertFalse(resolver.isOpen("sys.date-time"),
                        "a date-time slot must not accept an arbitrary topic string")
-        XCTAssertFalse(resolver.isOpen("sys.number_integer"))
+        // The pack spells this with a HYPHEN (`entities/shared/content.json`).
+        // With an underscore the resolver is asked about an entity that does not
+        // exist, and `isOpen` falls through to `tables[entity]?.isEmpty ?? true`
+        // — which answers TRUE. The assertion was failing on a name, not on the
+        // behaviour it is about.
+        XCTAssertFalse(resolver.isOpen("sys.number-integer"))
     }
 
     func testClosedGazetteerEntityIsNotOpen() throws {

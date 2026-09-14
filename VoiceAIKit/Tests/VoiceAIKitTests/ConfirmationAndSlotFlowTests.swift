@@ -95,6 +95,59 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
         // The reminder shape: a free-text name plus a time. `Cmd.MemoryChange` also
         // has a required slot, so "has required slots" alone selects the wrong flow.
         reminder = try PackTestSupport.intent(requiringSlots: ["name", "date-time"], in: pack)
+        schema = try Self.withConfirmation(on: reminder, in: schema, from: pack)
+    }
+
+    /// Give `intent` a confirmation the PACK does not ship, so the confirm-then-collect
+    /// flow can be exercised at all.
+    ///
+    /// The gate was already injected below, and for a while that was enough: the
+    /// factory INFERRED a `followup` for any intent carrying a `confirmation` block.
+    /// It now READS one, and demands both branches — `reminders.add` ships a
+    /// `confirm_prompt` and no `yes`/`no`, so its `followup` is nil and
+    /// `if let fu = cfg.followup` never opens. Injecting the gate without the
+    /// followup injects half of what the flow needs, which is what six tests here
+    /// were doing.
+    ///
+    /// That is not a pack defect. `reminders.add` is policy `never`, so the question
+    /// is never asked and branches for it would be answers to nothing. But VIK-021's
+    /// damage — "yes" fulfilling with `parameters: [:]`, a reminder with no name and
+    /// no time reported as success — is real engine behaviour that must stay covered
+    /// whether or not today's pack can reach it.
+    ///
+    /// Every value comes from the pack, never a literal: this is the shape
+    /// `PackEngineFactory.schema(from:)` would build if the branches were there.
+    private static func withConfirmation(on intent: String,
+                                         in schema: NLUSchema,
+                                         from pack: ResolvedPack) throws -> NLUSchema {
+        let workflow = try XCTUnwrap(pack.intents[intent])
+        let completion = try XCTUnwrap(workflow.completion)
+        let base = try XCTUnwrap(schema.intents[intent])
+
+        let confirmKey = try XCTUnwrap(workflow.confirmation?.prompt,
+                                       "\(intent) carries no confirm prompt to borrow")
+        let followup = FollowupDef(
+            // `PackEngineFactory` uses the intent id as the context name.
+            context: intent,
+            lifespan: 1,
+            prompt: try XCTUnwrap(pack.responses[confirmKey]),
+            yes: FollowupBranch(action: completion.action,
+                                fulfillment: try XCTUnwrap(pack.responses[completion.response])),
+            no: FollowupBranch(action: "",
+                               fulfillment: try XCTUnwrap(pack.responses["sys.confirm.cancelled"])))
+
+        var intents = schema.intents
+        intents[intent] = IntentDef(slots: base.slots,
+                                    action: base.action,
+                                    fulfillment: base.fulfillment,
+                                    followup: followup)
+        return NLUSchema(version: schema.version,
+                         confidenceThreshold: schema.confidenceThreshold,
+                         fallbackIntent: schema.fallbackIntent,
+                         intents: intents,
+                         affirmative: schema.affirmative,
+                         negative: schema.negative,
+                         keywordTriggers: schema.keywordTriggers)
     }
 
     /// An engine wired exactly as `PackEngineFactory` wires one, but with a
