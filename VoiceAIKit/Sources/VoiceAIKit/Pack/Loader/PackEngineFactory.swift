@@ -108,7 +108,14 @@ enum PackEngineFactory {
             oovBypass: pack.policies.thresholds.oovBypass,
             trailingFunctionWords: effectiveTrailingWords,
             leadingConnectors: lexicon.leadingConnectors,
-            confirmationGates: confirmationGates(from: pack))
+            confirmationGates: confirmationGates(from: pack),
+            // ND-14, from `runtime/guards.json`. Every pack this loader has ever
+            // read has shipped it; `PackGuards` was decoded and validated for
+            // dangling intents and then never applied, so a device STARTED
+            // transcription when asked how to use it while the reference engine
+            // showed help.
+            helpMarkerPattern: pack.guards.helpMarker?.markers,
+            helpPairs: pack.guards.helpMarker?.pairs ?? [:])
 
         log.info("""
             Engine ready — \(pack.manifest.bundleID, privacy: .public) \
@@ -273,6 +280,10 @@ actor PackClassifierAdapter: IntentClassifying {
 
     func oovRatio(_ text: String) async -> Double {
         await classifier.oovRatio(text)
+    }
+
+    func calibratedConfidence(for intent: String) async -> Double? {
+        await classifier.calibratedConfidence(for: intent)
     }
 
     func classifyAsync(_ text: String) async -> ClassificationResult {

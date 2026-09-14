@@ -25,6 +25,20 @@ import os.log
 // console, unfiltered, with no subsystem to filter it out by.
 private let lifecycleLog = Logger(subsystem: "com.voiceaikit", category: "Lifecycle")
 
+// Decisions that CHANGE what the engine reports, and would otherwise be
+// invisible. The app's debug panel carries `VoiceIntentStages`, which is scores
+// only -- `stage2Score`, `stage3Score`, no intent names -- so a redirect cannot
+// be seen there: the reported intent simply differs from what the model said,
+// with nothing to say why.
+//
+// At `.notice` so it survives to `log show` rather than only live streaming: a
+// redirect lands on roughly 5% of help turns, and the question it answers ("did
+// the guard handle that?") is usually asked afterwards.
+//
+//     log stream --predicate 'subsystem == "com.voiceaikit"'
+//     log show --last 10m --predicate 'category == "NLUDecision"'
+private let decisionLog = Logger(subsystem: "com.voiceaikit", category: "NLUDecision")
+
 actor NLUEngine: ConversationEngine {
 
     private let schema: NLUSchema
@@ -100,6 +114,15 @@ actor NLUEngine: ConversationEngine {
         // step, so leaving it out keeps that path byte-identical.
         leadingConnectors: [String] = [],
         confirmationGates: [String: ConfirmationGate] = [:],
+        /// `runtime/guards.json → help_marker`: the question pattern, and the
+        /// command → help pairing (ND-14).
+        ///
+        /// Defaulted, unlike the thresholds above, and the difference is not
+        /// laziness: an absent threshold means a wrong number is about to be
+        /// guessed, while an absent guard means exactly what empty says — this
+        /// pack declares no help redirect, so nothing is redirected.
+        helpMarkerPattern: String? = nil,
+        helpPairs: [String: String] = [:],
         sessionID: String = "default"
     ) {
         self.schema = schema
@@ -116,6 +139,16 @@ actor NLUEngine: ConversationEngine {
         self.oovReject = oovReject
         self.oovBypass = oovBypass
         self.confirmationGates = confirmationGates
+        self.helpPairs = helpPairs
+        // Compiled once, here. A pattern this platform cannot compile disables
+        // the guard rather than failing the load: the pack is otherwise fine,
+        // and NSRegularExpression's dialect is not identical to Python's `re`.
+        if let pattern = helpMarkerPattern, !pattern.isEmpty {
+            self.helpMarkers = try? NSRegularExpression(pattern: pattern,
+                                                        options: [.caseInsensitive])
+        } else {
+            self.helpMarkers = nil
+        }
         self.trailingFunctionWords = trailingFunctionWords ?? []
 
         // Longest first so "regarding" is not pre-empted by a shorter word that
@@ -240,6 +273,41 @@ actor NLUEngine: ConversationEngine {
                             parameters: [:], message: fu.no.fulfillment, confidence: 1.0)
         }
     }
+
+    /// ND-14, the help-marker guard. Mirrors `engine.py`'s `_apply_help_guard`.
+    ///
+    /// A state-changing action must not fire because the user asked HOW to use
+    /// the feature: "how do I turn down the volume" must show help, not turn the
+    /// volume down. On the product team's 1492 help phrases this corrects 72, of
+    /// which 36 are volume changes that would otherwise have happened.
+    ///
+    /// Fires only for a command that HAS a paired help intent, and only when
+    /// that sibling exists in this pack. Read-only queries are unpaired upstream
+    /// on purpose: "how many steps" is a real question, not a help ask.
+    ///
+    /// PURE, and nil rather than the input when nothing applies. It is called
+    /// twice per turn -- once as a QUESTION in Stage 0 ("would this keyword be
+    /// redirected?") and once as a DECISION after classification -- so logging
+    /// inside it made the Stage 0 probe emit `blocked=...` when nothing had been
+    /// blocked: one decline printed two lines and the first was untrue. Each
+    /// caller now logs what it actually did.
+    private func helpRedirect(_ text: String, _ intent: String) -> String? {
+        guard let markers = helpMarkers,
+              let sibling = helpPairs[intent],
+              schema.intents[sibling] != nil
+        else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        guard markers.firstMatch(in: text, options: [], range: range) != nil else {
+            return nil
+        }
+        return sibling
+    }
+
+    /// `runtime/guards.json → help_marker.markers`, compiled. Nil when the pack
+    /// ships no guard, or its pattern does not compile here.
+    private let helpMarkers: NSRegularExpression?
+    /// Command intent → its read-only help sibling.
+    private let helpPairs: [String: String]
 
     /// Returns true for yes, false for no, nil for ambiguous/uncertain.
     private func yesNo(_ text: String) -> Bool? {
@@ -456,43 +524,96 @@ actor NLUEngine: ConversationEngine {
         session.decrementContexts()
 
         // Stage 0: declarative keyword triggers bypass TF-IDF for high-precision patterns.
-        if let kwIntent = matchKeywordTrigger(text), let cfg = schema.intents[kwIntent] {
-            var slots: [String: String] = [:]
-            extractAllSlots(cfg, text, into: &slots)
-            fillOpenTopics(cfg, text, into: &slots)
+        // A keyword match the HELP GUARD would reject is not treated as a match,
+        // and the turn falls through to the classifier.
+        //
+        // The reference engine needs no such branch: its keyword stage lives
+        // INSIDE the classifier, which scores the model on every utterance
+        // (`classifier.py` builds the distribution before arbitrating), so a
+        // keyword-routed turn still has one for the guard's confidence re-read.
+        // Stage 0 here returns before the model runs, so redirecting on this
+        // path would mean inventing a confidence for an intent the pattern never
+        // matched. Declining the shortcut gets the real number from the real
+        // classifier, which is what the reference reports.
+        //
+        // Measured, not theoretical: all four of "can you show me transcribe
+        // user guide", "how do i set a reminder", "how do i turn down the
+        // loudness on my aid?" and "hearing aids translate guide" match keyword
+        // rules. Without this they bypass the guard entirely and the device acts.
+        if let kwIntent = matchKeywordTrigger(text) {
+            if let wouldRedirectTo = helpRedirect(text, kwIntent) {
+                // LOGGED SEPARATELY, and this is the case most likely to be
+                // tested by hand. Declining the shortcut usually means the
+                // classifier then answers with the help intent by itself, so the
+                // guard's second pass is a no-op and records nothing — the turn
+                // would come out correct with no evidence that anything acted.
+                // "hearing aids transcribe help" is exactly that shape.
+                decisionLog.notice("help_guard stage0_declined keyword=\(kwIntent, privacy: .public) wouldRedirectTo=\(wouldRedirectTo, privacy: .public)")
+            } else if let cfg = schema.intents[kwIntent] {
+                var slots: [String: String] = [:]
+                extractAllSlots(cfg, text, into: &slots)
+                fillOpenTopics(cfg, text, into: &slots)
 
-            // The confirmation gate applies HERE TOO, and its absence was VIK-021 in a
-            // second place. A keyword rule bypasses the CLASSIFIER; it has no business
-            // bypassing the POLICY. `pack-en` proves the difference matters: the only
-            // intent it gates is `Cmd.SendMessage` (`always`) and that intent ships four
-            // keyword rules — so "send a message to…" matched a rule, skipped the gate,
-            // and sent without asking, while the pack said always ask.
-            //
-            // Confidence 1.0, deliberately: a declarative pattern either matched or it
-            // did not, so there is no ambiguity to gate on. `always` fires (that is what
-            // always means), `when_ambiguous` does not (we are certain), `never` does
-            // not. The gate reads as its own name on this path.
-            if let fu = cfg.followup, gate(for: kwIntent).fires(confidence: 1.0) {
-                session.pendingIntent = cfg.slots.isEmpty ? nil : kwIntent
+                // The confirmation gate applies HERE TOO, and its absence was VIK-021 in a
+                // second place. A keyword rule bypasses the CLASSIFIER; it has no business
+                // bypassing the POLICY. `pack-en` proves the difference matters: the only
+                // intent it gates is `Cmd.SendMessage` (`always`) and that intent ships four
+                // keyword rules — so "send a message to…" matched a rule, skipped the gate,
+                // and sent without asking, while the pack said always ask.
+                //
+                // Confidence 1.0, deliberately: a declarative pattern either matched or it
+                // did not, so there is no ambiguity to gate on. `always` fires (that is what
+                // always means), `when_ambiguous` does not (we are certain), `never` does
+                // not. The gate reads as its own name on this path.
+                if let fu = cfg.followup, gate(for: kwIntent).fires(confidence: 1.0) {
+                    session.pendingIntent = cfg.slots.isEmpty ? nil : kwIntent
+                    session.pendingSlots = slots
+                    session.awaitingSlot = nil
+                    session.pendingBreakdown = nil
+                    session.setContext(fu.context, lifespan: fu.lifespan)
+                    return .confirm(intent: kwIntent, action: cfg.action, question: fu.prompt, filled: slots)
+                }
+
+                session.pendingIntent = kwIntent
                 session.pendingSlots = slots
                 session.awaitingSlot = nil
                 session.pendingBreakdown = nil
-                session.setContext(fu.context, lifespan: fu.lifespan)
-                return .confirm(intent: kwIntent, action: cfg.action, question: fu.prompt, filled: slots)
+                return advanceSlots(kwIntent, cfg)
             }
-
-            session.pendingIntent = kwIntent
-            session.pendingSlots = slots
-            session.awaitingSlot = nil
-            session.pendingBreakdown = nil
-            return advanceSlots(kwIntent, cfg)
         }
 
         let result    = await classifier.classifyAsync(text)
-        let intent    = result.label
-        let conf      = result.confidence
+        var intent    = result.label
+        var conf      = result.confidence
         let rescued   = result.semanticRescue
         let breakdown = result.breakdown
+
+        // ND-14. Asking HOW to use a feature must never TRIGGER it.
+        //
+        // The confidence is re-read for the intent actually being reported: it
+        // meets the fire threshold a few lines below, and the blocked
+        // prediction's number describes something no longer being returned. On
+        // this pack's honest holdout, keeping it deflected 11 of 12 guarded
+        // turns to the fallback. `calibratedConfidence` answers nil when the
+        // classifier keeps no distribution — every test stub — and the turn then
+        // keeps the confidence it had, as the reference does.
+        if let redirected = helpRedirect(text, intent) {
+            let blocked = intent
+            if let reguarded = await classifier.calibratedConfidence(for: redirected) {
+                conf = reguarded
+            }
+            intent = redirected
+            // `belowFireThreshold` is the difference between "the guard worked"
+            // and "the guard worked and the user still saw nothing". A redirect
+            // whose sibling scores under the bar falls back a few lines later,
+            // which reads on screen as "not understood" -- the log has to say so,
+            // or the guard looks broken while behaving exactly as designed.
+            // Evaluated OUTSIDE the log call on purpose: `Logger`'s string
+            // interpolation is an @autoclosure, so touching `schema` inside it
+            // is a capture of `self` and the compiler rejects it.
+            let belowBar = conf < schema.confidenceThreshold
+            decisionLog.notice("help_guard blocked=\(blocked, privacy: .public) redirected=\(redirected, privacy: .public) confidence=\(conf, privacy: .public) belowFireThreshold=\(belowBar, privacy: .public)")
+        }
 
         // Semantic rescue already passed its own 0.55 gate inside classifyAsync.
         // Do NOT re-apply Stage 2's 0.70 threshold to a semanticRescue result —

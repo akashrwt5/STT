@@ -155,12 +155,6 @@ extension ResolvedPack {
         case keyword, tfidf, semantic, fallback
     }
 
-    /// The help-marker redirect for a classified intent, when the utterance
-    /// matched the marker pattern. Nil when there is no guard for it.
-    func helpRedirect(for intent: String) -> String? {
-        guards.helpMarker?.pairs[intent]
-    }
-
     /// Keyword rules ordered tier 1 (exact anchors) before tier 2.
     var keywordRulesByTier: [PackKeywords.Rule] {
         keywordRules.sorted { lhs, rhs in

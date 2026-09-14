@@ -34,6 +34,23 @@ protocol IntentClassifying: Actor {
     /// Share of the utterance's tokens the featurizer cannot represent, for the
     /// out-of-vocabulary guard. See `PackTFIDFVectorizer.oovRatio(_:)`.
     func oovRatio(_ text: String) async -> Double
+    /// The calibrated probability the model gave `intent` on the LAST turn.
+    ///
+    /// For the help-marker guard, which changes WHICH intent is reported after
+    /// classification has already run. The confidence must then be re-read for
+    /// the intent actually being returned, because it is compared against the
+    /// fire threshold moments later; inheriting the blocked prediction's number
+    /// describes something no longer being reported.
+    ///
+    /// Defaulted below so a stub classifier need not implement it — five in the
+    /// test suite do not. A nil answer means the caller keeps the confidence it
+    /// had, exactly as the reference engine does when its distribution is
+    /// unavailable.
+    func calibratedConfidence(for intent: String) async -> Double?
+}
+
+extension IntentClassifying {
+    func calibratedConfidence(for intent: String) async -> Double? { nil }
 }
 
 extension IntentClassifying {

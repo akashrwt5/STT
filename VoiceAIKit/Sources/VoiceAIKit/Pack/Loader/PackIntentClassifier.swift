@@ -52,6 +52,25 @@ actor PackIntentClassifier {
     // MARK: - State
 
     private let artifacts: ResolvedPack.ClassifierArtifacts
+    /// Calibrated probabilities from the last scored utterance, and the index
+    /// that reads them by label.
+    ///
+    /// For a caller that changes the reported intent AFTER classification — the
+    /// engine's help-marker guard — so the confidence can be re-derived for the
+    /// intent actually being reported. Without it a redirected turn carries the
+    /// BLOCKED prediction's number into the fire test a few lines later:
+    /// measured on this pack's honest holdout, that sent 11 of the 12 guarded
+    /// turns to the GenAI fallback, so the guard stopped the wrong action and
+    /// the right one with it.
+    ///
+    /// Mirrors `classifier.py`'s `last_distribution`. Actor-isolated, and read
+    /// within the same turn that wrote it.
+    private var lastDistribution: [Double]?
+    private lazy var labelIndex: [String: Int] = {
+        var index: [String: Int] = [:]
+        for (i, label) in artifacts.labels.enumerated() { index[label] = i }
+        return index
+    }()
     private let vectorizer: PackTFIDFVectorizer
     private let temperature: Double
     private let confidenceThreshold: Double
@@ -281,6 +300,8 @@ actor PackIntentClassifier {
             ? exponentials.map { $0 / total }
             : [Double](repeating: 1.0 / Double(logits.count), count: logits.count)
 
+        lastDistribution = probabilities
+
         let confidence = probabilities[best]
         var runnerUp = 0.0
         for i in probabilities.indices where i != best {
@@ -294,5 +315,18 @@ actor PackIntentClassifier {
                           passesGate: confidence >= confidenceThreshold && margin >= gapThreshold,
                           isVacuous: false,
                           backend: backend)
+    }
+
+    /// The calibrated probability this model gave `intent` on the last turn.
+    ///
+    /// Nil when nothing has been scored yet, or `intent` is outside the label
+    /// space — the caller then keeps the confidence it had, which is what the
+    /// reference engine does when its distribution is unavailable.
+    func calibratedConfidence(for intent: String) -> Double? {
+        guard let distribution = lastDistribution,
+              let i = labelIndex[intent],
+              i < distribution.count
+        else { return nil }
+        return distribution[i]
     }
 }
