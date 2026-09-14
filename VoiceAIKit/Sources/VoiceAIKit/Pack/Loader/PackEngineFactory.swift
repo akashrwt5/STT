@@ -292,6 +292,13 @@ actor PackClassifierAdapter: IntentClassifying {
     /// and a second number invented on this platform would break parity by
     /// definition. It sits BELOW `policies.thresholds.confidence` on purpose, so
     /// a contested rule can never fire on its own.
+    ///
+    /// VIK-070: this is the one number in the fire path that the PACK does not
+    /// own, on any of the three runtimes. It works only while `confidence` stays
+    /// above it — a language pack shipping a better-calibrated head and a 0.55
+    /// fire threshold would make every contested turn fire, on that language
+    /// only, with no code change and nothing to fail. That is VIK-050's failure
+    /// mode. See `docs/things-to-pull-from-android.md` §3.
     static let contestedConfidence = 0.60
 
     private let classifier: PackIntentClassifier

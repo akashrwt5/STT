@@ -239,7 +239,7 @@ Android: `NluPackValidator.validate(...) -> NluPackValidation(isUsable, brokenIn
 read on the turn path as two O(1) lookups (`NluManager.getWorkflow` returns null
 for a broken intent → fallback).
 
-**Where this bites iOS.** The OTA path is fine — see §3. The exposure is the
+**Where this bites iOS.** The OTA path is fine — see §4. The exposure is the
 **seed pack**: `VoiceAISeedPackEN` is vendored into the binary, and if one intent
 in it carries one dangling key, `BundleDataLoader.load` throws and the device has
 **no NLU at all**, with 56 healthy intents sitting on disk.
@@ -313,7 +313,75 @@ single cross-platform delta rather than a one-directional complaint.
 
 ---
 
-## 3. Asymmetries that are correct — do not "fix" these
+## 3. Shared gaps — no runtime owns this one
+
+### VIK-070 — `contestedConfidence` is a code constant on all three runtimes
+
+**The rule this breaks.** This codebase has an explicit, earned pattern: *a number
+that changes a decision must be content-owned.* VIK-050 is the case that
+established it. `NLUEngine` carried
+`private static let interruptThreshold: Double = 0.75`, documented as mirroring
+Python — but 0.75 is Python's FALLBACK for a schema that omits the key, and
+`pack-en` carries 0.68. Every probe scoring in `[0.68, 0.75)` was answered
+differently on the two runtimes. Same pack, same utterance, two answers, nothing
+red anywhere.
+
+`contestedConfidence = 0.60` is that same shape, in three places at once:
+
+| Runtime | Where | Ownership |
+|---|---|---|
+| iOS | `PackClassifierAdapter.contestedConfidence` | code constant |
+| Android | `OfflineNluServiceImpl.contestedConfidence` (`private val`) | code constant |
+| Python | `IntentClassifier.CONTESTED_CONFIDENCE` | class constant |
+
+**The reference already says so.** Its own comment marks the value PROVISIONAL:
+
+> "This is the one constant left in the confidence path, and it is currently a
+> placeholder chosen to land inside the confirmation band. It must be fitted
+> out-of-fold on `train.csv` (never on the holdout — that is blocker B9) by the
+> joint (FIRE, FLOOR) sweep… Shipping a fitted 0.75 in place of a guessed 0.75
+> would repeat the original defect with better manners."
+
+So this is named debt with a named fix, not an oversight. It is recorded here
+because the ticket did not exist anywhere.
+
+**Why it matters more than it looks.** 0.60's only job is to sit BELOW the fire
+threshold, so a contested rule can never fire on its own. Today
+`thresholds.confidence` is 0.70 and it does. The moment a language pack ships a
+different fire threshold — a better-calibrated head that can afford 0.55, say —
+0.60 sits ABOVE it, and **every contested keyword turn fires.** On that language
+only, with no code change, and with nothing to fail.
+
+That is VIK-050's failure mode exactly: a code constant that happened to agree
+with the content until the content moved.
+
+**Shape of the fix, in order:**
+
+1. **Python first.** Fit the value out-of-fold per the reference's own plan. This
+   gates the other two — neither runtime should ship a number Python has not
+   fitted, because then three "agreed" constants become three guesses again.
+2. **Compiler.** Emit `policies.thresholds.contested`. Backward-compatible:
+   `policy_schema` stays 1 (no existing field changes shape), and every runtime's
+   decoder ignores unknown keys today, so an older build reads a newer pack
+   without noticing.
+3. **Runtimes.** Read it as an OPTIONAL, defaulting to the current 0.60 when
+   absent — the same read-it-or-keep-today's-behaviour discipline `agreement` now
+   uses on iOS. Then re-point the invariant that already exists in
+   `KeywordArbitrationTests.testTheContestedConfidenceCannotClearTheFireThreshold`
+   so it asserts against the PACK's value rather than the constant: that test is
+   what would catch the 0.55 scenario above.
+
+**Ordering.** After VIK-055 has shipped and been measured. Changing the number and
+the mechanism in one go makes any accuracy delta unattributable — the same reason
+VIK-056 is deferred.
+
+**Cross-platform.** Unlike everything else in this document, this needs all three
+runtimes plus the pack compiler. Raise it as ONE cross-team ticket, not three:
+three independently "fixed" constants is the state it is already in.
+
+---
+
+## 4. Asymmetries that are correct — do not "fix" these
 
 **Pack delivery and failure strictness are coupled.** iOS has a full OTA pipeline:
 staging directory → smoke test that builds a real engine from the *staged* pack
@@ -343,7 +411,7 @@ correctly to each.
 
 ---
 
-## 4. Suggested sequencing
+## 5. Suggested sequencing
 
 | Wave | Items | Rationale |
 |---|---|---|
@@ -353,6 +421,7 @@ correctly to each.
 | **2** | VIK-061 Route A / B / C, or close with the finding recorded | Decided by the spike, not in advance |
 | **3** | VIK-062, VIK-065 | Small, independent, each closes a contract. VIK-064 drops out — CI already covers its cheap half |
 | **4** | VIK-056 (normalisation) **or** VIK-057 (rule order) — not both | Each needs its own holdout measurement |
+| **5** | VIK-070 (contested threshold → pack) | Gated on the Python fit; cross-team, all three runtimes |
 
 Waves 1 and 3 are parallelisable. Wave 4 is not.
 
@@ -382,3 +451,6 @@ between the two directions.
 | Android endpointing window | `speech/ByteVad.kt:114` |
 | iOS content-aware endpointing | `NLU/Engine/NLUEngine.swift::assessSlotAnswer` |
 | The one field iOS deliberately does not model, and says why | `Pack/Schema/PackSections.swift:257-293` |
+| VIK-070 — the constant, three times | `PackEngineFactory.swift::PackClassifierAdapter.contestedConfidence`; `OfflineNluServiceImpl.kt:29`; `classifier.py::IntentClassifier.CONTESTED_CONFIDENCE` |
+| VIK-070 — the precedent (VIK-050) | `NLUEngine.swift::interruptThreshold` doc comment |
+| VIK-070 — the invariant to re-point | `KeywordArbitrationTests.testTheContestedConfidenceCannotClearTheFireThreshold` |
