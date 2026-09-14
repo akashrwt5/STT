@@ -2,7 +2,7 @@
 
 **Status:** backlog, evidence-backed
 **Scope:** `VoiceAIKit` (iOS, Swift) vs `voiceaikit` (Android, Kotlin), both on `pack-en-v1.0.54`
-**Companion:** [`VIK-055-keyword-arbitration-plan.md`](./VIK-055-keyword-arbitration-plan.md) — the one item already planned in detail
+**Companion:** [`VIK-055-keyword-arbitration-plan.md`](./VIK-055-keyword-arbitration-plan.md) — shipped; its §13 carries the holdout measurement
 **Method:** every row below was read off source on both sides. Nothing here is inferred from docs, comments-as-spec, or assumed parity.
 
 ---
@@ -37,14 +37,14 @@ Ordered by what I would actually do first, not by severity.
 | ID | Item | Effort | Parity risk | Status |
 |---|---|---|---|---|
 | **VIK-061** | ASR biasing from the pack's keyword rules | M | None to the NLU — but the **delivery mechanism is unverified** on this API | **[Planned, spike-gated](./VIK-061-asr-biasing-plan.md)** |
-| **VIK-055** | Keyword arbitration (corroborated / contested) | M | High — this IS a behaviour change | **Planned** |
-| **VIK-063** | Per-turn decision log | S | None | Folded into VIK-055 §10 |
+| **VIK-055** | Keyword arbitration — **shipped THREE-way, not two** | M | High — a behaviour change, measured | **Shipped.** iOS now DIVERGES from Python/Android on purpose — see VIK-072 |
+| **VIK-063** | Per-turn decision log | S | None | **Shipped** with VIK-055 |
 | **VIK-062** | Polarity guard never wired to the engine | S | None today (pack ships 0 rules) | Not started |
 | **VIK-065** | Classifier self-warmup on construction | S | None | Not started |
 | **VIK-056** | Text normalisation before classification | M | **High** — changes model input on every turn | Not started |
 | **VIK-064** | Per-intent quarantine instead of whole-pack rejection | L | Medium — changes load-failure semantics | **Largely mitigated by CI** — see below |
 | **VIK-057** | Keyword rule precedence (file order vs tier-sort) | S | Medium — needs a sweep first | Not started |
-| **VIK-058** | Guard arity (`guards.first` vs all guards) | S | None on this pack | Closed incidentally by VIK-055 §6.2 |
+| **VIK-058** | Guard arity (`guards.first` vs all guards) | S | None on this pack | **Closed** incidentally by VIK-055 §6.2 |
 
 ---
 
@@ -296,7 +296,7 @@ instead of silently half-applying.
 
 ---
 
-## 2. Android should pull from iOS — and two iOS gaps vs the Python reference
+## 2. Android and Python should pull from iOS — and two iOS gaps vs the reference
 
 Raise these with the Android team. They are listed here so this document is the
 single cross-platform delta rather than a one-directional complaint.
@@ -305,6 +305,7 @@ single cross-platform delta rather than a one-directional complaint.
 |---|---|---|
 | **VIK-059** | **No out-of-vocabulary guard.** The pack ships `oov_reject: 0.25` and `oov_bypass: 0.97`; Android's `OfflineNluServiceImpl.classifyOnPack` never computes a ratio. iOS implements it and the reference documents why the ratio alone is insufficient (`'send a message to john'` is 25% OOV and entirely real). This is Android's own decoded-and-unused field. | `runtime/policies.json` vs `OfflineNluServiceImpl.kt` |
 | **VIK-066** | **A day without a clock time is lost.** `SysDateTimeParser.parse` returns `null` when no time-of-day is found — by design ("tomorrow alone would become midnight"). But nothing parks the day, and `OfflineNluServiceImpl` holds no cross-turn state, so `"remind me Friday"` → *"When should I remind you?"* → `"6am"` resolves against **today**, and Friday is gone. iOS parks the day at local midnight in `session.partialDateTime` and anchors the later bare time to it (`NLUEngine.resolveDateTime`). | `SysDateTimeParser.kt:33`, `NLUEngine.swift:~810` |
+| **VIK-072** | **iOS now runs a THIRD arbitration variant, on purpose.** Python and Android split keyword-vs-model two ways (agree / disagree). iOS splits three: the model only overrules a rule when it answers OUT OF SCOPE; a model naming a different in-scope intent loses to the rule. Measured on `holdout_honest.csv` (n=1470) through the reference's own ladder: two-way costs 10 correct turns, three-way costs 1, both fix the defect, neither changes `wrong_action_count`. **This is a deliberate divergence and it is debt** — exactly the shape that produced VIK-050, VIK-055 and VIK-056, where one runtime moved and nobody wrote it down. `G_oos` has been added to `scripts/analysis/arbitration_holdout.py` so the other runtimes can reproduce the number rather than take iOS's word for it. Next step is a Python-side decision; Android follows Python. | `VIK-055-keyword-arbitration-plan.md` §13; `scripts/analysis/arbitration_holdout.py` |
 | — | **No dialog state machine in the kit.** Android's kit exposes `classifyIntent` / `resolveFollowUpSlot` / `resolveConfirmation` and leaves session contexts, context lifespans, the `max_slot_attempts` budget and topic-switch detection to the host. iOS owns all of it, including the VIK-038 insight that a topic-switch probe must be gated on the awaited **entity kind** — open and date-time slots never probe, because a slot answer is out-of-distribution input for a command classifier and its confidence is not a thresholdable quantity. If the Android host reimplements this, it should reimplement *that* rule too. | `IOfflineNluService.kt` vs `NLUEngine.handleSlotFilling` |
 | — | **Binary endpointing window.** `ByteVad.useSlotAnswerWindow(Boolean)` — slot answer or not. iOS assesses three ways (`.complete` / `.freeform` / `.incomplete`) using the awaited slot's entity kind plus a trailing-function-word check, so "tomorrow… …5 AM" and "drink… …water" do not split into two turns. | `ByteVad.kt:114` vs `NLUEngine.assessSlotAnswer` |
 | **VIK-067** | **(iOS gap vs the Python reference, not vs Android)** No "does this answer the awaited slot?" guard before the topic-switch probe. `"Mute"` is a `memory` entity value *and* a tier-1 keyword rule, so answering the memory prompt with "mute" mutes the device. The reference refuses to interrupt when the utterance is a valid value for the awaited closed slot. Android has no slot state machine at all, so it cannot have this bug — or this guard. | `engine.py:878-946` |
@@ -416,7 +417,7 @@ correctly to each.
 | Wave | Items | Rationale |
 |---|---|---|
 | **0** | Land the in-flight ND-14 / help-guard work | VIK-055 §14 — it modifies the same five files |
-| **1** | VIK-055 (arbitration) — the planned PR | The reported defect, fully specified, blocked on nothing |
+| **1** | ~~VIK-055 (arbitration)~~ | **Done.** Shipped three-way after measurement; see VIK-072 for the debt it leaves |
 | **1, parallel** | VIK-063 (decision log) · VIK-061 §6 deriver + §5 spike | Neither touches the NLU decision path; the spike answers a question nobody currently has an answer to |
 | **2** | VIK-061 Route A / B / C, or close with the finding recorded | Decided by the spike, not in advance |
 | **3** | VIK-062, VIK-065 | Small, independent, each closes a contract. VIK-064 drops out — CI already covers its cheap half |

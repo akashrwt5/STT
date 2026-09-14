@@ -1,6 +1,16 @@
-# VIK-055 — Keyword arbitration parity (iOS)
+# VIK-055 — Keyword arbitration (iOS)
 
-**Status:** proposed
+> **READ THIS FIRST.** This document was written as a plan for a TWO-WAY split
+> (rule and model agree / disagree), which is what the Python reference and
+> Android ship. That design was implemented, then **measured on
+> `holdout_honest.csv` and rejected** — it cost 10 correct turns out of 1470 and
+> removed no wrong actions. What shipped is a **THREE-WAY** split. §5, §6 and §13
+> describe what shipped; §13 carries the measurement and the rejected design.
+>
+> Nothing below states the two-way rule as an instruction any more. If you find
+> one that does, it is a bug in this document.
+
+**Status:** shipped (three-way), measured
 **Owner:** VoiceAIKit / NLU
 **Pack under test:** `pack-en-v1.0.54` (identical content on iOS and Android)
 **Reference:** `IntentClassifier/packages/runtime/nlu_engine/classifier.py::IntentClassifier.classify`
@@ -131,10 +141,14 @@ and `OfflineNluServiceImpl.classifyOnPack` step [3]:
 1. classifier.classifyAsync(text)
      a. keywordIntent = first matching rule (raw text, all guards honoured)
      b. distribution  = model over the same text        <- ALWAYS runs
-     c. arbitrate:
-          no rule            -> (model label, model conf,  arbitration = nil)
-          rule == model      -> (rule label,  model conf,  arbitration = .corroborated)
-          rule != model      -> (rule label,  0.60,        arbitration = .contested)
+     c. arbitrate, THREE ways (see §13 for why not two):
+          no rule                    -> (model label, model conf, arbitration = nil)
+          rule == model              -> (rule label,  model conf, .corroborated)
+          model top-1 == fallback    -> (rule label,  0.60,       .contested)
+          otherwise                  -> (rule label,  1.0,        .ruleOnly)
+
+     Every branch compares argmax LABELS, never a confidence, so the verdict is
+     temperature-invariant and survives the CoreML/reference drift.
 2. help guard / polarity guard        (unchanged, already implemented)
 3. calibratedConfidence re-read       (unchanged, already implemented)
 4. fireBar = corroborated ? agreement : confidence
@@ -146,11 +160,21 @@ and `OfflineNluServiceImpl.classifyOnPack` step [3]:
 Steps 2, 3, 5, 6, 7 already exist and are correct. Only step 1 and the `fireBar` in
 step 4 are new.
 
-`CONTESTED_CONFIDENCE = 0.60` is carried verbatim from the reference and from
+`contestedConfidence = 0.60` is carried verbatim from the reference and from
 Android's `OfflineNluServiceImpl.contestedConfidence`. It is deliberately below
 `thresholds.confidence` (0.70), which is what makes a contested keyword unable to fire
 on its own. Do **not** re-derive it; the reference marks it PROVISIONAL pending an
-out-of-fold sweep, and iOS inventing a second number would break parity by definition.
+out-of-fold sweep, and iOS inventing a second number would break parity by definition
+(VIK-070).
+
+`ruleOnlyConfidence = 1.0` is the OTHER number, and it is **not a probability** — a
+deterministic pattern either matched or it did not, and there is no distribution behind
+it. It is 1.0 so the turn clears the fire bar on the rule's authority alone, which is
+also what makes the OOV guard stand down (gated on `conf < oov_bypass`) and what the
+confirmation gate reads — both matching the pre-VIK-055 behaviour this preserves. The
+`.ruleOnly` case exists so that fact is VISIBLE rather than hidden inside the number;
+hiding it is the "two incompatible scales in one field" defect the reference's own
+ladder was rebuilt to remove.
 
 ---
 
@@ -162,8 +186,9 @@ Add a nested enum and a **defaulted** property to `ClassificationResult`:
 
 ```swift
 enum Arbitration: String, Sendable {
-    case corroborated   // a keyword rule and the model named the same intent
-    case contested      // they disagreed; the rule holds the label, 0.60 holds the number
+    case corroborated   // rule and model named the same intent
+    case contested      // the model answered OUT OF SCOPE and a rule claimed it anyway
+    case ruleOnly       // the model named a different IN-SCOPE intent; the rule wins
 }
 
 let arbitration: Arbitration?   // nil = no keyword rule fired this turn
@@ -205,8 +230,14 @@ if prediction.isVacuous {
     // a vacuous model cannot corroborate anything, and must not have its bar dropped
 }
 guard let kw else { <model label, model conf, arbitration: nil> }
-if kw.intent == prediction.intent { <kw.intent, prediction.confidence, .corroborated> }
-else                              { <kw.intent, Self.contestedConfidence, .contested> }
+if kw.intent == prediction.intent      { <kw.intent, prediction.confidence,   .corroborated> }
+if prediction.intent == outOfScopeIntent { <kw.intent, contestedConfidence,   .contested> }
+                                         { <kw.intent, ruleOnlyConfidence,    .ruleOnly> }
+
+// `outOfScopeIntent` is "" for a pack declaring no fallback label. An empty
+// string never equals a predicted intent, so such a pack never reaches the
+// contested branch and the rule keeps winning — the pre-VIK-055 behaviour, and
+// the safe direction to degrade in.
 ```
 
 Two invariants worth stating in code comments:
@@ -294,12 +325,16 @@ Case by case, at `interrupt` = 0.68:
 |---|---|---|---|
 | no keyword rule matches | model verdict | model verdict | **identical** |
 | rule and model agree | model verdict | keyword label (= model label), model confidence | **identical** |
-| rule and model disagree | model label at model confidence — may interrupt | keyword label at 0.60 | **0.60 < 0.68, so no interrupt** |
+| rule fires, model names another in-scope intent | model label at model confidence — may interrupt | keyword label at 1.0 | **may interrupt, on the rule's label** |
+| rule fires, model answers out-of-scope | model label (the fallback) — cannot interrupt, it is excluded | keyword label at 0.60 | **0.60 < 0.68, so no interrupt** |
 
-So the only movement is that a CONTESTED probe stops interrupting. Abandoning a
-flow the user is halfway through is destructive, and a contested signal measures
-~45% correct on the honest holdout — requiring corroboration before destroying
-in-progress state is the right default, and it is what the reference already does.
+So a CONTESTED probe stops interrupting, and a `.ruleOnly` probe interrupts on the
+RULE's label where it used to interrupt on the model's. Both movements are toward
+the evidence: abandoning a flow the user is halfway through is destructive, and the
+out-of-scope case is the one where nothing was recognised at all.
+
+Blast radius stays narrow either way: the VIK-038 gate means only a CLOSED gazetteer
+slot probes at all, which in `pack-en` is the `memory` flow alone.
 
 Blast radius is narrow by construction: the VIK-038 gate means only a CLOSED
 gazetteer slot probes at all, which in `pack-en` is the `memory` flow alone.
@@ -380,26 +415,58 @@ Net: **2 suites change behaviourally** (`ReferenceParityTests`, one
 
 ## 9. New tests
 
-### 9.1 `KeywordArbitrationTests` (new file)
+### 9.1 `KeywordArbitrationTests` — 13 tests, AS WRITTEN
 
-Driven by a **real** `PackClassifierAdapter` over the vendored pack, not a stub —
-otherwise the arbitration code is never executed by the suite.
+Two subjects, two kinds of test, and the split is the point:
 
-- `testContestedKeywordDoesNotFire` — the regression case.
-  `"who is the prime minister of create reminder"` → `.fallback`. Premises asserted,
-  not assumed: (a) a keyword rule claims it and names `reminders.add`; (b) the model's
-  top-1 is not `reminders.add`.
-- `testCorroboratedKeywordUsesTheModelConfidence` — `"turn up the volume"` →
-  `.fulfill(Cmd.VolumeIncrease)` at the model's number, not 1.0 and not 0.60.
-- `testCorroboratedTurnBelowFireBarStillFires` — `"turn it up its too quiet"`, which
-  the fixture records at 0.6922 → FULFILL, because the bar drops to `agreement` 0.50.
-  This is the case iOS gets wrong today in the *opposite* direction.
-- `testNoKeywordRuleLeavesArbitrationNil` — `"remind me to go to the airport"`.
-- `testContestedProbeDoesNotAbandonAnInProgressFlow` — §6.6. Drive the `memory`
-  flow to its prompt with a real `PackClassifierAdapter`, answer with an utterance
-  whose keyword rule and model disagree, assert the result is NOT `.interrupted`.
-- `testKeywordStageDisabledSkipsArbitration` — pack copy with
-  `stages.keyword.enabled = false`; asserts pure-model routing. Proves the kill switch.
+* the ADAPTER decides the LABEL and the NUMBER — tested against the **real**
+  `PackClassifierAdapter` over the vendored pack, because a stub classifier IS the
+  classifier and would bypass the code under test entirely;
+* the ENGINE decides which BAR that number clears — tested with a stub that states
+  an arbitration verdict outright, because forcing a real model into a chosen
+  confidence band is not something a test can do honestly.
+
+**Pack invariants**
+
+- `testThePackDeclaresAnAgreementThresholdBelowTheFireThreshold`
+- `testTheContestedConfidenceCannotClearTheFireThreshold`
+- `testNoKeywordRuleShipsMoreThanOneGuard` — records the assumption that made §12
+  VIK-058 safe to close incidentally
+- `testEveryKeywordPatternCompilesOnThisPlatform` — `NSRegularExpression` is not
+  Python's `re`; a pattern that fails here drops a rule silently
+
+**The adapter, against the real model**
+
+- `testAContestedKeywordDoesNotFire` — the regression case,
+  `"who is the prime minister of create reminder"` → `.fallback`. Both premises
+  asserted: a rule claims it and names `reminders.add`, and the help guard is NOT
+  what handles it.
+- `testACorroboratedKeywordFiresAtTheModelConfidence` — `"turn up the volume"`, at
+  the model's number, neither 1.0 nor 0.60.
+- `testARuleTheModelMerelyDisagreesWithStillWins` — `"dim the audio"` → `.ruleOnly`
+  → fires. The case two-way got wrong (§13.4). Premises assert the model neither
+  agrees with the rule nor answers out-of-scope.
+- `testAnUtteranceNoRuleClaimsKeepsTheModelVerdict` — `"remind me to go to the
+  airport"`, the unarbitrated path.
+
+**The engine's bar selection, stub-driven**
+
+- `testACorroboratedTurnClearsTheLowerAgreementBar` — confidence between the two
+  bars, corroborated, fires; and the number does not move, only the bar.
+- `testTheSameConfidenceWithoutCorroborationFallsBack` — the control.
+- `testAContestedTurnTakesTheOrdinaryBar`
+- `testRuleOnlyDoesNotBorrowTheAgreementBar` — `.ruleOnly` does not need the
+  discount and must not get it.
+- `testAPackWithoutAnAgreementThresholdKeepsTheFlatBar` — nil means the bar never
+  moves; a pack's policy is never invented for it.
+
+**Planned here but NOT written — still open:**
+
+- `testContestedProbeDoesNotAbandonAnInProgressFlow` (§6.6) — the VIK-038 probe
+  under arbitration. The reasoning in §6.6 stands; it has no test.
+- `testKeywordStageDisabledSkipsArbitration` — `stages.keyword.enabled = false`,
+  the OTA kill switch §11 relies on. **The rollback path is currently unproven by
+  any test**, which is the more serious of the two gaps.
 
 ### 9.2 Pack-invariant guards
 
@@ -443,20 +510,25 @@ approximate by hand in Swift — that is the failure mode the fixture exists to 
 
 Merge requires all of:
 
-1. `swift test` green on the full suite.
+**Status: gates 1-3 met. 4 and 5 outstanding.**
+
+1. ✅ `swift test` green on the full suite.
 2. `ReferenceParityTests` asserting (not printing) every `fire_boundary` case,
    including new contested probes.
-3. **Holdout re-measurement** on `holdout_honest.csv` (n=1470) through the iOS path,
-   compared against the pre-change run on the same build:
+3. ✅ **Holdout re-measurement** — done, and it CHANGED THE DESIGN. See §13.
+   `wrong_action_count` 5 -> 5 (unchanged, the gate's condition); accuracy
+   1344 -> 1343, one turn. The two-way design this document was written for cost
+   ten. Original wording of this gate, for the record:
    - `wrong_action_count` must not increase (pack meta records 28).
    - gate-pass rate reported; a drop is acceptable only where the turns that stopped
      passing are contested ones — that is the fix working.
    - per-utterance diff list attached to the PR.
-4. `PerformanceBenchmarks` — the extra inference runs on the ~9% of turns that hit a
-   keyword rule; the reference measured 0.06 ms for that arm. On-device the cost is one
+4. ⬜ `PerformanceBenchmarks` — the extra inference runs on the turns that hit a
+   keyword rule. That share is now MEASURED on this pack rather than quoted:
+   **138 of 1470 = 9.4%**, which matches the reference's "~9%". the reference measured 0.06 ms for that arm. On-device the cost is one
    `PackIntentClassifier.classify` (~1 ms CPU-only). Record before/after p50 and p95 for
    a keyword-routed utterance. **Regression budget: +3 ms p95.**
-5. A device smoke run of the five utterances in §9.3 plus the regression case, with
+5. ⬜ A device smoke run of the five utterances in §9.3 plus the regression case, with
    `log stream --predicate 'subsystem == "com.voiceaikit"'` captured in the PR.
 
 Add one `decisionLog.notice` at the arbitration site carrying
@@ -515,7 +587,189 @@ ticket, measurement and PR. **None of them is the cause of the reported defect.*
 
 ---
 
-## 13. Risks
+## 13. The measurement — and the design it rejected
+
+This section is the reason the rest of the document says "three-way". It is
+written out in full because the finding was expensive to produce, is not obvious,
+and had already been recorded once in a place that did not stop it being
+re-implemented.
+
+### 13.1 What was already in the repo, and why it did not help
+
+> **The warning was in an untracked file.** `scripts/analysis/arbitration_holdout.py`
+> is not committed to the `IntentClassifier` repo — it sits in a working tree on a
+> feature branch. So it is in nobody's history, nobody's blame, and no search of the
+> repo would have surfaced it. That is the real process failure here, and it is
+> fixable: the script should be committed.
+
+
+`IntentClassifier/scripts/analysis/arbitration_holdout.py` predates this work. It
+tests four ladders against the balanced holdout, and one of them — `C_python` — is
+the two-way split, character for character:
+
+```python
+if kw:
+    if kw == m:  intent, conf, bar = kw, mc,   AGREE   # corroborated
+    else:        intent, conf, bar = kw, 0.60, BAR     # contested
+else:            intent, conf, bar = m,  mc,   BAR
+```
+
+Its docstring says, in as many words: *"Result: every variant loses. Do not revive
+arbitration without re-running this."*
+
+**It was found after the two-way version had already been written and committed.**
+A warning in a script nobody greps for is not a control. That is worth more than an
+apology: the lasting fix is that the measurement now lives here, next to the design,
+and that `G_oos` has been added to that script so the next person sees the answer in
+the same place they see the question.
+
+### 13.2 Method
+
+Run through the reference engine's OWN ladder code — not a reimplementation — against
+`pack-en-v1.0.54` (the Android pack, which is byte-identical content to the iOS pack
+and carries the ONNX head Python can load). Corpus: `language_packs/en/holdout_honest.csv`,
+n = 1470.
+
+```
+cd IntentClassifier
+REPO=$PWD BUNDLE=<path-to>/nlu_pack python3 scripts/analysis/arbitration_holdout.py
+```
+
+Two metrics, and keeping them apart is the whole point:
+
+* **accuracy** — predicted label == the corpus's labelled intent. What the existing
+  script reports.
+* **`wrong_action_count`** — a STATE-CHANGING intent fired and it was wrong. The
+  medical safety budget, and what this document's gate 3 actually specifies.
+  Predicates taken verbatim from `nlu_training/wrong_action_harness.py`: help
+  intents and the fallback are not actions, and the nine read-only intents are
+  tracked separately.
+
+### 13.3 Result
+
+| ladder | accuracy | **wrong actions** | vs baseline | defect |
+|---|---|---|---|---|
+| `ios_now` — Stage 0 bypass (pre-VIK-055) | 1344 (91.43%) | 5 | — | ❌ fires `reminders.add` |
+| two-way (`C_python`) — first implementation | 1334 (90.75%) | 5 | **−10** | ✅ fixed |
+| **three-way (`G_oos`) — shipped** | **1343 (91.36%)** | **5** | **−1** | ✅ fixed |
+
+Gate 3's condition — `wrong_action_count` must not increase — is met by both. The
+accuracy column is what separates them, and it is a factor of ten.
+
+### 13.4 Why two-way loses
+
+138 of 1470 turns (9.4%) hit a keyword rule: **118 corroborated, 20 contested** —
+reproducing the reference's own recorded n=118 and n=20 exactly.
+
+On those 20 contested turns: **`ios_now` 18/20 correct, two-way 9/20.** The nine
+losses are all one shape — a rule hand-authored for a phrasing the model reads badly:
+
+| utterance | truth | keyword rule | model |
+|---|---|---|---|
+| dim the audio | `Cmd.VolumeDecrease` | **✓ VolumeDecrease** | ✗ StreamingStart |
+| voices seem distant to me | `Cmd.VolumeIncrease` | **✓ VolumeIncrease** | ✗ Help_Home |
+| load my normal configuration | `Cmd.MemoryChange` | **✓ MemoryChange** | ✗ VolumeUnmute |
+| switch on translate mode | `Cmd.TranslationStart` | **✓ TranslationStart** | ✗ Help_Translate |
+| translate the speech now | `Cmd.TranslationStart` | **✓ TranslationStart** | ✗ Help_Translate |
+| set a daily reminder for my vitamins | `reminders.add` | **✓ reminders.add** | ✗ Help_Reminder |
+| can i set a reminder | `reminders.add` | **✓ reminders.add** | ✗ Help_Reminder |
+| everything sounds muffled | `Help_DeviceSettings` | **✓ Help_DeviceSettings** | ✗ VolumeIncrease |
+| where do i see my aids last location | `Help_FindMyHearingAids` | **✓ Help_FindMyHearingAids** | ✗ Help_HeartRate |
+
+These are exactly what the keyword rules exist for. Two-way throws all of them away.
+
+### 13.5 The discriminator
+
+The reported defect looks different, and the difference is the whole design:
+
+```
+"dim the audio"                                 rule ✓   model names ANOTHER intent
+"who is the prime minister of create reminder"  rule ✗   model recognises NOTHING
+```
+
+A model saying *"I read this as a different intent"* and a model saying *"I do not
+recognise this at all"* are not the same evidence. Two-way collapses them. Three-way
+keeps them apart: **the model only overrules a rule when it recognises nothing.**
+
+### 13.6 The agreement bar buys nothing here — and why that is structural
+
+Of the 118 corroborated turns, only **2** sit in the `[0.50, 0.70)` band the
+agreement bar exists to open, and both already fired under `ios_now` — the bypass
+returned them at an implied 1.0 without consulting any bar at all.
+
+The agreement bar's value is measured against a *no-keyword-stage* baseline. iOS did
+not have one; it had a *bypass*. §5 of the original plan did not make that
+distinction, which is why the bar looked like a win on paper.
+
+It is kept regardless: it costs nothing, it is the pack's own declared policy
+(`thresholds.agreement`, read for the first time by this change), and it is what the
+parity fixture's `"turn it up its too quiet"` case at 0.6922 asserts.
+
+### 13.7 Attribution — the change has three separable parts
+
+| part | accuracy | defect |
+|---|---|---|
+| **P1** delete Stage 0, model runs every turn, rule still always wins | 1344 (**0**) | ❌ |
+| **P2** + corroborated → model confidence, agreement bar | 1343 (**−1**) | ❌ |
+| **P3a** + contested only when the model answers out-of-scope | 1343 (**−1**) | ✅ |
+| *(P3b)* + contested on ANY disagreement — the rejected design | 1334 (−10) | ✅ |
+
+P1 is free and is the structural prerequisite: without it nothing downstream can
+run. P2 costs one turn — a corroborated turn now passes through the OOV guard and a
+bar, which the bypass skipped. The defect fix comes entirely from P3, and P3a buys it
+for nothing more.
+
+### 13.8 What this does NOT fix
+
+```
+"tell me a joke about increase volume"   ->  Cmd.VolumeIncrease   (every ladder)
+"who won the match turn up the volume"   ->  Cmd.VolumeIncrease   (every ladder)
+```
+
+The model reads these as the command too, so they are CORROBORATED and no arbitration
+can help. Out-of-domain text carrying a command phrase is only caught when the model
+also declines it. The claim this change supports is narrow and should be stated
+narrowly.
+
+### 13.8b The one turn it does cost, named
+
+`G_oos` breaks exactly one row of the 1470:
+
+```
+"dim the sound"   truth Cmd.VolumeDecrease   rule VolumeDecrease   model <fallback>
+```
+
+A real command that the model does not recognise, and a rule that reads it
+correctly. Three-way sends it to the fallback because the rule is contradicted by
+an out-of-scope verdict — which is the exact trade this design makes, in the one
+direction where it costs something. Worth stating plainly rather than leaving as
+"−1": the cost is not a rounding error, it is a real command being refused.
+
+`"dim the audio"` — same shape, one word apart — survives, because the model
+answers `Cmd.StreamingStart` there rather than the fallback. That the two split on
+so thin a margin is a fact about the model's coverage of this phrasing family, and
+an argument for a training row rather than for a different ladder.
+
+### 13.9 The corpus cannot score the benefit
+
+Of the 138 keyword-claiming rows, **none is labelled out-of-scope.** The defect class
+— out-of-domain text containing a keyword pattern — is absent from this corpus. So
+`holdout_honest.csv` measures the COST of arbitration and not its BENEFIT.
+
+That is the mirror of the critique `arbitration_holdout.py` makes of the help-only
+corpus it replaced: *"suppressing a command cannot be scored as a regression because
+the corpus holds no commands."*
+
+**Open, and it bounds everything above:** how often this defect class occurs in real
+traffic is unmeasured. If it is rare, even the one-turn cost is arguable; if it is
+common — and out-of-domain speech is ordinary for a voice assistant — the trade is
+cheap. Field logs settle it; this corpus cannot. A holdout carrying out-of-scope rows
+that a keyword rule claims would be the right addition, and is worth raising with
+whoever owns `scripts/ci/build_honest_holdout.py`.
+
+---
+
+## 14. Risks
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
@@ -523,12 +777,12 @@ ticket, measurement and PR. **None of them is the cause of the reported defect.*
 | A corroborated turn that used to fire now falls back | Low | Regression | The bar *drops* to 0.50 for corroborated turns, so a turn that fired at confidence 1.0 still fires. `testCorroboratedTurnBelowFireBarStillFires` covers the widened band. |
 | Latency on keyword-routed turns | Medium | ~9% of turns gain one inference | §10.4 budget. `PackIntentClassifier` is `.cpuOnly` and measured at ~1 ms. |
 | `NSRegularExpression` rejects a pack pattern that Python accepts | Low | A rule silently stops firing | §9.2 compile test; §6.2 logs a dropped rule at error level rather than trapping. |
-| Working-tree collision | **High — active now** | Merge conflict / lost work | §14. |
+| Working-tree collision | **High — active now** | Merge conflict / lost work | §15. |
 | Parity fixture cannot emit contested cases | Medium | VIK-055 cannot be closed on evidence | Raise on the Python side before starting §9.4. Do not hand-author expectations in Swift. |
 
 ---
 
-## 14. Sequencing
+## 15. Sequencing
 
 **Before any code is written**, resolve the working-tree state. At the time of writing:
 
