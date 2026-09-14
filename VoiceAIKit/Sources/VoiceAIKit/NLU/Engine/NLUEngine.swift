@@ -659,6 +659,13 @@ actor NLUEngine: ConversationEngine {
         if let reject = oovReject, let bypass = oovBypass, !outOfScope, conf < bypass {
             let ratio = await classifier.oovRatio(text)
             if ratio >= reject {
+                // There are TWO ways out of this function to the fallback, and the
+                // `decide` line above cannot tell them apart: this one, and the fire
+                // test below. Without this line a turn that was refused for its
+                // vocabulary reads in the log exactly like one refused for its
+                // confidence, and the two need different fixes. Mirrors the
+                // reference's `nlu.oov_guard` record.
+                decisionLog.notice("oov_guard blocked=\(intent, privacy: .public) ratio=\(ratio, privacy: .public) reject=\(reject, privacy: .public) conf=\(conf, privacy: .public)")
                 return .fallback(intent: schema.fallbackIntent,
                                  confidence: conf, breakdown: breakdown)
             }

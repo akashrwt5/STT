@@ -41,7 +41,15 @@ Model verdict, computed from the pack's own full-vocab head (5896 features):
 | Android | `model.onnx` | `temperature` = 0.671457 | `Default Fallback Intent` **0.640** | #2 @ 0.237 |
 | iOS | `IntentClassifier_full.mlmodelc` | `temperature_coreml_full` = 0.54399 | `Default Fallback Intent` **0.729** | #2 @ 0.213 |
 
-OOV ratio for this utterance: **0.25** — exactly `policies.thresholds.oov_reject`.
+OOV ratio for this utterance, against the **full** head iOS actually loads
+(`BundleDataLoader`'s default variant): **0.125** — only `prime` is outside the
+vocabulary, `minister` is in it. That is below `oov_reject` (0.25), so **the OOV
+guard does not catch this utterance.**
+
+> CORRECTED. An earlier draft recorded 0.25 here, computed against the PRUNED
+> weights (1592 terms), where both `prime` and `minister` are missing. The pruned
+> head is not what ships. The correction strengthens the case rather than weakening
+> it: arbitration is the ONLY thing in the ladder that stops this turn.
 
 **Android decision trace** (`OfflineNluServiceImpl.classifyOnPack`):
 
@@ -66,7 +74,9 @@ The classifier never runs. Three guards that would each have caught this turn al
 *after* Stage 0:
 
 - the fire threshold, `conf < schema.confidenceThreshold` (`NLUEngine.swift:668`)
-- the OOV guard, `oov_reject 0.25 / oov_bypass 0.97` (`NLUEngine.swift:659-666`)
+- the OOV guard, `oov_reject 0.25 / oov_bypass 0.97` (`NLUEngine.swift:659-666`) —
+  which would NOT have caught this particular utterance (ratio 0.125), but catches
+  the wider class of turns a keyword rule used to smuggle past it
 - the vacuous-prediction check in `PackClassifierAdapter.classifyAsync`
 
 The pack data is not implicated. A full tree hash of both packs differs only in
