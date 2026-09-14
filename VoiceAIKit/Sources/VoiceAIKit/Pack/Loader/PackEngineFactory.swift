@@ -301,6 +301,21 @@ actor PackClassifierAdapter: IntentClassifying {
     /// mode. See `docs/things-to-pull-from-android.md` §3.
     static let contestedConfidence = 0.60
 
+    /// Reported when a rule fires and the model names a DIFFERENT IN-SCOPE
+    /// intent. The rule wins outright, exactly as it did before VIK-055.
+    ///
+    /// NOT A PROBABILITY, and `Arbitration.ruleOnly` is what says so. A
+    /// deterministic pattern either matched or it did not; there is no
+    /// distribution behind this number. It is 1.0 because the turn must clear
+    /// the fire bar on the rule's authority alone — which is also what makes the
+    /// OOV guard stand down (it is gated on `conf < oov_bypass`) and what the
+    /// confirmation gate reads, both matching the behaviour this preserves.
+    ///
+    /// Measured on `holdout_honest.csv` (n=1470): sending these turns to the
+    /// contested path instead cost 9 correct turns out of 20 and removed no
+    /// wrong actions. See `docs/VIK-055-keyword-arbitration-plan.md`.
+    static let ruleOnlyConfidence = 1.0
+
     private let classifier: PackIntentClassifier
     private let outOfScopeIntent: String
     /// The pack decides whether semantic rescue runs — not the host, and not
@@ -470,15 +485,63 @@ actor PackClassifierAdapter: IntentClassifying {
                     stage3: nil))
         }
 
-        // `winningStage: 1` — the keyword rule decided the label, and 1 is what
-        // that field has always meant (see `ClassificationBreakdown.StageResult`).
-        let corroborated = keywordIntent == prediction.intent
+        // THREE outcomes, not two. `winningStage: 1` throughout — the keyword rule
+        // decided the label, and 1 is what that field has always meant (see
+        // `ClassificationBreakdown.StageResult`).
+        //
+        // The two-way split (agree / disagree) is what the Python reference and
+        // Android ship, and measuring it on this pack's own honest holdout is
+        // what showed it is wrong here: of the 20 contested turns, 18 were
+        // correct under the old bypass and only 9 survive a flat "disagreement
+        // means ambiguity" rule. The losses are all the same shape — a rule
+        // authored for a phrasing the model reads badly:
+        //
+        //     "dim the audio"               rule VolumeDecrease   model StreamingStart
+        //     "load my normal configuration" rule MemoryChange     model VolumeUnmute
+        //     "voices seem distant to me"    rule VolumeIncrease   model Help_Home
+        //
+        // What the defect case looks like is DIFFERENT, and that difference is
+        // the whole discriminator: there the model does not name another intent,
+        // it says the utterance is out of scope.
+        //
+        //     "who is the prime minister of create reminder"
+        //                                    rule reminders.add   model <fallback>
+        //
+        // So the model only overrules a rule when it recognises NOTHING. Measured
+        // across 1470 turns: two-way costs 10 correct turns, three-way costs 1,
+        // and both fix the defect. Neither changes `wrong_action_count` (5).
+        //
+        // TEMPERATURE-INVARIANT, which is why this survives the CoreML/reference
+        // confidence drift: every branch below compares argmax labels, never a
+        // confidence. Only the fire test downstream reads the number.
+        if keywordIntent == prediction.intent {
+            return ClassificationResult(
+                label: keywordIntent,
+                confidence: prediction.confidence,
+                semanticRescue: false,
+                breakdown: ClassificationBreakdown(winningStage: 1, stage2: stage2, stage3: nil),
+                arbitration: .corroborated)
+        }
+
+        // `outOfScopeIntent` is "" for a pack that declares no fallback label. An
+        // empty string never equals a predicted intent, so such a pack simply
+        // never reaches the contested branch — the rule keeps winning, which is
+        // the pre-VIK-055 behaviour and the safe direction to degrade in.
+        if !outOfScopeIntent.isEmpty, prediction.intent == outOfScopeIntent {
+            return ClassificationResult(
+                label: keywordIntent,
+                confidence: Self.contestedConfidence,
+                semanticRescue: false,
+                breakdown: ClassificationBreakdown(winningStage: 1, stage2: stage2, stage3: nil),
+                arbitration: .contested)
+        }
+
         return ClassificationResult(
             label: keywordIntent,
-            confidence: corroborated ? prediction.confidence : Self.contestedConfidence,
+            confidence: Self.ruleOnlyConfidence,
             semanticRescue: false,
             breakdown: ClassificationBreakdown(winningStage: 1, stage2: stage2, stage3: nil),
-            arbitration: corroborated ? .corroborated : .contested)
+            arbitration: .ruleOnly)
     }
 
     func warmUp() async { await classifier.warmUp() }

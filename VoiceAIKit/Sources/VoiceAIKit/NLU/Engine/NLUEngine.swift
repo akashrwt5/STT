@@ -636,6 +636,10 @@ actor NLUEngine: ConversationEngine {
         // inventing a higher number for a corroborated turn would put a second
         // scale back in the confidence field, which is the defect this ladder was
         // rebuilt to remove.
+        // Only CORROBORATION lowers the bar. `.ruleOnly` carries the rule's own
+        // authority (1.0) and clears the ordinary bar without help; `.contested`
+        // carries 0.60 and must NOT clear it. Three arbitration outcomes, one
+        // bar decision, and it keys on the single one that is extra evidence.
         let corroborated = result.arbitration == .corroborated
         let fireBar = corroborated
             ? (agreementThreshold ?? schema.confidenceThreshold)

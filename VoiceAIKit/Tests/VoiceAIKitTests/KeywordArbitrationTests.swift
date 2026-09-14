@@ -214,6 +214,59 @@ final class KeywordArbitrationTests: XCTestCase {
         XCTAssertGreaterThan(result?.confidence ?? 0, pack.policies.thresholds.confidence)
     }
 
+    /// The third outcome, and the one the two-way split got wrong.
+    ///
+    /// A rule fires, the model names a DIFFERENT IN-SCOPE intent, and the rule
+    /// wins. These are the turns the keyword rules exist for: phrasings the
+    /// model reads badly, which someone hand-authored a pattern to catch.
+    /// Measured on `holdout_honest.csv`, treating them as contested cost 9 of
+    /// 20 correct turns and removed no wrong actions.
+    ///
+    /// The premise is asserted, not assumed: if the model ever starts agreeing
+    /// with the rule here, or starts answering out-of-scope, this stops being a
+    /// `.ruleOnly` case and the test says so instead of passing hollow.
+    func testARuleTheModelMerelyDisagreesWithStillWins() async throws {
+        let text = "dim the audio"
+        let intent = try XCTUnwrap(keywordIntent(for: text), "no rule claims \(text.debugDescription)")
+
+        let classifier = try PackClassifierAdapter(pack: pack)
+        let verdict = await classifier.classifyAsync(text)
+        let modelSaid = try XCTUnwrap(verdict.breakdown.stage2?.intent)
+        XCTAssertNotEqual(modelSaid, intent, """
+            the model now agrees with the rule on \(text.debugDescription), so this is \
+            corroboration rather than the rule-only case. Pick another utterance.
+            """)
+        XCTAssertNotEqual(modelSaid, schema.fallbackIntent, """
+            the model now answers out-of-scope on \(text.debugDescription), so this is the \
+            contested case. Pick another utterance.
+            """)
+        XCTAssertEqual(verdict.arbitration, .ruleOnly)
+
+        let engine = try PackEngineFactory.makeEngine(pack: pack)
+        let result = fulfilled(await engine.handle(text))
+        XCTAssertEqual(result?.intent, intent, """
+            a rule the model merely disagrees with must still fire — the model naming a \
+            different intent is not the same evidence as the model recognising nothing.
+            """)
+    }
+
+    /// `.ruleOnly` must not borrow the agreement bar. It does not need it — it
+    /// carries 1.0 — but keying the bar on "any arbitration happened" instead of
+    /// on corroboration would hand the discount to the wrong case.
+    func testRuleOnlyDoesNotBorrowTheAgreementBar() async throws {
+        let intent = try slotlessUngatedIntent()
+        let agreement = try XCTUnwrap(pack.policies.thresholds.agreement)
+        let between = (agreement + pack.policies.thresholds.confidence) / 2
+
+        let e = engine(label: intent, confidence: between,
+                       arbitration: .ruleOnly, agreement: agreement)
+        let response = await e.handle("anything the stub will answer for")
+
+        guard case .fallback = response else {
+            return XCTFail("`.ruleOnly` took the agreement bar, got \(response)")
+        }
+    }
+
     /// No rule fires, so the model's verdict passes through untouched — the path
     /// that was already correct and must stay that way.
     func testAnUtteranceNoRuleClaimsKeepsTheModelVerdict() async throws {

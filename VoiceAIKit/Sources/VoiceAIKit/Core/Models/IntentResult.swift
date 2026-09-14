@@ -76,10 +76,24 @@ struct ClassificationResult: Sendable {
         /// correct on the honest holdout (n=118), which is what justifies the
         /// lower bar.
         case corroborated
-        /// They disagreed. The rule still holds the LABEL — it is a deliberate,
-        /// hand-authored product decision — but the disagreement is real
-        /// evidence of ambiguity and the number has to say so. ~45% correct.
+        /// The model says the utterance is OUT OF SCOPE and a rule claims it
+        /// anyway. The rule keeps the LABEL, but a model that recognises nothing
+        /// is the one disagreement that must not be overridden: it is what
+        /// separates "create reminder" inside a real request from the same two
+        /// words inside "who is the prime minister of create reminder".
         case contested
+        /// A rule fired and the model named a DIFFERENT in-scope intent.
+        ///
+        /// The rule wins, and the confidence that comes with it is not a
+        /// probability — see `PackClassifierAdapter.ruleOnlyConfidence`. This
+        /// case exists so that fact is visible to the log, the debug panel and
+        /// the confirmation gate instead of being hidden inside a number.
+        ///
+        /// Measured on `holdout_honest.csv` (n=1470): these are the turns where
+        /// the hand-authored rule is RIGHT and the model is wrong — "dim the
+        /// audio", "load my normal configuration", "voices seem distant to me".
+        /// Treating them as contested cost 9 correct turns and bought nothing.
+        case ruleOnly
     }
 
     /// `arbitration` is defaulted so a classifier that has no keyword stage —
