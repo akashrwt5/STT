@@ -64,9 +64,15 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
     private var fulfilment: String? { schema.intents[reminder]?.fulfillment }
     private var action: String? { schema.intents[reminder]?.action }
 
-    /// Routes through Stage 0: `keywords/en.json` carries
-    /// `\b(set|create|add|make)\b.{0,20}\breminder\b`, so this utterance reaches the
-    /// intent WITHOUT the classifier — and, today, without the confirmation gate.
+    /// Claimed by a keyword rule: `keywords/en.json` carries
+    /// `\b(set|create|add|make)\b.{0,20}\breminder\b`.
+    ///
+    /// Since VIK-055 that is a VOTE, not a bypass — in production the model runs
+    /// too and arbitration decides. These tests inject a stub classifier, which
+    /// IS the classifier, so arbitration never runs here and the stub's verdict
+    /// decides alone. The distinction matters when reading a failure: this
+    /// utterance's keyword route is asserted below as a PREMISE about the pack,
+    /// not as the path this suite exercises.
     private let keywordRouted = "set a reminder to go to the airport"
 
     /// Reaches the CLASSIFIER: no keyword rule matches this phrasing, so the stub's
@@ -138,7 +144,7 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
         func matches(_ text: String) -> Bool {
             rules.contains { text.range(of: $0, options: [.regularExpression, .caseInsensitive]) != nil }
         }
-        XCTAssertTrue(matches(keywordRouted), "\(keywordRouted) must reach Stage 0")
+        XCTAssertTrue(matches(keywordRouted), "\(keywordRouted) must still be claimed by a keyword rule")
         XCTAssertFalse(matches(classifierRouted), """
             \(classifierRouted) now matches a keyword rule, so the confirmation tests \
             below bypass the gate and prove nothing. Pick another phrasing for them.
@@ -198,17 +204,20 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
         }
     }
 
-    /// VIK-036 — a keyword rule bypasses the CLASSIFIER, never the POLICY.
+    /// VIK-036 — a keyword rule never bypasses the POLICY.
     ///
     /// Stage 0 used to go straight to `advanceSlots`, so an intent reached through a
-    /// keyword rule never met its confirmation gate. `pack-en` is the worst case for
+    /// keyword rule never met its confirmation gate. VIK-055 removed Stage 0
+    /// altogether, so the gate is now unreachable-by-construction rather than
+    /// merely applied — but the assertion stays: it is the behaviour that matters,
+    /// not the mechanism that delivers it. `pack-en` is the worst case for
     /// that: `Cmd.SendMessage` is the ONE intent it gates `always`, and it ships four
     /// keyword rules — `^ptt$`, `^push to talk$`, and two `send…message` patterns. A
     /// message went out without asking, on the only intent the pack says to always ask
     /// about.
     ///
     /// The premise is asserted rather than assumed: if this utterance stops reaching an
-    /// always-gated intent through Stage 0, the test says so instead of passing hollow.
+    /// always-gated intent through a keyword rule, the test says so instead of passing hollow.
     func testAKeywordRoutedAlwaysGatedIntentStillConfirms() async throws {
         let utterance = "send a message to mom"
 

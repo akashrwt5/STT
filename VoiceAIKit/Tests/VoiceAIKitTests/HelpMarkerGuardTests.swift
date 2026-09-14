@@ -116,27 +116,38 @@ final class HelpMarkerGuardTests: XCTestCase {
         XCTAssertNoThrow(try NSRegularExpression(pattern: pattern, options: [.caseInsensitive]))
     }
 
-    // MARK: Stage 0 — a keyword match the guard rejects is not a match
+    // MARK: The keyword path — a rule must not carry a question to a command
 
     /// The path that made the device act.
     ///
-    /// Stage 0 returns before the classifier runs, so a keyword rule used to
-    /// carry a help question straight to a command at confidence 1.0. All four
-    /// of these utterances match a keyword rule AND carry a help marker — the
-    /// premise is asserted here, not assumed, because a rule change would
-    /// silently turn this test into a no-op.
+    /// Stage 0 used to return before the classifier ran, so a keyword rule
+    /// carried a help question straight to a command at an implied confidence of
+    /// 1.0. VIK-055 removed Stage 0, so this now runs through the REAL
+    /// `PackClassifierAdapter` — which is the only way it can still prove
+    /// anything: a stub classifier IS the classifier, so a stubbed version of
+    /// this test would assert that the stub returns what it was told to.
+    ///
+    /// Every one of these is CONTESTED under arbitration — the rule says
+    /// `Cmd.*`, the model says `Help_*` — which is the exact shape the guard has
+    /// to survive: the turn arrives at 0.60, the guard redirects to the sibling,
+    /// and the re-read pulls the model's own probability for THAT intent back up
+    /// over the fire threshold. Without the re-read every one of these would fall
+    /// back and the guard would look broken while behaving correctly.
     func testAKeywordRoutedHelpAskIsNotSmuggledPastTheGuard() async throws {
-        let cases: [(text: String, command: String, help: String, conf: Double)] = [
-            ("can you show me transcribe user guide",     "Cmd.TranscribeStart",  "Help_Transcribe", 0.998),
-            ("hearing aids transcribe help",              "Cmd.TranscribeStart",  "Help_Transcribe", 0.999),
-            ("how do i turn down the loudness on my aid?", "Cmd.VolumeDecrease",  "Help_Volume",     0.931),
-            ("hearing aids translate guide",              "Cmd.TranslationStart", "Help_Translate",  0.996),
-            ("how do i set a reminder",                   "reminders.add",        "Help_Reminder",   0.998),
+        let cases: [(text: String, command: String, help: String)] = [
+            ("can you show me transcribe user guide",      "Cmd.TranscribeStart",  "Help_Transcribe"),
+            ("hearing aids transcribe help",               "Cmd.TranscribeStart",  "Help_Transcribe"),
+            ("how do i turn down the loudness on my aid?", "Cmd.VolumeDecrease",   "Help_Volume"),
+            ("hearing aids translate guide",               "Cmd.TranslationStart", "Help_Translate"),
+            ("how do i set a reminder",                    "reminders.add",        "Help_Reminder"),
         ]
 
+        let engine = try PackEngineFactory.makeEngine(pack: pack)
+
         for c in cases {
-            // Premise 1: a keyword rule really does claim this utterance.
-            let routed = pack.keywordRules.first { rule in
+            // Premise 1: a keyword rule really does claim this utterance. Asserted,
+            // not assumed — a rule change would otherwise turn this into a no-op.
+            let routed = pack.keywordRulesByTier.first { rule in
                 c.text.range(of: rule.pattern, options: [.regularExpression, .caseInsensitive]) != nil
                     && !rule.guards.contains {
                         c.text.range(of: $0, options: [.regularExpression, .caseInsensitive]) != nil
@@ -144,20 +155,23 @@ final class HelpMarkerGuardTests: XCTestCase {
             }
             XCTAssertEqual(routed?.intent, c.command, """
                 \(c.text.debugDescription) no longer routes to \(c.command) through a \
-                keyword rule, so it cannot demonstrate the Stage 0 bypass. Pick another.
+                keyword rule, so it cannot demonstrate what this test is about. Pick another.
                 """)
             // Premise 2: the pack pairs that command with this help intent.
             XCTAssertEqual(pack.guards.helpMarker?.pairs[c.command], c.help)
 
-            // The classifier answers with the help intent, as the real model does
-            // on this pack; the question is only whether Stage 0 lets it be asked.
-            let engine = makeEngine(label: c.help, confidence: c.conf)
             let result = fulfilled(await engine.handle(c.text))
 
             XCTAssertEqual(result?.intent, c.help, """
-                \(c.text.debugDescription) reached \(c.command) through Stage 0 — the \
-                keyword rule bypassed the guard and the device acts on a question.
+                \(c.text.debugDescription) reached \(c.command) — a keyword rule carried a \
+                question past the guard and the device acts on it.
                 """)
+            XCTAssertGreaterThanOrEqual(result?.confidence ?? 0, schema.confidenceThreshold, """
+                \(c.text.debugDescription) redirected to \(c.help) but kept a confidence under \
+                the fire threshold, which reaches the user as "not understood" — the \
+                calibrated re-read is what this asserts.
+                """)
+            await engine.reset()
         }
     }
 

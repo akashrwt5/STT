@@ -106,6 +106,10 @@ enum PackEngineFactory {
             // The pair the compiler emits from one statement; passed the same way.
             oovReject: pack.policies.thresholds.oovReject,
             oovBypass: pack.policies.thresholds.oovBypass,
+            // VIK-055. Decoded since the v3 surface landed and read by nothing
+            // until now, which is exactly why the engine applied a flat bar where
+            // the reference drops it for a corroborated turn.
+            agreementThreshold: pack.policies.thresholds.agreement,
             trailingFunctionWords: effectiveTrailingWords,
             leadingConnectors: lexicon.leadingConnectors,
             confirmationGates: confirmationGates(from: pack),
@@ -120,7 +124,9 @@ enum PackEngineFactory {
         log.info("""
             Engine ready — \(pack.manifest.bundleID, privacy: .public) \
             [\(pack.language, privacy: .public)], \(pack.intents.count) intents, \
-            \(pack.classifier.variant.rawValue, privacy: .public) head
+            \(pack.classifier.variant.rawValue, privacy: .public) head, \
+            keyword stage \(pack.stageEnabled(.keyword) ? "on" : "off", privacy: .public), \
+            agreement bar \(pack.policies.thresholds.agreement.map { String($0) } ?? "off", privacy: .public)
             """)
         return engine
     }
@@ -244,6 +250,14 @@ enum PackEngineFactory {
             intents: intents,
             affirmative: pack.lexicon.affirmative,
             negative: pack.lexicon.negative,
+            // DEPRECATED (VIK-055). The keyword stage now lives in
+            // `PackClassifierAdapter`, which reads `PackKeywords.Rule` directly.
+            // Nothing consumes this any more, and it must not be revived: the
+            // projection is LOSSY — it keeps only `guards.first`, so a rule with
+            // two guards would fire where the pack says it must stay silent
+            // (VIK-058). Kept for one release rather than deleted, because
+            // removing it changes `NLUSchema`'s memberwise init and forces edits
+            // across four test files for no behavioural reason.
             keywordTriggers: pack.keywordRulesByTier.map {
                 KeywordTrigger(intent: $0.intent,
                                regex: $0.pattern,
@@ -265,17 +279,113 @@ enum PackEngineFactory {
 /// was the first thing to leave that way.
 actor PackClassifierAdapter: IntentClassifying {
 
+    private static let log = Logger(subsystem: "com.voiceaikit", category: "PackClassifierAdapter")
+
+    /// Confidence reported when a rule fires but the model's top prediction is a
+    /// DIFFERENT intent. The rule still wins the LABEL — it is a deliberate,
+    /// hand-authored product decision — but the disagreement is real evidence of
+    /// ambiguity and the number has to say so.
+    ///
+    /// Carried verbatim from `classifier.py`'s `CONTESTED_CONFIDENCE` and
+    /// Android's `OfflineNluServiceImpl.contestedConfidence`. Do NOT re-derive
+    /// it here: the reference marks it PROVISIONAL pending an out-of-fold sweep,
+    /// and a second number invented on this platform would break parity by
+    /// definition. It sits BELOW `policies.thresholds.confidence` on purpose, so
+    /// a contested rule can never fire on its own.
+    static let contestedConfidence = 0.60
+
     private let classifier: PackIntentClassifier
     private let outOfScopeIntent: String
     /// The pack decides whether semantic rescue runs — not the host, and not
     /// this adapter. en packs ship it disabled and their report card was
     /// measured that way.
     private let semanticEnabled: Bool
+    /// The pack's keyword rules, compiled once. Empty when the pack disables the
+    /// keyword stage — which is this feature's OTA kill switch: a pack shipping
+    /// `stages.keyword.enabled = false` routes on the model alone, with no app
+    /// update and a known accuracy cost rather than an unknown one.
+    private let keywordRules: [CompiledRule]
+
+    /// One keyword rule with its patterns compiled ahead of the turn, so matching
+    /// never compiles. The old Stage 0 called `range(of:options:.regularExpression)`
+    /// per rule per utterance, which recompiles every pattern on every turn.
+    private struct CompiledRule {
+        let intent: String
+        let pattern: NSRegularExpression
+        /// ALL of the rule's guards, not `guards.first` (VIK-058). Any one of
+        /// them matching vetoes the rule.
+        let vetoes: [NSRegularExpression]
+
+        func matches(_ text: String) -> Bool {
+            let range = NSRange(text.startIndex..., in: text)
+            guard pattern.firstMatch(in: text, options: [], range: range) != nil else { return false }
+            return !vetoes.contains { $0.firstMatch(in: text, options: [], range: range) != nil }
+        }
+    }
 
     init(pack: ResolvedPack) throws {
         self.classifier = try PackIntentClassifier(artifacts: pack.classifier)
         self.outOfScopeIntent = pack.outOfScopeIntent ?? ""
         self.semanticEnabled = pack.stageEnabled(.semantic)
+
+        // Order is the pack's `keywordRulesByTier` — tier 1 (exact anchors)
+        // before tier 2 — and it is preserved here deliberately. Android matches
+        // in FILE order instead (VIK-057); changing that belongs in its own PR
+        // with a sweep behind it, not folded into this one.
+        var compiled: [CompiledRule] = []
+        if pack.stageEnabled(.keyword) {
+            for rule in pack.keywordRulesByTier {
+                // A pattern this platform cannot compile costs that ONE rule, not
+                // the load — the pack is otherwise fine, and NSRegularExpression's
+                // dialect is not identical to Python's `re`. Same discipline as
+                // `NLUEngine`'s help-marker compilation.
+                guard let pattern = try? NSRegularExpression(pattern: rule.pattern,
+                                                             options: [.caseInsensitive]) else {
+                    Self.log.error("""
+                        Keyword rule for \(rule.intent, privacy: .public) does not compile here \
+                        — dropping it. The rule will never fire on this platform.
+                        """)
+                    continue
+                }
+                var vetoes: [NSRegularExpression] = []
+                var guardsUsable = true
+                for veto in rule.guards {
+                    guard let expr = try? NSRegularExpression(pattern: veto,
+                                                              options: [.caseInsensitive]) else {
+                        guardsUsable = false
+                        break
+                    }
+                    vetoes.append(expr)
+                }
+                // A rule whose GUARD will not compile is dropped whole, never kept
+                // unguarded: an unguarded rule fires where the pack says it must
+                // stay silent, which is the more damaging of the two failures.
+                guard guardsUsable else {
+                    Self.log.error("""
+                        A guard on the keyword rule for \(rule.intent, privacy: .public) does not \
+                        compile here — dropping the rule rather than running it unguarded.
+                        """)
+                    continue
+                }
+                compiled.append(CompiledRule(intent: rule.intent, pattern: pattern, vetoes: vetoes))
+            }
+        }
+        self.keywordRules = compiled
+    }
+
+    /// The intent of the first rule that fires, or nil when none do.
+    ///
+    /// Matches RAW text. `classifier.py` is explicit that normalisation is
+    /// "applied to the MODEL path only — the keyword stage matches raw text".
+    /// iOS applies no normalisation at all today (VIK-056), so both paths
+    /// currently see the same string; the distinction is written down because it
+    /// becomes load-bearing the day normalisation lands.
+    ///
+    /// Lowercased and trimmed before matching, exactly as the Stage 0 this
+    /// replaces did, and the patterns are case-insensitive as well.
+    private func firstKeywordIntent(_ text: String) -> String? {
+        let t = text.lowercased().trimmingCharacters(in: .whitespaces)
+        return keywordRules.first { $0.matches(t) }?.intent
     }
 
     func oovRatio(_ text: String) async -> Double {
@@ -286,13 +396,48 @@ actor PackClassifierAdapter: IntentClassifying {
         await classifier.calibratedConfidence(for: intent)
     }
 
+    /// VIK-055. Arbitrate the keyword rules against the model, mirroring
+    /// `classifier.py::classify`.
+    ///
+    /// The model runs on EVERY turn and is the sole author of the confidence this
+    /// returns. The rule, when one fires, is the sole author of the label.
+    /// Separating those two responsibilities is the point:
+    ///
+    ///   * a rule is a deliberate, hand-authored product decision about what an
+    ///     utterance means, so it decides the LABEL;
+    ///   * only the model produces a calibrated probability, and confidence is
+    ///     compared downstream against thresholds fitted on exactly that scale,
+    ///     so it decides the NUMBER.
+    ///
+    /// This lives HERE, not in `NLUEngine`, because that is where the reference
+    /// puts it — and because the engine's callers inject stub classifiers, which
+    /// ARE the classifier and therefore bypass arbitration entirely. Putting it in
+    /// the engine would make every stub a permanent disagreement with the pack.
+    ///
+    /// Two callers benefit, not one: `handleNewIntent` and the VIK-038
+    /// topic-switch probe in `handleSlotFilling`. The reference's probe calls this
+    /// same arbitrated path (`engine.py`'s `self.classifier.classify`), so the
+    /// probe moves into parity rather than out of it. A contested probe now scores
+    /// 0.60, under the 0.68 interrupt bar, so it no longer abandons a flow the
+    /// user is halfway through on a signal measured at ~45% correct.
+    ///
+    /// Cost: one extra inference on the ~9% of turns that hit a rule; the rest
+    /// already ran the model. The reference measured that arm at 0.06 ms.
     func classifyAsync(_ text: String) async -> ClassificationResult {
+        let keywordIntent = firstKeywordIntent(text)
         let prediction = await classifier.classify(text)
 
         // A vacuous prediction is not a low-confidence one: nothing in the
         // utterance matched the vocabulary, so the scores are the model's
         // priors. Route it out of scope rather than let the engine act on a
         // number that means nothing (VIK-011).
+        //
+        // A rule that fired is deliberately NOT honoured here. A model that read
+        // no features cannot corroborate anything, so the honest outcomes are
+        // "contested" or nothing — and contested (0.60) is below the fire bar, so
+        // both land on the fallback. Returning out-of-scope says the same thing
+        // without implying the two stages were compared. Android reaches the same
+        // fallback by the contested route.
         guard !prediction.isVacuous else {
             return ClassificationResult(
                 label: outOfScopeIntent,
@@ -301,16 +446,32 @@ actor PackClassifierAdapter: IntentClassifying {
                 breakdown: ClassificationBreakdown(winningStage: nil, stage2: nil, stage3: nil))
         }
 
+        // The MODEL's own reading, recorded whichever way arbitration goes — the
+        // debug panel wants what the model said, and `NLUEngine`'s decision log
+        // reads it to show both sides of a disagreement.
         let stage2 = ClassificationBreakdown.StageResult(
             stage: 2, intent: prediction.intent, confidence: prediction.confidence)
+
+        guard let keywordIntent else {
+            return ClassificationResult(
+                label: prediction.intent,
+                confidence: prediction.confidence,
+                semanticRescue: false,
+                breakdown: ClassificationBreakdown(
+                    winningStage: prediction.passesGate ? 2 : nil,
+                    stage2: stage2,
+                    stage3: nil))
+        }
+
+        // `winningStage: 1` — the keyword rule decided the label, and 1 is what
+        // that field has always meant (see `ClassificationBreakdown.StageResult`).
+        let corroborated = keywordIntent == prediction.intent
         return ClassificationResult(
-            label: prediction.intent,
-            confidence: prediction.confidence,
+            label: keywordIntent,
+            confidence: corroborated ? prediction.confidence : Self.contestedConfidence,
             semanticRescue: false,
-            breakdown: ClassificationBreakdown(
-                winningStage: prediction.passesGate ? 2 : nil,
-                stage2: stage2,
-                stage3: nil))
+            breakdown: ClassificationBreakdown(winningStage: 1, stage2: stage2, stage3: nil),
+            arbitration: corroborated ? .corroborated : .contested)
     }
 
     func warmUp() async { await classifier.warmUp() }

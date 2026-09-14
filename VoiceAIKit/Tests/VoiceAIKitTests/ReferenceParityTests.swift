@@ -202,14 +202,12 @@ final class ReferenceParityTests: XCTestCase {
     /// arithmetic against one threshold. Model parity is the CoreML job's
     /// business; mixing the two makes a failure impossible to attribute.
     ///
-    /// The second case is a KNOWN DIVERGENCE (VIK-055): this engine has no
-    /// corroboration concept, so it applies a flat bar and falls back where the
-    /// reference fulfils. Those cases are reported, not asserted, until
-    /// `thresholds.agreement` is implemented here — at which point the reporting
-    /// below should become an assertion and this paragraph should go.
+    /// VIK-055 CLOSED. Corroboration is implemented here now, so the second case
+    /// is asserted like any other rather than reported. What used to stand here
+    /// read: "this engine has no corroboration concept, so it applies a flat bar
+    /// and falls back where the reference fulfils. Those cases are reported, not
+    /// asserted, until `thresholds.agreement` is implemented here."
     func testEngineDecisionsMatchTheReference() async throws {
-        let bar = pack.policies.thresholds.confidence
-        var divergences: [String] = []
 
         for probe in fixture.fireBoundary {
             let intent = probe.classifierIntent
@@ -222,7 +220,9 @@ final class ReferenceParityTests: XCTestCase {
             let engine = NLUEngine(
                 schema: schema,
                 classifier: ScriptedParityClassifier(
-                    label: intent, confidence: probe.classifierConfidence),
+                    label: intent, confidence: probe.classifierConfidence,
+                    arbitration: ClassificationResult.Arbitration(
+                        rawValue: probe.arbitration ?? "")),
                 entities: PackSlotResolver(pack: pack),
                 uncertain: [],
                 noIdioms: [],
@@ -231,6 +231,7 @@ final class ReferenceParityTests: XCTestCase {
                 maxSlotAttempts: pack.policies.limits.maxSlotAttempts,
                 oovReject: pack.policies.thresholds.oovReject,
                 oovBypass: pack.policies.thresholds.oovBypass,
+                agreementThreshold: pack.policies.thresholds.agreement,
                 leadingConnectors: pack.lexicon.leadingConnectors,
                 confirmationGates: PackEngineFactory.confirmationGates(from: pack))
             let response = await engine.handle(probe.text)
@@ -267,46 +268,53 @@ final class ReferenceParityTests: XCTestCase {
 
             if actual == probe.type { continue }
 
-            // Corroborated: a keyword rule and the model agreed, so the
-            // reference dropped its bar to `agreement`. This engine has no such
-            // concept and applies a flat bar (VIK-055), so it falls back where
-            // the reference fires. Read off the RECORDED arbitration rather than
-            // inferred from the confidence — inferring it would also swallow a
-            // genuine gate bug that happens to sit below the bar.
-            if probe.arbitration == "corroborated",
-               probe.type == "FULFILL", actual == "FALLBACK" {
-                divergences.append("\(probe.text.debugDescription): reference FULFILL at "
-                    + "\(probe.classifierConfidence) (corroborated, bar drops to "
-                    + "\(fixture.thresholds.agreement)); this engine FALLBACK at bar \(bar)")
-                continue
-            }
-
             XCTFail("""
                 \(probe.text.debugDescription): reference said \(probe.type) (\(probe.intent ?? "-")), this engine said \(actual) (\(actualIntent)) at confidence \(probe.confidence). Pack fallbackIntent is \(schema.fallbackIntent.debugDescription); the classifier was scripted to return \(intent.debugDescription) — if those two are equal the fire test should have caught it, so look at the keyword stage first.
                 """)
         }
+    }
 
-        if !divergences.isEmpty {
-            print("VIK-055 — corroboration not implemented here, \(divergences.count) case(s):")
-            divergences.forEach { print("  " + $0) }
-        }
+    /// The fixture must still carry the shape VIK-055 was about, or this suite
+    /// silently stops covering it. A regenerated fixture with no corroborated
+    /// case would make `testEngineDecisionsMatchTheReference` pass without ever
+    /// exercising the agreement bar.
+    ///
+    /// CONTESTED is the gap that remains: the emitter records no contested probe,
+    /// so the case that started VIK-055 — "who is the prime minister of create
+    /// reminder" — is not represented here. `KeywordArbitrationTests` covers it
+    /// against the real model in the meantime; this assertion is the reminder to
+    /// close it at the source.
+    func testTheFixtureStillCoversCorroboration() {
+        XCTAssertTrue(fixture.fireBoundary.contains { $0.arbitration == "corroborated" }, """
+            no corroborated probe in the fixture — regenerate it, or this suite no             longer covers the agreement bar at all
+            """)
     }
 }
 
 /// Returns one fixed verdict, so the engine's decision is the only variable.
+///
+/// `arbitration` comes from the fixture too (VIK-055). The reference records
+/// whether a keyword rule and the model agreed on each probe, and that is an
+/// INPUT to the engine's decision — it picks the bar — not an outcome. Leaving it
+/// out is what made three corroborated cases diverge here while the reference
+/// fired them.
 private actor ScriptedParityClassifier: IntentClassifying {
     private let label: String
     private let confidence: Double
+    private let arbitration: ClassificationResult.Arbitration?
 
-    init(label: String, confidence: Double) {
+    init(label: String, confidence: Double,
+         arbitration: ClassificationResult.Arbitration? = nil) {
         self.label = label
         self.confidence = confidence
+        self.arbitration = arbitration
     }
 
     func classifyAsync(_ text: String) async -> ClassificationResult {
         ClassificationResult(
             label: label, confidence: confidence, semanticRescue: false,
-            breakdown: ClassificationBreakdown(winningStage: 2, stage2: nil, stage3: nil))
+            breakdown: ClassificationBreakdown(winningStage: 2, stage2: nil, stage3: nil),
+            arbitration: arbitration)
     }
     func warmUp() async {}
     func loadStage3() async {}

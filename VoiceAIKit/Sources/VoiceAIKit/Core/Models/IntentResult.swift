@@ -56,15 +56,45 @@ struct ClassificationResult: Sendable {
     let semanticRescue: Bool
     /// Per-stage detail, for the debug panel.
     let breakdown: ClassificationBreakdown
+    /// How a keyword rule and the model were reconciled on this turn, or nil
+    /// when no rule fired (VIK-055).
+    ///
+    /// The ENGINE reads this to pick the bar `confidence` must clear:
+    /// `policies.thresholds.agreement` for a corroborated turn, the ordinary
+    /// `confidence` threshold otherwise. It is EVIDENCE STRENGTH, not a second
+    /// confidence — the reported number stays the model's calibrated
+    /// probability and only the bar it must clear moves. Inventing a higher
+    /// number for a corroborated turn would put a second scale back in the
+    /// confidence field, which is the defect this ladder exists to remove.
+    ///
+    /// Mirrors `classifier.py`'s `last_arbitration`.
+    let arbitration: Arbitration?
 
+    /// The outcome of reconciling a keyword rule with the model.
+    enum Arbitration: String, Sendable {
+        /// The rule and the model named the same intent. Measured at 99.2%
+        /// correct on the honest holdout (n=118), which is what justifies the
+        /// lower bar.
+        case corroborated
+        /// They disagreed. The rule still holds the LABEL — it is a deliberate,
+        /// hand-authored product decision — but the disagreement is real
+        /// evidence of ambiguity and the number has to say so. ~45% correct.
+        case contested
+    }
+
+    /// `arbitration` is defaulted so a classifier that has no keyword stage —
+    /// every stub in the test suite — needs no change. Nil means the ordinary
+    /// bar applies, which is the behaviour that predates VIK-055.
     init(label: String,
                 confidence: Double,
                 semanticRescue: Bool,
-                breakdown: ClassificationBreakdown) {
+                breakdown: ClassificationBreakdown,
+                arbitration: Arbitration? = nil) {
         self.label = label
         self.confidence = confidence
         self.semanticRescue = semanticRescue
         self.breakdown = breakdown
+        self.arbitration = arbitration
     }
 }
 

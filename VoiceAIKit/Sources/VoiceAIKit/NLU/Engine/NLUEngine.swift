@@ -107,6 +107,15 @@ actor NLUEngine: ConversationEngine {
         /// neither. Nil disables it, which is what a pack predating them means.
         oovReject: Double?,
         oovBypass: Double?,
+        /// `policies.thresholds.agreement` — the bar a CORROBORATED turn must
+        /// clear instead of `confidence` (VIK-055).
+        ///
+        /// Defaulted, unlike `interruptThreshold` and `maxSlotAttempts`, and the
+        /// difference is the same one the help-guard parameters below record: an
+        /// absent threshold that CHANGES a decision must not be guessed, but this
+        /// one only ever LOWERS a bar. Nil means "never lower it", which is the
+        /// behaviour that predates VIK-055 and is the safe direction to default to.
+        agreementThreshold: Double? = nil,
         /// Language-specific trailing function words. `nil` → the English default set,
         /// preserving prior behaviour for English packs.
         trailingFunctionWords: Set<String>? = nil,
@@ -135,6 +144,7 @@ actor NLUEngine: ConversationEngine {
         self.noIdioms = noIdioms
         self.carrierPatterns = carriers
         self.interruptThreshold = interruptThreshold
+        self.agreementThreshold = agreementThreshold
         self.maxSlotAttempts = maxSlotAttempts
         self.oovReject = oovReject
         self.oovBypass = oovBypass
@@ -285,12 +295,15 @@ actor NLUEngine: ConversationEngine {
     /// that sibling exists in this pack. Read-only queries are unpaired upstream
     /// on purpose: "how many steps" is a real question, not a help ask.
     ///
-    /// PURE, and nil rather than the input when nothing applies. It is called
-    /// twice per turn -- once as a QUESTION in Stage 0 ("would this keyword be
-    /// redirected?") and once as a DECISION after classification -- so logging
-    /// inside it made the Stage 0 probe emit `blocked=...` when nothing had been
-    /// blocked: one decline printed two lines and the first was untrue. Each
-    /// caller now logs what it actually did.
+    /// PURE, and nil rather than the input when nothing applies.
+    ///
+    /// Called ONCE per turn since VIK-055. It used to be called twice — once as a
+    /// QUESTION in Stage 0 ("would this keyword be redirected?") and once as a
+    /// DECISION after classification — which is why logging lives at the call
+    /// site rather than in here: the Stage 0 probe emitted `blocked=...` when
+    /// nothing had been blocked, so one decline printed two lines and the first
+    /// was untrue. Stage 0 is gone and the question it asked with it; the logging
+    /// split is kept because the caller, not this function, knows what it did.
     private func helpRedirect(_ text: String, _ intent: String) -> String? {
         guard let markers = helpMarkers,
               let sibling = helpPairs[intent],
@@ -340,6 +353,16 @@ actor NLUEngine: ConversationEngine {
     /// utterance, two answers. The VIK-038 gate bounds the blast radius to closed
     /// enum slots (`memory`), because open and date-time slots never probe at all.
     private let interruptThreshold: Double
+
+    /// Bar for a corroborated turn — `policies.thresholds.agreement`, 0.50 in
+    /// `pack-en`. Nil when the pack omits it, in which case the bar never moves.
+    ///
+    /// Lower than the fire threshold on purpose: two INDEPENDENT recognisers
+    /// landing on the same intent is evidence the fire threshold alone cannot
+    /// express. The reference measures corroborated keyword turns at 99.2%
+    /// correct overall and 100% correct in the 0.50-0.70 band — the band this
+    /// threshold exists to admit.
+    private let agreementThreshold: Double?
 
     /// Consecutive failed turns on one awaited slot before the flow is abandoned.
     ///
@@ -500,87 +523,28 @@ actor NLUEngine: ConversationEngine {
                         breakdown: breakdown)
     }
 
-    // MARK: - Keyword triggers (Stage 0)
-
-    /// Returns the intent name if a declarative keyword trigger fires, nil otherwise.
-    /// Matches are performed on lowercased text (mirrors Python classifier._keyword_match).
-    private func matchKeywordTrigger(_ text: String) -> String? {
-        let t = text.lowercased().trimmingCharacters(in: .whitespaces)
-        for trigger in schema.keywordTriggers {
-            guard let pattern = trigger.regex else { continue }
-            let opts: NSString.CompareOptions = [.regularExpression, .caseInsensitive]
-            if t.range(of: pattern, options: opts) != nil {
-                if let notPattern = trigger.notRegex,
-                   t.range(of: notPattern, options: opts) != nil { continue }
-                return trigger.intent
-            }
-        }
-        return nil
-    }
-
     // MARK: - New intent (priority 3)
 
     private func handleNewIntent(_ text: String) async -> NLUResponse {
         session.decrementContexts()
 
-        // Stage 0: declarative keyword triggers bypass TF-IDF for high-precision patterns.
-        // A keyword match the HELP GUARD would reject is not treated as a match,
-        // and the turn falls through to the classifier.
+        // VIK-055. There is no Stage 0 here any more.
         //
-        // The reference engine needs no such branch: its keyword stage lives
-        // INSIDE the classifier, which scores the model on every utterance
-        // (`classifier.py` builds the distribution before arbitrating), so a
-        // keyword-routed turn still has one for the guard's confidence re-read.
-        // Stage 0 here returns before the model runs, so redirecting on this
-        // path would mean inventing a confidence for an intent the pattern never
-        // matched. Declining the shortcut gets the real number from the real
-        // classifier, which is what the reference reports.
+        // The keyword stage lives INSIDE the classifier now, where the reference
+        // puts it (`classifier.py::classify`), so this path sees ONE verdict that
+        // already reconciles rule and model. What used to be here returned the
+        // rule's intent before the model ran, at an implied confidence of 1.0 —
+        // so "who is the prime minister of create reminder" matched
+        // `\b(set|create|add|make)\b.{0,20}\breminder\b` and opened the reminder
+        // flow, while Android and the reference put the same utterance on the
+        // fallback: their model says `Default Fallback Intent` and the rule
+        // disagrees, which caps the turn at 0.60 against a 0.70 bar.
         //
-        // Measured, not theoretical: all four of "can you show me transcribe
-        // user guide", "how do i set a reminder", "how do i turn down the
-        // loudness on my aid?" and "hearing aids translate guide" match keyword
-        // rules. Without this they bypass the guard entirely and the device acts.
-        if let kwIntent = matchKeywordTrigger(text) {
-            if let wouldRedirectTo = helpRedirect(text, kwIntent) {
-                // LOGGED SEPARATELY, and this is the case most likely to be
-                // tested by hand. Declining the shortcut usually means the
-                // classifier then answers with the help intent by itself, so the
-                // guard's second pass is a no-op and records nothing — the turn
-                // would come out correct with no evidence that anything acted.
-                // "hearing aids transcribe help" is exactly that shape.
-                decisionLog.notice("help_guard stage0_declined keyword=\(kwIntent, privacy: .public) wouldRedirectTo=\(wouldRedirectTo, privacy: .public)")
-            } else if let cfg = schema.intents[kwIntent] {
-                var slots: [String: String] = [:]
-                extractAllSlots(cfg, text, into: &slots)
-                fillOpenTopics(cfg, text, into: &slots)
-
-                // The confirmation gate applies HERE TOO, and its absence was VIK-021 in a
-                // second place. A keyword rule bypasses the CLASSIFIER; it has no business
-                // bypassing the POLICY. `pack-en` proves the difference matters: the only
-                // intent it gates is `Cmd.SendMessage` (`always`) and that intent ships four
-                // keyword rules — so "send a message to…" matched a rule, skipped the gate,
-                // and sent without asking, while the pack said always ask.
-                //
-                // Confidence 1.0, deliberately: a declarative pattern either matched or it
-                // did not, so there is no ambiguity to gate on. `always` fires (that is what
-                // always means), `when_ambiguous` does not (we are certain), `never` does
-                // not. The gate reads as its own name on this path.
-                if let fu = cfg.followup, gate(for: kwIntent).fires(confidence: 1.0) {
-                    session.pendingIntent = cfg.slots.isEmpty ? nil : kwIntent
-                    session.pendingSlots = slots
-                    session.awaitingSlot = nil
-                    session.pendingBreakdown = nil
-                    session.setContext(fu.context, lifespan: fu.lifespan)
-                    return .confirm(intent: kwIntent, action: cfg.action, question: fu.prompt, filled: slots)
-                }
-
-                session.pendingIntent = kwIntent
-                session.pendingSlots = slots
-                session.awaitingSlot = nil
-                session.pendingBreakdown = nil
-                return advanceSlots(kwIntent, cfg)
-            }
-        }
+        // Everything the shortcut used to skip now applies to a keyword-routed
+        // turn as well: the help guard's confidence re-read, the OOV guard, the
+        // fire test, and the confirmation gate. The Stage 0 help-guard DECLINE
+        // that used to sit here went with it — it existed only because Stage 0
+        // returned before the model could supply a distribution to re-read.
 
         let result    = await classifier.classifyAsync(text)
         var intent    = result.label
@@ -656,6 +620,41 @@ actor NLUEngine: ConversationEngine {
         // rescue's confidence. Moot while the pack disables the semantic stage;
         // recorded because it is the kind of ordering that becomes a divergence
         // the day it is enabled.
+
+        // VIK-055. Two INDEPENDENT recognisers landing on the same intent is
+        // evidence the fire threshold alone cannot express, so a corroborated
+        // turn clears the lower `agreement` bar. Mirrors `engine.py`:
+        //
+        //     corroborated = last_arbitration == "corroborated"
+        //     fire_bar = self.agreement_threshold if corroborated else self.threshold
+        //
+        // The reference's own parity fixture carries the case this admits: "turn
+        // it up its too quiet" fulfils at 0.6922, under the 0.70 fire threshold,
+        // because the rule and the model agree. This engine fell back there.
+        //
+        // Only the BAR moves. `conf` stays the model's calibrated probability —
+        // inventing a higher number for a corroborated turn would put a second
+        // scale back in the confidence field, which is the defect this ladder was
+        // rebuilt to remove.
+        let corroborated = result.arbitration == .corroborated
+        let fireBar = corroborated
+            ? (agreementThreshold ?? schema.confidenceThreshold)
+            : schema.confidenceThreshold
+
+        // One line per turn carrying every input to the decision, in the same
+        // field order as Android's `[NLU] decide`, so the two platforms' logs diff
+        // line for line. `breakdown.stage2` is the MODEL's own reading, which the
+        // adapter fills even on a keyword-routed turn; `intent`/`conf` are what is
+        // about to be tested. The transcript is never logged.
+        //
+        // Read into locals first: `Logger`'s interpolation is an @autoclosure, so
+        // touching a property inside it captures `self` and the compiler rejects it
+        // — the same trap the ND-14 log a few lines above documents.
+        let modelIntent = breakdown.stage2?.intent ?? "-"
+        let modelConf = breakdown.stage2?.confidence ?? 0
+        let arbitrationName = result.arbitration?.rawValue ?? "-"
+        decisionLog.notice("decide model=\(modelIntent, privacy: .public)/\(modelConf, privacy: .public) arbitration=\(arbitrationName, privacy: .public) final=\(intent, privacy: .public) conf=\(conf, privacy: .public) bar=\(fireBar, privacy: .public)")
+
         let outOfScope = intent == "OUT_OF_SCOPE" || intent == schema.fallbackIntent
         if let reject = oovReject, let bypass = oovBypass, !outOfScope, conf < bypass {
             let ratio = await classifier.oovRatio(text)
@@ -665,7 +664,7 @@ actor NLUEngine: ConversationEngine {
             }
         }
 
-        if !rescued && (outOfScope || conf < schema.confidenceThreshold) {
+        if !rescued && (outOfScope || conf < fireBar) {
             return .fallback(intent: schema.fallbackIntent,
                              confidence: conf, breakdown: breakdown)
         }

@@ -162,8 +162,9 @@ final class OpenSlotNameDerivationTests: XCTestCase {
         schema.intents[intent]?.slots.first { $0.name == slot }?.prompt
     }
 
-    /// Hits the Stage-0 keyword rule and carries no name of its own, so the
-    /// engine's first move is to ask for one.
+    /// Claimed by a keyword rule, and carries no name of its own, so the engine's
+    /// first move is to ask for one. (Stage 0 is gone since VIK-055; these tests
+    /// inject a stub classifier, so the keyword stage never runs here either way.)
     private let openReminder = "set a reminder"
     /// No keyword rule matches; the fixed classifier routes it.
     private let openMemory = "change memory"
