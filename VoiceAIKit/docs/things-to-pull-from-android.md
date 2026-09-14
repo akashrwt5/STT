@@ -296,7 +296,7 @@ instead of silently half-applying.
 
 ---
 
-## 2. Android should pull from iOS
+## 2. Android should pull from iOS — and two iOS gaps vs the Python reference
 
 Raise these with the Android team. They are listed here so this document is the
 single cross-platform delta rather than a one-directional complaint.
@@ -307,6 +307,8 @@ single cross-platform delta rather than a one-directional complaint.
 | **VIK-066** | **A day without a clock time is lost.** `SysDateTimeParser.parse` returns `null` when no time-of-day is found — by design ("tomorrow alone would become midnight"). But nothing parks the day, and `OfflineNluServiceImpl` holds no cross-turn state, so `"remind me Friday"` → *"When should I remind you?"* → `"6am"` resolves against **today**, and Friday is gone. iOS parks the day at local midnight in `session.partialDateTime` and anchors the later bare time to it (`NLUEngine.resolveDateTime`). | `SysDateTimeParser.kt:33`, `NLUEngine.swift:~810` |
 | — | **No dialog state machine in the kit.** Android's kit exposes `classifyIntent` / `resolveFollowUpSlot` / `resolveConfirmation` and leaves session contexts, context lifespans, the `max_slot_attempts` budget and topic-switch detection to the host. iOS owns all of it, including the VIK-038 insight that a topic-switch probe must be gated on the awaited **entity kind** — open and date-time slots never probe, because a slot answer is out-of-distribution input for a command classifier and its confidence is not a thresholdable quantity. If the Android host reimplements this, it should reimplement *that* rule too. | `IOfflineNluService.kt` vs `NLUEngine.handleSlotFilling` |
 | — | **Binary endpointing window.** `ByteVad.useSlotAnswerWindow(Boolean)` — slot answer or not. iOS assesses three ways (`.complete` / `.freeform` / `.incomplete`) using the awaited slot's entity kind plus a trailing-function-word check, so "tomorrow… …5 AM" and "drink… …water" do not split into two turns. | `ByteVad.kt:114` vs `NLUEngine.assessSlotAnswer` |
+| **VIK-067** | **(iOS gap vs the Python reference, not vs Android)** No "does this answer the awaited slot?" guard before the topic-switch probe. `"Mute"` is a `memory` entity value *and* a tier-1 keyword rule, so answering the memory prompt with "mute" mutes the device. The reference refuses to interrupt when the utterance is a valid value for the awaited closed slot. Android has no slot state machine at all, so it cannot have this bug — or this guard. | `engine.py:878-946` |
+| **VIK-068** | **(same)** No cancellation cue mid-slot-flow — no "cancel" / "never mind" / "stop". The only exit is exhausting `max_slot_attempts`. The reference has `cancel_cues` + `_is_cancel`, with a purity guard so "no, tomorrow at 5" reads as a correction. | `engine.py:242-244, 862+` |
 | — | **No confidence margin and no vacuous-prediction check.** iOS reports `margin` (gap to runner-up) and `isVacuous` (no feature matched, so every logit is its intercept and the softmax is meaningless while still able to clear 0.70). Android's `IntentPrediction` carries the full distribution but neither derived signal. | `PackIntentClassifier.Prediction` vs `IntentPrediction.kt` |
 
 ---

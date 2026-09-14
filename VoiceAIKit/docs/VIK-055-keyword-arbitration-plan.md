@@ -259,6 +259,48 @@ agreement \(pack.policies.thresholds.agreement.map(String.init) ?? "off"),
 keyword stage \(pack.stageEnabled(.keyword) ? "on" : "off")
 ```
 
+### 6.6 The SECOND `classifyAsync` call site — the VIK-038 probe
+
+`classifyAsync` is called **twice** in `NLUEngine`, not once:
+
+| Line | Caller |
+|---|---|
+| 585 | `handleNewIntent` — the turn under discussion |
+| **405** | `handleSlotFilling` — the VIK-038 topic-switch probe |
+
+Moving arbitration into the adapter therefore changes the **probe** too. This was
+missing from the first draft of this plan and must be stated, because it is a
+behaviour change on a path nobody is thinking about while reading §6.3.
+
+**It is the correct direction, and it closes a second gap.** The reference's probe
+calls the ARBITRATED classifier, not the raw model — `engine.py:995` is
+`new_intent, new_conf = self.classifier.classify(text)`, the same method that
+arbitrates. Today iOS's probe sees a pure model verdict, which is a divergence in
+its own right. After this change it sees what the reference sees.
+
+Case by case, at `interrupt` = 0.68:
+
+| Probe situation | Today | After | Effect |
+|---|---|---|---|
+| no keyword rule matches | model verdict | model verdict | **identical** |
+| rule and model agree | model verdict | keyword label (= model label), model confidence | **identical** |
+| rule and model disagree | model label at model confidence — may interrupt | keyword label at 0.60 | **0.60 < 0.68, so no interrupt** |
+
+So the only movement is that a CONTESTED probe stops interrupting. Abandoning a
+flow the user is halfway through is destructive, and a contested signal measures
+~45% correct on the honest holdout — requiring corroboration before destroying
+in-progress state is the right default, and it is what the reference already does.
+
+Blast radius is narrow by construction: the VIK-038 gate means only a CLOSED
+gazetteer slot probes at all, which in `pack-en` is the `memory` flow alone.
+
+**What this does NOT fix, and must not be claimed to:** `"mute"` is both a value of
+the `memory` entity and a tier-1 keyword rule (`^mute$` → `Cmd.VolumeMute`). In the
+memory flow, answering "mute" is CORROBORATED — rule and model both say
+`Cmd.VolumeMute` — so it still clears the bar and still interrupts, muting the
+device instead of selecting the Mute memory. That is VIK-067 (§12), a separate
+missing guard, and arbitration neither causes nor cures it.
+
 ### 6.5 `NLUSchema.keywordTriggers` — deprecate, do not delete
 
 `PackEngineFactory.schema(from:)` line 247 keeps building it. Nothing reads it after
@@ -295,6 +337,10 @@ Each of these is a property to verify, not an assertion of confidence:
 7. **A pack without `agreement`** (older vendored pack) falls back to the flat bar
    rather than guessing — same discipline as `oovReject`/`oovBypass` being read as a
    pair or not at all.
+8. **The VIK-038 probe moves toward the reference, not away from it** (§6.6), and
+   only ever becomes MORE conservative about abandoning an in-progress flow. Every
+   test that exercises the probe (`OpenSlotNameDerivationTests`) injects a
+   `ScriptedClassifier`, so those tests bypass arbitration and are unaffected.
 
 ---
 
@@ -312,6 +358,7 @@ edit in this PR.
 | `HelpMarkerGuardTests.testAKeywordRoutedHelpAskIsNotSmuggledPastTheGuard` | asserts Stage 0 does not smuggle a help ask past the guard | Stage 0 is gone; stub returns the help label at ≥0.70 → still `.fulfill(help)` | **Keep, but re-point.** The test would pass vacuously. Move the premise to the new seam: drive it through a real `PackClassifierAdapter` (§9.3) so it proves the *arbitration* path honours the guard. |
 | `HelpMarkerGuardTests` — the other 6 tests | classifier path | unchanged | **Keep, unchanged.** |
 | `OpenSlotNameDerivationTests` (`openReminder = "set a reminder"`) | Stage 0 | `FixedClassifier` routes to `reminder` → same `.prompt` for `name` | **Keep.** Update the comment at line 165 ("Hits the Stage-0 keyword rule"). |
+| `OpenSlotNameDerivationTests` — the three VIK-038 interrupt tests | `ScriptedClassifier` stub drives the probe | stub bypasses arbitration — identical | **Keep, unchanged.** Note in passing that their switch utterance `"increase volume"` DOES match a keyword rule, so with a real adapter it would be corroborated; the stub is why they are insulated. |
 | `TopicDerivationParityTests`, `PackDateTimeParityTests`, `PackSlotResolverTests`, `PackEntityAndClassifierTests` | no keyword involvement | unchanged | **Keep, unchanged.** |
 | `PackLoadingTests` (asserts `pack.stageEnabled(.keyword)`) | premise only | now actually consumed | **Keep.** |
 | `VoiceIntentSessionSmokeTests`, `VoiceIntentClientTests` | facade | `NLUResponse` unchanged | **Keep, unchanged.** |
@@ -338,6 +385,9 @@ otherwise the arbitration code is never executed by the suite.
   the fixture records at 0.6922 → FULFILL, because the bar drops to `agreement` 0.50.
   This is the case iOS gets wrong today in the *opposite* direction.
 - `testNoKeywordRuleLeavesArbitrationNil` — `"remind me to go to the airport"`.
+- `testContestedProbeDoesNotAbandonAnInProgressFlow` — §6.6. Drive the `memory`
+  flow to its prompt with a real `PackClassifierAdapter`, answer with an utterance
+  whose keyword rule and model disagree, assert the result is NOT `.interrupted`.
 - `testKeywordStageDisabledSkipsArbitration` — pack copy with
   `stages.keyword.enabled = false`; asserts pure-model routing. Proves the kill switch.
 
@@ -448,6 +498,10 @@ ticket, measurement and PR. **None of them is the cause of the reported defect.*
 | **VIK-064** | **Whole-pack rejection vs per-intent quarantine.** iOS validation *coverage* is equal or better (it checks slot prompts, slot entities, actions against the capability-owned map, confirmation branches, and label-set/intent-set equality). The difference is granularity: one dangling key throws and rejects the entire pack, where Android quarantines that intent and keeps the other 56. | `BundleDataLoader.swift:296-340, 371-380` vs `NluPackValidator.kt`, `NluPackValidation` | Correct for the OTA path — iOS can throw because staging + smoke test + `.rollback_target` keep the previous pack. The seed-pack exposure is **already largely covered**: `PackLoadingTests.testVendoredPackLoads` / `testEveryReferencedKeyResolves` load it through the real `BundleDataLoader` in CI. Lowest priority of the set. |
 | **VIK-065** | **Classifier self-warmup.** Android runs `runCatching { classifyInternal(WARMUP_TEXT) }` at the end of `OnnxIntentClassifier.init`. iOS's `warmUp()` is correct but host-invoked; a host that forgets makes the user pay the ~15 ms CoreML load on their first utterance. | `OnnxIntentClassifier.kt:68` vs `PackIntentClassifier.warmUp()` | Arguably iOS is right to leave it to the host — it has a real memory story (`unload()`). Decide deliberately: warm in the factory, or assert the host step in the smoke tests. |
 | **VIK-066** | **(Android-side)** A day with no clock time is lost. `SysDateTimeParser.parse` returns `null` without a time-of-day and nothing parks the day, so `"remind me Friday"` → `"6am"` resolves against today. iOS parks the day at local midnight and anchors the later bare time to it. | `SysDateTimeParser.kt:33` vs `NLUEngine.resolveDateTime` | Android ticket, like VIK-059. No iOS change. |
+| **VIK-067** | **No "does this answer the awaited slot?" guard.** The reference computes `answers_prompt = self._answers_awaited_slot(session, cfg, text)` and refuses to interrupt when true: *"An answer to the question we just asked is NOT a topic switch, however confidently it classifies as something else."* iOS has no equivalent. Live consequence on this pack: `"Mute"` is a `memory` value **and** a tier-1 keyword rule (`^mute$`), so answering the memory prompt with "mute" mutes the device instead of selecting the Mute memory. `"Quiet"`, `"Telephone"`, `"Tinnitus"`, `"Mask"` are the same class of name. | `engine.py:878-946, 1004`; `content.json` memory values; `keywords/en.json` `^mute$` | **Not fixed by this plan** — the turn is corroborated, so it clears the bar either way (§6.6). Needs the closed-entity lookup the reference does, gated to closed enums only. Strong candidate for the PR straight after VIK-055, since it lands in the same function. |
+| **VIK-068** | **No cancellation cue mid-slot-flow.** The reference carries `cancel_cues` ("cancel", "stop", "never mind", "forget it", "quit", "abort") and `_is_cancel`, with a purity guard so `"no, tomorrow at 5"` reads as a CORRECTION rather than a cancel. iOS's only exit from a slot flow is exhausting `max_slot_attempts` — three turns of being re-asked. | `engine.py:242-244, 862+`; no `cancel` path in `NLUEngine.handleSlotFilling` | Independent of this plan. The reference's own VIK-038 note leans on it — *"A user is not trapped by this: `_is_cancel` below still abandons the flow on an explicit cue"* — which is an argument iOS cannot currently make. |
+| **VIK-069** | **No interrupt out of an active confirmation.** `engine.py:770` runs the same topic-switch probe inside `_handle_confirmation`; iOS's `handleConfirmation` only evaluates yes/no and re-arms the context on anything else. | `engine.py:765-773` vs `NLUEngine.handleConfirmation` | Independent. Lower impact than VIK-068 — `pack-en` gates exactly one intent (`Cmd.SendMessage`, no slots). |
+| — | **`weak_keyword` is NOT a gap.** The reference suppresses an interrupt when `last_keyword_tier == "contains"`. That tier exists only for the legacy `contains`/`exact` keyword-rule shapes; every rule in a v3 pack is a regex, so on the pack path the condition is always false. Recorded so nobody ports a no-op and calls it parity. | `classifier.py::_keyword_match` rule kinds vs `keywords/en.json` | No action. |
 
 ---
 
