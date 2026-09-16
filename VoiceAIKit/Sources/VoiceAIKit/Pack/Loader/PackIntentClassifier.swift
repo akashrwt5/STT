@@ -154,6 +154,10 @@ actor PackIntentClassifier {
     /// See `PackTFIDFVectorizer.oovRatio(_:)`.
     func oovRatio(_ text: String) -> Double { vectorizer.oovRatio(text) }
 
+    /// Non-zero feature count for this utterance.
+    /// See `PackTFIDFVectorizer.featureCount(_:)` — observability only.
+    func featureCount(_ text: String) -> Int { vectorizer.featureCount(text) }
+
     func classify(_ text: String) -> Prediction {
         let vector = vectorizer.vectorize(text)
 

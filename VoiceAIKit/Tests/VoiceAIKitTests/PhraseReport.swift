@@ -65,7 +65,7 @@ enum PhraseScope: Equatable {
     //
     //  .commands  |  .help  |  .other  |  .all  |  .intent("Cmd.VolumeIncrease")
     //
-    static let selected: PhraseScope = .intent("Cmd.BatteryLevel")
+    static let selected: PhraseScope = .other
     //
     //  ▲▲▲                            ▲▲▲
     // ═══════════════════════════════════════════════════════════════════════
@@ -134,6 +134,17 @@ private struct Outcome {
     let finalIntent: String
     let kind: String
     let finalConfidence: Double?
+    /// Non-zero features the head scored on. A one-feature vector saturates the
+    /// softmax, so a high confidence next to `features 1` means the opposite of
+    /// what it looks like.
+    let features: Int
+    /// Share of tokens the featurizer cannot represent. Read together with
+    /// `features`: high `oov` + low `features` is the degenerate case.
+    let oov: Double
+    /// Which keyword rule claimed the turn, "-" when none did. Without it a
+    /// `ruleOnly` row shows the model's label and the final label and hides the
+    /// rule's — the one that actually decided.
+    let ruleIntent: String
 
     var matchesExpected: Bool { finalIntent == probe.expected }
 }
@@ -202,7 +213,7 @@ final class PhraseReport: XCTestCase {
             """)
         }
 
-        var tsv = "label\tphrase\toccurrences\tmodel\tmodel_confidence\tarbitration\tfinal\tkind\tfinal_confidence\tmatches\n"
+        var tsv = "label\tphrase\toccurrences\tmodel\tmodel_confidence\tarbitration\trule_intent\tfeatures\toov\tfinal\tkind\tfinal_confidence\tmatches\n"
         var grandMatched = 0, grandTotal = 0
         var grandKinds: [String: Int] = [:]
 
@@ -233,8 +244,14 @@ final class PhraseReport: XCTestCase {
                 await engine.reset()
 
                 let verdict = await classifier.classifyAsync(probe.text)
+                // Observability, read from the same adapter and therefore the same
+                // vocabulary the verdict came from. Neither call touches the engine.
+                let features = await classifier.featureCount(probe.text)
+                let oov = await classifier.oovRatio(probe.text)
+                let ruleIntent = await classifier.firstKeywordIntent(probe.text)
                 let response = await engine.handle(probe.text)
-                let outcome = Self.outcome(probe: probe, verdict: verdict, response: response)
+                let outcome = Self.outcome(probe: probe, verdict: verdict, response: response,
+                                           features: features, oov: oov, ruleIntent: ruleIntent)
                 outcomes.append(outcome)
                 print("    " + Self.line(for: outcome))
             }
@@ -244,6 +261,7 @@ final class PhraseReport: XCTestCase {
             for o in outcomes {
                 tsv += "\(label)\t\(o.probe.text)\t\(o.probe.occurrences)\t\(o.modelIntent)\t"
                 tsv += String(format: "%.4f", o.modelConfidence) + "\t\(o.arbitration)\t"
+                tsv += "\(o.ruleIntent)\t\(o.features)\t" + String(format: "%.2f", o.oov) + "\t"
                 tsv += "\(o.finalIntent)\t\(o.kind)\t"
                 tsv += (o.finalConfidence.map { String(format: "%.4f", $0) } ?? "-")
                 tsv += "\t\(o.matchesExpected ? "yes" : "no")\n"
@@ -309,7 +327,10 @@ final class PhraseReport: XCTestCase {
 
     private static func outcome(probe: Probe,
                                 verdict: ClassificationResult,
-                                response: NLUResponse) -> Outcome {
+                                response: NLUResponse,
+                                features: Int,
+                                oov: Double,
+                                ruleIntent: String?) -> Outcome {
         let kind: String
         let finalIntent: String
         var finalConfidence: Double?
@@ -329,7 +350,10 @@ final class PhraseReport: XCTestCase {
             arbitration: verdict.arbitration?.rawValue ?? "-",
             finalIntent: finalIntent,
             kind: kind,
-            finalConfidence: finalConfidence)
+            finalConfidence: finalConfidence,
+            features: features,
+            oov: oov,
+            ruleIntent: ruleIntent ?? "-")
     }
 
     private static func printSectionHeader(label: String, probes: [Probe]) {
@@ -345,7 +369,9 @@ final class PhraseReport: XCTestCase {
     private static func line(for o: Outcome) -> String {
         let model = "\(o.modelIntent) " + String(format: "%.3f", o.modelConfidence)
         let final = o.finalConfidence.map { " " + String(format: "%.3f", $0) } ?? ""
-        return "\(o.matchesExpected ? "✓" : "✗")  model \(model) · \(o.arbitration)"
+        let shape = "f\(o.features)/o" + String(format: "%.2f", o.oov)
+        let rule = o.ruleIntent == "-" ? "" : " · rule \(o.ruleIntent)"
+        return "\(o.matchesExpected ? "✓" : "✗")  model \(model) · \(o.arbitration)\(rule) · \(shape)"
              + "  →  \(o.finalIntent)\(final) · \(o.kind)"
     }
 

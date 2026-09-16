@@ -163,6 +163,20 @@ struct PackTFIDFVectorizer: Sendable {
         return dense
     }
 
+    /// How many non-zero features this utterance produces — the width of the
+    /// evidence the head actually scores on.
+    ///
+    /// Observability, not policy: nothing in the decision path reads this. It
+    /// exists because a one-feature vector and a ten-feature vector are
+    /// indistinguishable downstream — both arrive as a confidence — and a
+    /// one-feature vector saturates the softmax, so degeneracy reads as
+    /// certainty. Every audit of that behaviour so far had to reconstruct this
+    /// number outside the app.
+    ///
+    /// `vectorize(_:)` already computes it and discards it; this is the same
+    /// count, recomputed rather than cached, because no hot path calls it.
+    func featureCount(_ text: String) -> Int { vectorize(text).count }
+
     /// True when nothing in the utterance is in the vocabulary.
     ///
     /// Worth checking explicitly: with an all-zero vector every logit collapses

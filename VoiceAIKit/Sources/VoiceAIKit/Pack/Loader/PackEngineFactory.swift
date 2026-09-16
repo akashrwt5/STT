@@ -405,13 +405,23 @@ actor PackClassifierAdapter: IntentClassifying {
     ///
     /// Lowercased and trimmed before matching, exactly as the Stage 0 this
     /// replaces did, and the patterns are case-insensitive as well.
-    private func firstKeywordIntent(_ text: String) -> String? {
+    /// Not `private`: when `arbitration` is `.ruleOnly` the rule's own intent is
+    /// the one fact a report needs and cannot otherwise obtain — the TSV shows
+    /// the model's label and the final label, and the rule's label sits between
+    /// them, invisible.
+    func firstKeywordIntent(_ text: String) -> String? {
         let t = text.lowercased().trimmingCharacters(in: .whitespaces)
         return keywordRules.first { $0.matches(t) }?.intent
     }
 
     func oovRatio(_ text: String) async -> Double {
         await classifier.oovRatio(text)
+    }
+
+    /// Non-zero feature count for this utterance — observability only, nothing
+    /// in the decision path reads it. See `PackTFIDFVectorizer.featureCount(_:)`.
+    func featureCount(_ text: String) async -> Int {
+        await classifier.featureCount(text)
     }
 
     func calibratedConfidence(for intent: String) async -> Double? {
