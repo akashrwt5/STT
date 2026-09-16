@@ -118,6 +118,11 @@ enum PackEngineFactory {
             // dangling intents and then never applied, so a device STARTED
             // transcription when asked how to use it while the reference engine
             // showed help.
+            // A bare entity value is not a request: "outdoors" names a memory,
+            // and a device that switches programs on a stray word heard by an
+            // always-on mic is the worst failure this pack can produce. Empty
+            // for a pack predating the guard, which leaves behaviour unchanged.
+            bareValueGuards: pack.guards.bareValue,
             helpMarkerPattern: pack.guards.helpMarker?.markers,
             helpPairs: pack.guards.helpMarker?.pairs ?? [:])
 
@@ -250,6 +255,7 @@ enum PackEngineFactory {
             intents: intents,
             affirmative: pack.lexicon.affirmative,
             negative: pack.lexicon.negative,
+            cancelCues: pack.lexicon.cancelCues,
             // DEPRECATED (VIK-055). The keyword stage now lives in
             // `PackClassifierAdapter`, which reads `PackKeywords.Rule` directly.
             // Nothing consumes this any more, and it must not be revived: the

@@ -303,20 +303,39 @@ struct PackCascade: Decodable, Sendable {
 struct PackGuards: Decodable, Sendable {
     let helpMarker: HelpMarker?
     let polarity: [PolarityGuard]
+    let bareValue: [BareValueGuard]
 
     enum CodingKeys: String, CodingKey {
         case helpMarker = "help_marker"
         case polarity
+        case bareValue = "bare_value"
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         helpMarker = try c.decodeIfPresent(HelpMarker.self, forKey: .helpMarker)
         polarity = try c.decodeIfPresent([PolarityGuard].self, forKey: .polarity) ?? []
+        bareValue = try c.decodeIfPresent([BareValueGuard].self, forKey: .bareValue) ?? []
     }
 
     static let empty = PackGuards()
-    private init() { helpMarker = nil; polarity = [] }
+    private init() { helpMarker = nil; polarity = []; bareValue = [] }
+
+    /// Suppresses an intent when the WHOLE utterance is nothing but a value of a
+    /// closed entity. A memory is named "Outdoors"; someone who says only
+    /// "outdoors" has not asked for anything, and switching programs on a stray
+    /// word an always-on mic caught is the worst action this pack can cause.
+    ///
+    /// The entity is NAMED, never copied: the guard reads the pack's own value
+    /// list, so a memory added later is covered with no change here.
+    struct BareValueGuard: Decodable, Sendable {
+        /// Intent to suppress.
+        let intent: String
+        /// Closed entity whose values arm the guard.
+        let entity: String
+        /// Intent to substitute; nil suppresses to the out-of-scope fallback.
+        let redirect: String?
+    }
 
     /// Redirects a command to its help counterpart when the utterance is a
     /// question about it — "how do i turn up the volume" must show help, not

@@ -123,6 +123,21 @@ protocol SlotResolving: Sendable {
 
     /// Remove date/time fragments so what remains can serve as a free-text topic.
     func strippingDateTime(_ text: String) -> String
+
+    /// True when `text` is NOTHING BUT a value of `entity`.
+    ///
+    /// Distinct from `extract`, which answers "does this sentence mention one?".
+    /// The bare-value guard needs the stricter question, because "switch to
+    /// outdoors" mentions a memory and IS a request, while "outdoors" mentions
+    /// one and is not.
+    func isWholeValue(_ entity: String, _ text: String) -> Bool
+}
+
+extension SlotResolving {
+    /// Default false: a resolver that cannot answer must not arm a guard that
+    /// suppresses intents. Keeps existing conformers — test doubles included —
+    /// compiling unchanged.
+    func isWholeValue(_ entity: String, _ text: String) -> Bool { false }
 }
 
 // MARK: - Pack-driven implementation
@@ -231,6 +246,17 @@ struct PackSlotResolver: SlotResolving {
 
     func extract(_ entity: String, from text: String, isDirectAnswer: Bool) -> String? {
         entities.extract(entity, from: text, allowFuzzy: isDirectAnswer)?.value
+    }
+
+    func isWholeValue(_ entity: String, _ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !t.isEmpty,
+              // No fuzzy: an approximate hit is a guess, and a guess must not
+              // decide that a turn carries no request.
+              let match = entities.extract(entity, from: t, allowFuzzy: false),
+              !match.isFuzzy
+        else { return false }
+        return match.span.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == t
     }
 
     func dateTime(in text: String, now: Date) -> SlotDateTime? {

@@ -55,6 +55,14 @@ actor NLUEngine: ConversationEngine {
     private let session: NLUSession
     private let affirmative: Set<String>
     private let negative: Set<String>
+    /// VIK-068. Cues that ABANDON an open slot-filling flow, from the pack.
+    ///
+    /// Empty on a pack that predates the key. Cancellation does not switch off
+    /// when it is: `isCancel`'s second branch catches a short bare refusal, and
+    /// `cancel` / `stop` / `never mind` / `nevermind` / `forget it` are all in
+    /// `negative` at <= 2 tokens. Only `quit`, `abort` and `forget about it`
+    /// need this list. Measured on pack-en-v1.0.54, not assumed.
+    private let cancelCues: [String]
     private var uncertain: [String]
     private var noIdioms: [String]
     private var carrierPatterns: [String]
@@ -130,6 +138,9 @@ actor NLUEngine: ConversationEngine {
         /// laziness: an absent threshold means a wrong number is about to be
         /// guessed, while an absent guard means exactly what empty says — this
         /// pack declares no help redirect, so nothing is redirected.
+        /// `runtime/guards.json → bare_value`. Empty when the pack predates the
+        /// guard, which leaves the engine's behaviour exactly as it was.
+        bareValueGuards: [PackGuards.BareValueGuard] = [],
         helpMarkerPattern: String? = nil,
         helpPairs: [String: String] = [:],
         sessionID: String = "default"
@@ -140,6 +151,7 @@ actor NLUEngine: ConversationEngine {
         self.session = NLUSession(sessionID: sessionID)
         self.affirmative = Set(schema.affirmative)
         self.negative = Set(schema.negative)
+        self.cancelCues = schema.cancelCues
         self.uncertain = uncertain
         self.noIdioms = noIdioms
         self.carrierPatterns = carriers
@@ -153,6 +165,7 @@ actor NLUEngine: ConversationEngine {
         // Compiled once, here. A pattern this platform cannot compile disables
         // the guard rather than failing the load: the pack is otherwise fine,
         // and NSRegularExpression's dialect is not identical to Python's `re`.
+        self.bareValueGuards = bareValueGuards
         if let pattern = helpMarkerPattern, !pattern.isEmpty {
             self.helpMarkers = try? NSRegularExpression(pattern: pattern,
                                                         options: [.caseInsensitive])
@@ -304,6 +317,33 @@ actor NLUEngine: ConversationEngine {
     /// nothing had been blocked, so one decline printed two lines and the first
     /// was untrue. Stage 0 is gone and the question it asked with it; the logging
     /// split is kept because the caller, not this function, knows what it did.
+    /// A bare entity value is not a request.
+    ///
+    /// "outdoors" NAMES a memory, so the classifier reads it as a request to
+    /// switch to that memory — across the corpus it is the only label the token
+    /// carries. But a bare noun is not an instruction, and acting on one turns
+    /// any stray word an always-on mic caught into a device state change.
+    ///
+    /// Narrow on three counts, and each one matters:
+    ///   * WHOLE-STRING only, so "switch to outdoors" and "the outdoors
+    ///     program" are untouched — those ask for something.
+    ///   * Called only on a NEW intent, so a bare value answering "which
+    ///     memory?" still fills the slot. That is the one place a bare value is
+    ///     unambiguous, and it keeps working.
+    ///   * One intent and one entity per entry, named in the pack, so the guard
+    ///     cannot drift from what it protects.
+    ///
+    /// PURE, and nil rather than the input when nothing applies — same contract
+    /// as `helpRedirect`.
+    private func bareValueRedirect(_ text: String, _ intent: String) -> String? {
+        for guardSpec in bareValueGuards where guardSpec.intent == intent {
+            guard entities.isWholeValue(guardSpec.entity, text) else { continue }
+            let redirect = guardSpec.redirect ?? schema.fallbackIntent
+            return schema.intents[redirect] != nil ? redirect : nil
+        }
+        return nil
+    }
+
     private func helpRedirect(_ text: String, _ intent: String) -> String? {
         guard let markers = helpMarkers,
               let sibling = helpPairs[intent],
@@ -315,6 +355,11 @@ actor NLUEngine: ConversationEngine {
         }
         return sibling
     }
+
+    /// `runtime/guards.json → bare_value`. Each entry names an intent and a
+    /// CLOSED ENTITY; the values themselves stay in the entity, so a value added
+    /// to the pack is covered without touching the guard.
+    private let bareValueGuards: [PackGuards.BareValueGuard]
 
     /// `runtime/guards.json → help_marker.markers`, compiled. Nil when the pack
     /// ships no guard, or its pattern does not compile here.
@@ -439,6 +484,30 @@ actor NLUEngine: ConversationEngine {
             }
         }
 
+        // VIK-068. A pure cancellation ABANDONS the flow instead of being mined
+        // for a slot value. Without it an open free-text slot stores "no" as the
+        // reminder's subject, and a typed slot drags the user through
+        // `maxSlotAttempts` dead re-prompts — which, with no other exit, is the
+        // only way out of a flow today.
+        //
+        // Placed AFTER the topic-switch probe and BEFORE extraction, matching
+        // `engine.py::_handle_slot_filling`.
+        //
+        // PARITY GAP, stated rather than hidden: the reference also requires
+        // `not answers_prompt`, so a refusal word that is itself a valid value of
+        // the awaited enum stays an answer. That guard is VIK-067 and this engine
+        // does not have it yet. On pack-en-v1.0.54 the conjunct is inert — no
+        // cancel cue and no `negative` word is one of the 38 `memory` values — so
+        // omitting it changes nothing here. It must be added with VIK-067, not
+        // rediscovered then.
+        if isCancel(text) {
+            let abandoned = session.pendingIntent
+            session.resetSlotFilling()
+            decisionLog.notice("slot_cancelled intent=\(abandoned ?? "-", privacy: .public)")
+            return .fulfill(intent: "sys.slot.cancelled", action: nil,
+                            parameters: [:], message: "", confidence: 1.0)
+        }
+
         // The utterance answers the slot we last prompted for.
         let awaiting = session.awaitingSlot
         if let awaiting,
@@ -561,6 +630,7 @@ actor NLUEngine: ConversationEngine {
         // turns to the fallback. `calibratedConfidence` answers nil when the
         // classifier keeps no distribution — every test stub — and the turn then
         // keeps the confidence it had, as the reference does.
+
         if let redirected = helpRedirect(text, intent) {
             let blocked = intent
             if let reguarded = await classifier.calibratedConfidence(for: redirected) {
@@ -577,6 +647,25 @@ actor NLUEngine: ConversationEngine {
             // is a capture of `self` and the compiler rejects it.
             let belowBar = conf < schema.confidenceThreshold
             decisionLog.notice("help_guard blocked=\(blocked, privacy: .public) redirected=\(redirected, privacy: .public) confidence=\(conf, privacy: .public) belowFireThreshold=\(belowBar, privacy: .public)")
+        }
+
+        // A bare entity value carries no request at all.
+        //
+        // Runs AFTER the help guard, matching the reference's chain
+        // (`_apply_bare_value_guard(_apply_help_guard(_apply_polarity_guards(...)))`).
+        // The order is invisible on real input — a bare noun carries no help
+        // marker, so the two guards never contend — but the conformance fixtures
+        // are generated from the reference, and a chain that differs is a
+        // divergence waiting for the one utterance that reaches both.
+        if let suppressed = bareValueRedirect(text, intent) {
+            let blocked = intent
+            intent = suppressed
+            // Same re-read the help guard does above: the number must describe
+            // the intent actually being returned, not the one suppressed.
+            if let reguarded = await classifier.calibratedConfidence(for: suppressed) {
+                conf = reguarded
+            }
+            decisionLog.notice("bare_value_guard blocked=\(blocked, privacy: .public) suppressed_to=\(suppressed, privacy: .public)")
         }
 
         // Semantic rescue already passed its own 0.55 gate inside classifyAsync.
@@ -939,6 +1028,23 @@ actor NLUEngine: ConversationEngine {
     }
 
     // MARK: - Misc
+
+    /// True when `text` is a PURE cancellation of the open slot-filling flow.
+    ///
+    /// Mirrors `engine.py::_is_cancel` condition for condition. Two forms count:
+    /// an explicit cue ("cancel", "never mind"), or a bare refusal ("no") with
+    /// nothing else in the turn.
+    ///
+    /// THE PURITY GUARD IS THE POINT. "no, tomorrow at 5" is a CORRECTION that
+    /// carries a real value, not a cancellation, so a refusal only cancels when
+    /// the turn is essentially just the refusal (<= 2 tokens). Explicit cues
+    /// cancel at any length, because "cancel the reminder" has no second reading
+    /// while a flow is open.
+    private func isCancel(_ text: String) -> Bool {
+        let t = text.lowercased().trimmingCharacters(in: .whitespaces)
+        if cancelCues.contains(where: { wholeWord($0, in: t) }) { return true }
+        return yesNo(t) == false && t.split(separator: " ").count <= 2
+    }
 
     private func wholeWord(_ word: String, in text: String) -> Bool {
         let escaped = NSRegularExpression.escapedPattern(for: word)

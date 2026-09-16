@@ -144,6 +144,10 @@ struct NLUSchema: Sendable {
     let intents: [String: IntentDef]
     let affirmative: [String]
     let negative: [String]
+    /// VIK-068. Cues that abandon an open slot-filling flow. Content-owned:
+    /// the reference carried them as a code default, which is the VIK-050
+    /// shape — a decision-changing list the pack does not own.
+    let cancelCues: [String]
     /// Triggers evaluated before the classifier.
     let keywordTriggers: [KeywordTrigger]
 
@@ -153,6 +157,7 @@ struct NLUSchema: Sendable {
                 intents: [String: IntentDef],
                 affirmative: [String],
                 negative: [String],
+                cancelCues: [String] = [],
                 keywordTriggers: [KeywordTrigger]) {
         self.version = version
         self.confidenceThreshold = confidenceThreshold
@@ -160,6 +165,7 @@ struct NLUSchema: Sendable {
         self.intents = intents
         self.affirmative = affirmative
         self.negative = negative
+        self.cancelCues = cancelCues
         self.keywordTriggers = keywordTriggers
     }
 }

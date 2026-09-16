@@ -27,6 +27,15 @@ struct PackLexicon: Decodable, Sendable {
     /// ("remind me to " → ""). Portable-subset patterns only.
     let carriers: [String]
     let leadingConnectors: [String]
+    /// VIK-068. Words that ABANDON an open slot-filling flow.
+    ///
+    /// Empty on a pack built before the key existed. That does NOT disable
+    /// cancellation: `isCancel` also treats a short bare refusal as a cancel, and
+    /// five of the eight English cues (`cancel`, `stop`, `never mind`,
+    /// `nevermind`, `forget it`) are already in `negative` at <= 2 tokens, so
+    /// they keep working through that branch. What an empty list loses is
+    /// `quit`, `abort` and `forget about it` — verified against this pack.
+    let cancelCues: [String]
     /// "don't" → "do not". 50 entries for English. The flattened root shim drops
     /// this table entirely.
     let contractions: [String: String]
@@ -39,6 +48,7 @@ struct PackLexicon: Decodable, Sendable {
         case lang, affirmative, negative, carriers, contractions
         case negationCues = "negation_cues"
         case leadingConnectors = "leading_connectors"
+        case cancelCues = "cancel_cues"
         case datetime = "datetime_grammar"
         case fuzzyStopwords
         case trailingFunctionWords
@@ -52,6 +62,7 @@ struct PackLexicon: Decodable, Sendable {
         negationCues = try c.decode([String].self, forKey: .negationCues)
         carriers = try c.decode([String].self, forKey: .carriers)
         leadingConnectors = try c.decode([String].self, forKey: .leadingConnectors)
+        cancelCues = try c.decodeIfPresent([String].self, forKey: .cancelCues) ?? []
         contractions = try c.decodeIfPresent([String: String].self, forKey: .contractions) ?? [:]
         datetime = try c.decode(DateTimeGrammar.self, forKey: .datetime)
         fuzzyStopwords = try c.decodeIfPresent([String].self, forKey: .fuzzyStopwords)
