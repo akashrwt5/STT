@@ -314,7 +314,7 @@ single cross-platform delta rather than a one-directional complaint.
 
 ---
 
-## 3. Shared gaps — no runtime owns this one
+## 3. Shared gaps — no runtime gets these right
 
 ### VIK-070 — `contestedConfidence` is a code constant on all three runtimes
 
@@ -382,6 +382,99 @@ three independently "fixed" constants is the state it is already in.
 
 ---
 
+### VIK-073 — the OOV bypass is exempted precisely on the vectors it should refuse
+
+**The first engine-level item in this document.** Everything in §1 is pack content,
+training data or a wiring gap. This one is a defect in the decision logic itself, and
+it is the reason it sits in §3 rather than §1: **no runtime gets it right.**
+
+Full evidence, measurements and reproduction:
+[`../../docs/QADataBasedDecision_SingleTokenCollapse.md`](../../docs/QADataBasedDecision_SingleTokenCollapse.md).
+The summary:
+
+The TF-IDF featuriser has no `<unk>` column, so a token outside the vocabulary is not
+weighed and rejected — it is dropped. `mute swan`, `mute Michael Jackson` and bare
+`mute` therefore produce **the same vector**, and a one-feature vector is the easiest
+input a linear head can score: after L2 normalisation it points straight down one
+coefficient column, the logit gap is maximal, and the softmax saturates.
+**Degeneracy produces high confidence, not low confidence.**
+
+The OOV guard exists to catch exactly this. It does not run, because
+`oov_bypass = 0.97` stands it down whenever the confidence is high — which is
+precisely when the vector has collapsed. The bypass's stated reason is sound and was
+measured (a slot value can never be in a finite vocabulary, so a bare ratio test
+refuses `send a message to john`), but the inference it rests on — *high confidence
+means the remainder reads unambiguously* — has no content when there **is** no
+remainder.
+
+Measured on the shipped iOS pack: 18 ordinary English phrases, none addressed to the
+device, **14 reach an intent and 13 change device state** — `sit down`, `calm down`,
+`slow down`, `settle down`, `quiet down`, `keep it down`, `hurry up`, `hands up` and
+more. Across the QA corpus, **79 rows reaching 27 distinct intents** fire on a vector
+the OOV guard was stood down for.
+
+| runtime | OOV guard | position |
+|---|---|---|
+| Python | yes, `engine.py:1285` | guard present, **exemption mis-specified** |
+| iOS | yes, `NLUEngine.swift:663` | same — iOS mirrors the reference faithfully, bug included |
+| Android | **none** — `NluConstants.REQUIRED_THRESHOLDS` is `listOf(confidence, agreement)`, and `oov` appears in no `.kt` file | **VIK-059**: no guard at all, so strictly worse |
+
+So this is **not** a case where Android is ahead. VIK-059 already tracks Android's
+missing guard; VIK-073 is the separate finding that the guard the other two runtimes
+*do* have is switched off in the wrong place. **Fix the condition before VIK-059
+ports it**, or Android inherits the defect along with the feature.
+
+**The change.** The bypass should stand the guard down only when the confidence is
+high *and* the utterance carried enough signal for that confidence to mean something.
+Measured candidate: also require `features >= 2`. The vectoriser must expose the
+non-zero feature count — `vectorize(_:)` already computes it as `counts.count` and
+throws it away.
+
+**Measured cost** (honest holdout, n=1470, iOS-faithful ladder):
+
+| variant | accuracy | wrong actions |
+|---|---:|---:|
+| base (shipped) | 1346 (91.56%) | 7 |
+| bypass also requires `features >= 2` | 1343 (91.36%) | **6** |
+| `oov_bypass` 0.97 → 0.90 | 1348 (91.70%) | 7 |
+
+**It does not pay for itself on accuracy, and it will not.** The four rows it loses
+are short commands containing a rare or **misrecognised** word — `its lowd`,
+`retrieve phone`, `audio redirection`, `i need instructions` — which means the bypass
+has been quietly doing a second job nobody wrote it for: rescuing ASR mangling. In a
+hearing-aid product that population is not marginal.
+
+The argument for the change is asymmetry, not accuracy: the holdout scores a needless
+repeat and a wrong device action as one row each, so **the corpus cannot express the
+benefit** — the same limitation recorded in
+[VIK-055 §13.9](./VIK-055-keyword-arbitration-plan.md). This one needs a named owner
+and a cost-model decision, not a table lookup. Lowering `oov_bypass` to 0.90 buys
++2 accuracy and zero safety and is listed here so nobody proposes it later as the
+cheap win.
+
+**Two related items found with it**, both in the same doc:
+
+- `PackTFIDFVectorizer.producesNoFeatures(_:)` handles the zero-feature case and its
+  docstring says a caller "must route these to the out-of-scope intent". **It has no
+  caller.** Harmless today by luck — the all-zero vector's intercept argmax happens
+  to be `Default Fallback Intent` at 0.877 — and a retrain hazard, because nothing
+  pins it there. Wire it up or delete it.
+- Only 6 of the 14 acting phrases are reachable by any engine change. The other 8
+  (`speak up`, `back down`, `lie down`, `write it down`, `get down`, `keep it down`,
+  `quiet down`, `stand up`) have an OOV ratio of **0.00** — the guard was never in
+  their path. Those are training-data work, and no bypass fix touches them. Any plan
+  that claims VIK-073 fixes "the `down` problem" is wrong.
+
+**Ordering.** Independent of VIK-055 and VIK-056 — it reads the vectoriser, not the
+arbitration path or the model input. But it must be measured on its own, and it
+should land **before** VIK-059.
+
+**Cross-platform.** Python owns the condition; iOS mirrors it; Android has not
+implemented it yet and should implement the corrected form. One cross-team ticket,
+like VIK-070.
+
+---
+
 ## 4. Asymmetries that are correct — do not "fix" these
 
 **Pack delivery and failure strictness are coupled.** iOS has a full OTA pipeline:
@@ -423,6 +516,7 @@ correctly to each.
 | **3** | VIK-062, VIK-065 | Small, independent, each closes a contract. VIK-064 drops out — CI already covers its cheap half |
 | **4** | VIK-056 (normalisation) **or** VIK-057 (rule order) — not both | Each needs its own holdout measurement |
 | **5** | VIK-070 (contested threshold → pack) | Gated on the Python fit; cross-team, all three runtimes |
+| **5, parallel** | VIK-073 (OOV bypass condition) | Independent of the arbitration path; needs a cost-model decision, not a bigger corpus. Land it **before** VIK-059 so Android does not inherit the defect |
 
 Waves 1 and 3 are parallelisable. Wave 4 is not.
 
@@ -455,3 +549,10 @@ between the two directions.
 | VIK-070 — the constant, three times | `PackEngineFactory.swift::PackClassifierAdapter.contestedConfidence`; `OfflineNluServiceImpl.kt:29`; `classifier.py::IntentClassifier.CONTESTED_CONFIDENCE` |
 | VIK-070 — the precedent (VIK-050) | `NLUEngine.swift::interruptThreshold` doc comment |
 | VIK-070 — the invariant to re-point | `KeywordArbitrationTests.testTheContestedConfidenceCannotClearTheFireThreshold` |
+| VIK-073 — the collapse | `PackTFIDFVectorizer.swift:63-71` (`oovRatio` docstring, written for VIK-054) |
+| VIK-073 — the bypass, iOS | `NLUEngine.swift:663` |
+| VIK-073 — the bypass, Python | `packages/runtime/nlu_engine/engine.py:1285` |
+| VIK-073 — Android's absence | `NluConstants.kt:90` — `REQUIRED_THRESHOLDS = listOf(confidence, agreement)` |
+| VIK-073 — the unused feature count | `PackTFIDFVectorizer.vectorize(_:)`, `counts.count` |
+| VIK-073 — the uncalled guard | `PackTFIDFVectorizer.producesNoFeatures(_:)` — no caller repo-wide |
+| VIK-073 — evidence | `docs/QADataBasedDecision_SingleTokenCollapse.md` |
