@@ -412,6 +412,44 @@ command.
 
 ### P4 — `Cmd.MemoryChange` versus `Help_ChangingMemories` / `Help_MemoryOptions`
 
+> **STATUS 2026-09-16 — largely done, and one part of it was reversed.**
+> Read this before the section below, which is left as written.
+>
+> | P4 part | state |
+> |---|---|
+> | (a) command answered with a help card | **7 of 8 fixed**, then 8 of 8 — `put it on custom` closed last |
+> | (b) bare memory names | **REVERSED.** They must NOT fire. See `QADataBasedDecision_Cmd_Reminders_Fallback.md` §4.3(b) |
+> | (c) 18 rows reading as other commands | open — a QA LABEL decision, not an engine defect |
+> | mirror: `Help_*` ↔ `Help_*` overlap | open, untouched |
+>
+> What moved, all measured on the full engine at the shipping threshold:
+>
+> ```
+>                       start   plural folding   hearing-aid rows   timer   carriers
+> raw model argmax       1351        1354             1354          1355      1355
+> engine holdout         1332        1332             1333          1334      1337
+> leakage guard           243         243              243           243       245
+> out-of-scope fires        6           6                6             6         6
+> P4 command phrases     0/11        7/11             9/11          9/11     10/11
+> explicit verb x name      —           —                —             —   340/342
+> ```
+>
+> Out-of-scope fires never moved. That was the constraint, not a coincidence.
+>
+> This section's premise — "**This blocks P0 and P3's retrain.** Training two
+> overlapping intents harder sharpens the boundary without making it correct" —
+> did not hold in practice. Five retrains happened without the taxonomy being
+> settled and every metric held or improved. The overlap is real, but it now
+> shows up as both siblings falling BELOW the fire gate rather than as one
+> stealing the other's turns, so it costs recall, not correctness. It no longer
+> blocks anything; it is ordinary remaining work.
+>
+> Still open in this family: `change my hearing aid memories` predicts
+> `Cmd.MemoryChange` with the right label at 0.624, under the 0.70 gate — not a
+> misroute. `help_marker_guard.pairs` maps `Cmd.MemoryChange` →
+> `Help_MemoryOptions` while this family's gold is `Help_ChangingMemories`.
+
+
 **Finding:** `QADataBasedDecision_Cmd_Reminders_Fallback.md` §4.3,
 `QADataBasedDecision_Help.md` §4.3.
 

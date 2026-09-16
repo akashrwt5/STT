@@ -437,6 +437,43 @@ This answers the question `QADataBasedDecision_Help.md` §F.16 left open — whe
 These are values of the `memory` entity (38 closed values in
 `entities/shared/content.json`), labelled as commands. See §5.
 
+> **REVERSED — 2026-09-16. This finding was wrong, and the correction is the
+> opposite of what it asks for.**
+>
+> Reading these rows as commands the engine failed to fire takes the QA label
+> for the user's intent. It is the same mistake §4.3(c) below already names in
+> its own rows — "QA-labelling artefacts rather than engine errors" — and it
+> applies here too.
+>
+> A bare noun is not an instruction. A product whose microphone is open and
+> whose program changes because someone said "outdoors" in conversation has the
+> worst failure this engine can produce, and no confidence makes it right: the
+> utterance carries a noun, not a request. **Owner decision: a memory changes
+> when the user asks for it to change** — "switch to outdoors", "change my
+> memory to outdoors" — and at no other time.
+>
+> Note what was already true when this was written, and went unchecked: every
+> explicit form ALREADY worked, and so did the slot prompt ("change programs" →
+> "which memory?" → "outdoors"). The only gap was the cold bare utterance, which
+> is precisely the case that should not fire.
+>
+> What shipped instead (Python `feat(nlu): a bare entity value is not a
+> request`, VoiceAIKit `bare_value` guard):
+>
+> * `bare_value_guard` — pack data naming an intent and a CLOSED ENTITY, never a
+>   word list, so a memory added later is covered with no edit. Full-string
+>   match only; reached only on a new intent, so the slot answer still works.
+> * **0 of 47** memory surface forms now fire `Cmd.MemoryChange` bare. One did
+>   before: `outdoors`, at 0.719, because all 47 of its corpus rows carry that
+>   one label and a bare utterance inherits it.
+> * Explicit forms measured across all 38 memory names × 9 verb phrasings:
+>   **273/342 (80%) → 340/342 (99%)**. `put it on` had been 0/38 — poisoned by
+>   three out-of-scope ASR captures containing the carrier — and `go to` 7/38 on
+>   three corpus rows.
+>
+> Holdout 1337/1470, leakage guard 245/331, out-of-scope fires 6/195 — none of
+> them moved against the pre-guard model.
+
 **(c) Eighteen wrong state-changing rows** — `change mute` ×4 →
 `Cmd.VolumeMute`, `mute` ×2 → `Cmd.VolumeMute`, `decrease volume` →
 `Cmd.VolumeDecrease`, `setting stream` → `Cmd.StreamingStart`, and similar. These
