@@ -235,43 +235,78 @@ below 583/621.
 
 ---
 
-### P1 — the help-marker pattern, both directions
+### P1 — the help-marker pattern  ·  **PART SHIPPED**
 
 **Finding:** `QADataBasedDecision_VOlumeIncrease.md` §3,
 `QADataBasedDecision_Help.md` §3.2, `QADataBasedDecision_Cmd_Reminders_Fallback.md` §3.4.
 
-One pack field carries two opposite defects.
+> **Status.** The widening shipped as `cce284e7` on the Python branch
+> `…-Layer2-QAAuditDataFix`:
+> `how\s+(to|do\s+i|does|can\s+i|is|would\s+i)\b` → `how\s+(to|do\b|does|can\b|is|would\b)\b`.
+> Measured on 11,753 rows: 0 rows lost their match, 43 newly matched, 3 acted on,
+> all 3 fixes. End-to-end QA match +1 / wrong-act −1; holdout unchanged. The
+> narrowing half was measured and **rejected** — see §5 S2.
+> The change is in the pack SOURCE; no runtime sees it until the pack is rebuilt.
 
-**Under-triggering.** The pattern has `how do i` but not `how do you`, so
-`how do you turn the volume up on the hearing aid` **raises the volume** — while
-the model itself had answered `Help_Volume` at 0.9559 and was overruled by a
-keyword rule.
+One pack field was suspected of carrying two opposite defects. One was real; the
+other was measured and turned out not to be.
 
-**Over-triggering.** `(\w+\s+help\b)` matches "can **you help** me set a
-reminder", which is a request to *do* something, not to *learn how*. The guard
-redirects `reminders.add` (model: **0.9857**) to `Help_Reminder`, the re-read
-returns 0.0138, and the user is told the device did not understand.
+**Under-triggering — real, and fixed.** The pattern had `how do i` but not
+`how do you`, so `how do you turn the volume up on the hearing aid` **raised the
+volume** — while the model itself had answered `Help_Volume` at 0.9559 and was
+overruled by a keyword rule. The shipped change removes the first-person
+restriction from `do`, `can` and `would` in one edit. It is a removal of three
+restrictions rather than an addition of coverage, which is why the pattern gets
+*shorter*: 322 → 316 characters.
+
+**Over-triggering — NOT a defect. Measured and rejected.** `(\w+\s+help\b)`
+matches "can **you help** me set a reminder", and the earlier revision of this
+plan proposed removing or narrowing it on the strength of a single row in the iOS
+QA corpus. Run against the reference engine on `train.csv` and
+`holdout_honest.csv`, removing it costs **3 holdout rows and 12 training rows**:
+
+```
+transcribe help                 truth Help_Transcribe -> Cmd.TranscribeStart   (starts transcribing)
+hearing aids transcribe help    truth Help_Transcribe -> Cmd.TranscribeStart
+show me the translate help      truth Help_Translate  -> Cmd.TranslationStart
+```
+
+The clause carries the **"X help"** sense — `transcribe help`, `translate help`,
+`volume help` — and it is the only thing redirecting those. Three narrower
+variants (`help` at end of utterance; `help with|for|on|about`) were also measured:
+all are safe on the holdout and all cost 5 training rows.
+
+The reason no regex fixes this is that the labels themselves conflict:
+
+```
+can you help me transcribe                       -> Help_Transcribe   (help)
+can you help me remind me to call bae tomorrow   -> reminders.add     (command)
+```
+
+Same surface form, opposite labels. That is now a settled product decision —
+§5 S2, leave as is — so the clause stays.
+
+**Also measured and rejected**, recorded so they are not retried:
+
+| candidate | why not |
+|---|---|
+| `show me` | `show me a transcript`, `show me text of what people say` are commands. 0 gain / 2 loss, and guard-breakage rises 11 → 13. |
+| `show me how\|where\|what` | `show me how` already matches via `how to`. 0 gain, 0 loss. |
+| `can you` / `could you` / `please` | Politeness wrappers do not discriminate: in `train.csv`, `can you` prefixes **1,052 commands** against 251 help asks, because the augmentation adds it to everything. |
+| `i need to`, `i can't`, `can i` | `i need to set up a reminder`, `i can't hear very well`, `can i set a reminder` are all commands. 0/10, 0/7, 2/3. |
+| `how many` / `how much` / `how accurate` | `translate how much do i owe you` is a translate command. 3 gain / 12 loss. |
+
+**The principle the measurements establish:** the marker must key on the
+**interrogative or instructional core** (`how to`, `how do`, `explain`, `guide`,
+`tutorial`) and never on a **politeness wrapper**, because the corpus augmentation
+attaches wrappers to commands and help asks alike.
 
 **Where:** `IntentClassifier/language_packs/en/platform.yaml` →
 `help_marker_guard.markers`. No engine change. No retrain.
 
-**How:**
-- widen `how\s+(to|do\s+i|does|can\s+i|is|would\s+i)` to include
-  `do you`, `do we`, `can you`, `would you`;
-- remove or narrow `(\w+\s+help\b)` so it does not capture "<pronoun> help me
-  <verb>".
-
-**Effect (simulated, exact):** match +2, wrong-act −1. Each half fixes exactly one
-row and breaks none:
-
-```
-P1a widen  : how do you turn the volume up…   Cmd.VolumeIncrease -> Help_Volume   (BETTER, 0 worse)
-P1b narrow : can you help me set a reminder   fallback           -> reminders.add (BETTER, 0 worse)
-```
-
-**Note what P1 does NOT fix.** `how can I add reminder` stays broken. `how can i`
-is a legitimate help marker, so the guard is right to fire — the damage is done by
-the confidence re-read afterwards. That is §5's open question, not a pattern bug.
+**Note what P1 does NOT fix.** `how can I add reminder` stays as it is. `how can i`
+is a legitimate help marker, so the guard is right to fire — the outcome is decided
+by the confidence re-read afterwards, which is §5 S1 and is now settled as correct.
 
 **Verify:** `HelpMarkerGuardTests`; full holdout (the pattern touches every paired
 command intent); re-run all four phrase reports.
@@ -574,28 +609,61 @@ before.
 
 ---
 
-## 5. Decisions needed from product, not engineering
+## 5. Decisions — settled and outstanding
 
-These are in the plan because engineering cannot settle them and each one blocks
-or shapes an item above.
+Engineering cannot settle these; each one blocks or shapes an item above.
+
+### Settled
+
+**S1 · The guarded-redirect fire bar — DECIDED: leave it as it is.**
+
+*Question was:* once `helpRedirect` has fired, the turn has been classified as a
+help ask by a deterministic rule. Must the redirected intent still clear the fire
+bar, given that a redirect replaces a command with a read-only card?
+
+*Measured* (`opt3a` — skip the fire test for a guarded redirect, OOV guard still
+applies): QA match 4,729 → 4,734, holdout 1,346 → 1,347, false-fire and
+wrong-act unchanged on both. Structurally safe too — all six redirect targets are
+`Help_*` intents, so the change cannot produce a device action.
+
+*Decision:* **"I did not understand" is preferable to a possibly-wrong help card.**
+Under that rule `opt3a` turns 4 fallbacks into the right card and 8 into the wrong
+one — net negative. An attempt to separate the two by gating on the model's
+confidence in the command was measured and fails: good cases span 0.5427–0.9995,
+bad cases 0.4035–1.0000. No threshold separates them.
+
+*Consequence:* the confidence re-read is **not** a defect; it implements this
+preference. `QADataBasedDecision_Help.md` §3.3 carries the full measurement and the
+mechanism (the sibling's probability is anti-correlated with the command's, because
+softmax normalises — which is why the code's "11 of 12 deflected" figure holds).
+`how can i turn up the volume?` still answers "I did not understand"; the fix is to
+teach the model the phrasing, as it already knows `how do i increase volume`. That
+is P0/P3 retrain work, not an engine change.
+
+**S2 · `can you help me <verb>` — DECIDED: leave as is.**
+
+*Question was:* `train.csv` labels `can you help me transcribe` → `Help_Transcribe`
+but `can you help me remind me to call bae tomorrow` → `reminders.add`. Same
+surface form, opposite labels. Which is it?
+
+*Decision:* **leave the current labels and behaviour unchanged.**
+
+*Consequence:* the `(\w+\s+help\b)` clause stays in the help marker. Removing it
+was measured and rejected independently — it breaks `transcribe help` /
+`translate help` (3 holdout rows, 12 train rows), where the clause carries the
+"X help" sense. Both the ambiguity and the clause are now deliberate.
+
+### Outstanding
 
 1. **P2's five lost rows.** Is *"mute Michael Jackson"* / *"silence Henry"* —
    addressing a mute or stream by a name — a capability the product keeps? If yes,
    P2 needs the narrower variant (§1.3) and that variant is **unmeasured**.
-2. **The guarded-redirect fire bar.** `how can I add reminder` (model 0.9173) and
-   `how do I turn off my hearing aids` (×3) are correctly identified as help asks
-   and then discarded by the confidence re-read — 9 rows across two reports. The
-   source comment at `NLUEngine.swift:558` records this as deliberate ("deflected
-   11 of 12 guarded turns to the fallback"). A redirect replaces a command with a
-   read-only card, so it is strictly safer than what it replaced. Should it clear
-   the same 0.70 bar? The holdout **cannot** score the benefit, so this must be
-   decided on the cost model.
-3. **`Cmd.MemoryChange` vs the two memory help intents** (P4) — merge, disjoin, or
+2. **`Cmd.MemoryChange` vs the two memory help intents** (P4) — merge, disjoin, or
    disambiguate.
-4. **Bare `volume` ×19** (`QADataBasedDecision_VOlumeIncrease.md` §1 Group B) —
+3. **Bare `volume` ×19** (`QADataBasedDecision_VOlumeIncrease.md` §1 Group B) —
    `Help_Volume` card, fallback, or `Cmd.VolumeIncrease`? All three are
    defensible; only one can ship.
-5. **Absolute-volume phrasings** (`set volume to 50`, 7 phrases / 9 rows, same
+4. **Absolute-volume phrasings** (`set volume to 50`, 7 phrases / 9 rows, same
    document Group C) — a taxonomy gap, not a defect. In or out of scope?
 
 ---
@@ -606,8 +674,8 @@ or shapes an item above.
 |---|---|---|
 | Stage 0 keyword bypass overrules the model | VIK-055 plan | **shipped** (three-way arbitration) |
 | Help guard misses `how do you` | VolIncr §3, Help §3.2, Cmd §3.4 | **P1** |
-| `\w+\s+help\b` over-triggers | Cmd §3.4 | **P1** |
-| Guarded redirect discarded by the re-read | Help §3.3, Cmd §3.4 | **§5 decision 2** |
+| `\w+\s+help\b` over-triggers | Cmd §3.4 | **§5 S2 — measured, rejected, clause stays** |
+| Guarded redirect discarded by the re-read | Help §3.3, Cmd §3.4 | **§5 S1 — settled, no change** |
 | Single-token collapse / `oov_bypass` exemption | Collapse (whole), Help §3.5, Cmd §3.2 | **P2** |
 | `down`/`up` particles fire volume commands | Collapse §3.1, Cmd §3.2 | **P0** (+P2 for the 1-feature half) |
 | `producesNoFeatures` has no caller | Collapse §7 | **P2** (wire it or delete it, same file) |
@@ -625,8 +693,8 @@ or shapes an item above.
 | `reminders.add` 51.5% is a harness artifact | Cmd §5.1 | **M0a** |
 | 68 Help rows mislabelled out-of-scope | Help §0 | **M0b** |
 | Report lacks `features` / `oov` / rule intent | Collapse §9, Help §5 E, Cmd §6 P7 (now M0) | **M0c** |
-| Bare `volume` ×19 ambiguous | VolIncr §1 Group B | **§5 decision 5** |
-| Absolute-volume taxonomy gap | VolIncr §1 Group C | **§5 decision 6** |
+| Bare `volume` ×19 ambiguous | VolIncr §1 Group B | **§5 outstanding 3** |
+| Absolute-volume taxonomy gap | VolIncr §1 Group C | **§5 outstanding 4** |
 | Android has no OOV guard | Android doc VIK-059 | after **P2** — never before |
 | iOS runs a third arbitration variant on purpose | Android doc VIK-072 | debt, tracked, no action here |
 | `contestedConfidence` is a code constant ×3 | Android doc VIK-070 | unchanged; independent of this plan |

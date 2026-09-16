@@ -204,7 +204,7 @@ guard — the one thing that would put it back — does not match.
 Worth stating plainly: **on that row the model was right at 0.9559 and was
 overruled.**
 
-### 3.3 The guard's confidence re-read discards correct redirects
+### 3.3 The confidence re-read after a guarded redirect — measured, and DECIDED
 
 `NLUEngine.swift:564-579` re-reads the confidence after redirecting, so the number
 reported describes the intent actually being returned. The consequence, on this
@@ -218,26 +218,81 @@ corpus:
 | how to step too low | 1 | Help_Volume | 0.0010 | fallback |
 | you can talk to at home soon how do I increase my volume | 1 | Help_Volume | 0.6587 | fallback |
 
-**This is known and deliberate.** The source comment at `NLUEngine.swift:558` says
-so: *"On this pack's honest holdout, keeping it deflected 11 of 12 guarded turns to
-the fallback."* Nothing here is a surprise to the code.
+The source comment at `NLUEngine.swift:558` already records the behaviour: *"On
+this pack's honest holdout, keeping it deflected 11 of 12 guarded turns to the
+fallback."*
 
-What the QA data adds is the product cost of that trade. The guard **identified the
-right answer** — `Help_Volume` — and then the fire test threw it away, so a user who
-asks *"how do I turn off my hearing aids"* is told the device did not understand.
-Five distinct phrases, 7 rows, all of them legitimate help questions.
+#### Why it happens — the mechanism, which the code comment does not state
 
-The design question this raises, which has not been asked before:
+The re-read confidence is the model's probability for the **sibling**, taken from
+the same distribution as its probability for the command. Softmax normalises, so
+if the model puts *p* on the command, the sibling can have at most *1 − p*:
 
-> Once `helpRedirect` has fired, the turn has already been classified as a help ask
-> by a deterministic rule that does not depend on the model's confidence. Why must
-> the redirected intent then clear the same 0.70 bar as an unguarded prediction?
+```
+how can i turn up the volume?   model Cmd.VolumeIncrease 0.9995  ->  p(Help_Volume) 0.0005  -> fallback
+how can i mute my hearing aids  model Cmd.VolumeMute     0.9742  ->  p(Help_Volume) 0.0059  -> fallback
+how do i turn up my volume      model Help_Volume        0.9810  ->  p(Help_Volume) 0.9810  -> fires
+how do i increase volume        model Help_Volume        0.9499  ->  p(Help_Volume) 0.9499  -> fires
+```
 
-A guarded redirect is a strictly safer outcome than the thing it replaced — it
-swaps a state-changing command for a read-only card. Applying the full fire bar to
-it treats those two as equally risky. **This is a proposal, not a measured result:
-it must be run through the holdout before anyone acts on it**, and the holdout will
-undercount the benefit for the same reason recorded in VIK-055 §13.9.
+**The two are anti-correlated by construction.** The more certain the model is
+that it heard a command, the more certainly the guarded redirect falls back. The
+redirect survives only when the model had *independently* chosen the help intent —
+that is, only when the guard was not needed. This is arithmetic, not a tuning
+accident, and it is why the figure is 11 of 12.
+
+#### The design question, and the answer
+
+> Once `helpRedirect` has fired, the turn has been classified as a help ask by a
+> deterministic rule that does not depend on the model's confidence. Why must the
+> redirected intent then clear the same bar as an unguarded prediction?
+
+**Measured.** Bypassing the fire test for a guarded redirect (`opt3a`; the OOV
+guard still applies) on the full iOS ladder:
+
+| corpus | match | false-fire | wrong-act |
+|---|---|---|---|
+| QA 5,411 | 4,729 → **4,734** | 39 → 39 | 92 → **91** |
+| holdout 1,470 | 1,346 → **1,347** | 3 → 3 | 7 → 7 |
+
+And it is structurally safe: all six distinct redirect targets are `Help_*`
+intents (`Help_Accessories`, `Help_MemoryOptions`, `Help_Reminder`,
+`Help_Transcribe`, `Help_Translate`, `Help_Volume`), so skipping the fire test
+cannot produce a device action — only a card.
+
+**It was nevertheless REJECTED, and the current behaviour is correct.** Row by row,
+`opt3a` turns 4 fallbacks into the *right* help card and 8 into the *wrong* one:
+
+```
+right topic   how to turn the volume up / how do I turn off my hearing aids
+              you can talk to at home soon how do I increase my volume
+              how to increase volume (holdout)
+
+wrong topic   hi how do I shut off my hearing aids   truth Help_Pairing      -> Help_Volume
+              how do i turn up the tv volume?        truth Help_Accessories  -> Help_Volume
+              how to step too low                    truth Help_Health       -> Help_Volume
+              how can I add reminder                 truth reminders.add     -> Help_Reminder
+              (+4 more)
+```
+
+**Product decision: "I did not understand" is preferable to a possibly-wrong help
+card.** Under that rule `opt3a` is 4 good against 8 bad — net negative.
+
+An attempt to keep the good and drop the bad by gating on the model's confidence
+in the **command** was measured and fails: the good cases span 0.5427–0.9995 and
+the bad cases span 0.4035–1.0000, with two bad cases at exactly 1.0000 because
+`ruleOnly` assigns a synthetic confidence. No threshold separates them.
+
+**So the re-read is not a defect — it implements the product's stated preference.**
+Earlier revisions of this document described it as a defect; that framing assumed
+the product would prefer a card, and the product does not.
+
+**What this leaves.** `how can i turn up the volume?` still answers "I did not
+understand", and that is genuinely poor. The fix is not in the engine: the model
+must learn the phrasing, exactly as it already knows `how do i increase volume`
+(which it labels `Help_Volume` at 0.9499 and which therefore never needs the
+guard). This is training-data work — see the plan's P0/P3 retrain — not a
+threshold change.
 
 ### 3.4 On `Help_*` traffic the keyword layer is net-negative
 

@@ -580,11 +580,14 @@ from `QADataBasedDecision_Help.md` §3.2. One pack field, both defects.
 - Narrow `(\w+\s+help\b)` so it does not capture "can you help me *do* X". A
   request for assistance is not a request for instructions.
 
-**Separately, and not in the same change:** §3.4's re-read behaviour is a design
-decision recorded in the source (`NLUEngine.swift:558`), not a bug. Whether a
-guarded redirect should clear the full 0.70 bar is the open question stated in
-`QADataBasedDecision_Help.md` §5 D.10. Keep the pattern fix and that question
-apart so the pattern fix can ship immediately.
+**Separately:** §3.4's re-read behaviour is a design decision recorded in the
+source (`NLUEngine.swift:558`), not a bug. Whether a guarded redirect should clear
+the full fire bar has since been **measured and settled** — bypassing it turns 4
+fallbacks into the right help card and 8 into the wrong one, and the product's rule
+is that "I did not understand" beats a possibly-wrong card. See
+`QADataBasedDecision_Help.md` §3.3 and `NLU-Quality-Plan.md` §5 S1. The narrowing
+half of P2 here was likewise measured and rejected (§5 S2); only the widening
+shipped.
 
 ### P3 — `Cmd.MemoryChange` versus `Help_ChangingMemories` / `Help_MemoryOptions`
 
