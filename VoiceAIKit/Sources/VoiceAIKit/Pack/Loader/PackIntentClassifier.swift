@@ -88,7 +88,16 @@ actor PackIntentClassifier {
 
     /// - Throws: `VoiceIntentError` when the weights cannot be read or the
     ///   vocabulary does not match the label space. Never traps.
-    init(artifacts: ResolvedPack.ClassifierArtifacts) throws {
+    /// `normalizer` is the surface-form transform the head was fitted on; it
+    /// belongs to the LEXICON, not to the classifier triple, which is why it
+    /// arrives as its own argument rather than being folded into
+    /// `ClassifierArtifacts` ("they are one triple and cannot be mixed").
+    ///
+    /// Defaulted so the test call sites keep compiling and keep behaving as
+    /// they do today. `PackEngineFactory` — the only production caller — passes
+    /// the pack's own tables.
+    init(artifacts: ResolvedPack.ClassifierArtifacts,
+         normalizer: PackTextNormalizer = .identity) throws {
         self.artifacts = artifacts
         self.temperature = artifacts.temperature > 0 ? artifacts.temperature : 1.0
         self.confidenceThreshold = artifacts.confidenceThreshold
@@ -109,7 +118,8 @@ actor PackIntentClassifier {
         else {
             throw VoiceIntentError.malformedJSON(path: relative, reason: "vocab/idf absent")
         }
-        self.vectorizer = PackTFIDFVectorizer(vocabulary: vocabulary, idf: idf)
+        self.vectorizer = PackTFIDFVectorizer(vocabulary: vocabulary, idf: idf,
+                                              normalizer: normalizer)
 
         log.info("""
             \(artifacts.variant.rawValue, privacy: .public) head — \

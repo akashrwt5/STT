@@ -352,7 +352,12 @@ actor PackClassifierAdapter: IntentClassifying {
     }
 
     init(pack: ResolvedPack) throws {
-        self.classifier = try PackIntentClassifier(artifacts: pack.classifier)
+        // The head was fitted on normalised text (contractions expanded,
+        // apostrophes dropped, plurals folded). Handing it anything else loses
+        // features silently — see `PackTextNormalizer` for the measurement.
+        self.classifier = try PackIntentClassifier(
+            artifacts: pack.classifier,
+            normalizer: PackTextNormalizer(lexicon: pack.lexicon))
         self.outOfScopeIntent = pack.outOfScopeIntent ?? ""
         self.semanticEnabled = pack.stageEnabled(.semantic)
 

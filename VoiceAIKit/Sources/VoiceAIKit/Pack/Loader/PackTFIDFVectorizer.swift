@@ -49,9 +49,21 @@ struct PackTFIDFVectorizer: Sendable {
     /// guard runs on every turn and the vocabulary is up to 4718 entries.
     let unigrams: Set<String>
 
-    init(vocabulary: [String: Int], idf: [Double]) {
+    /// The surface-form transform the head was FITTED on — contraction
+    /// expansion, apostrophe removal, plural folding. See
+    /// `PackTextNormalizer`.
+    ///
+    /// Defaulted to `.identity` so the existing construction sites, including
+    /// the test doubles, keep compiling and keep their current behaviour. A
+    /// caller that has the pack's lexicon must pass it: an empty table is not
+    /// "no normalisation is needed", it is "this pack declares none".
+    let normalizer: PackTextNormalizer
+
+    init(vocabulary: [String: Int], idf: [Double],
+         normalizer: PackTextNormalizer = .identity) {
         self.vocabulary = vocabulary
         self.idf = idf
+        self.normalizer = normalizer
         var single = Set<String>()
         single.reserveCapacity(vocabulary.count)
         for term in vocabulary.keys where !term.contains(" ") { single.insert(term) }
@@ -102,10 +114,22 @@ struct PackTFIDFVectorizer: Sendable {
     /// underscore — matched here with `isLetter || isNumber || == "_"` rather
     /// than `CharacterSet.alphanumerics`, which is not the same set for
     /// non-Latin scripts and would diverge for a future language pack.
+    /// Normalises FIRST, then tokenises — the reference's order at both of its
+    /// call sites (`classifier.py:255` feeds `tfidf_logits(normalize_text(t))`,
+    /// and `:339` computes the OOV tokens from `normalize_text(t)`). Because
+    /// every entry point of this type funnels through here, `oovRatio`,
+    /// `vectorize`, `featureCount` and `producesNoFeatures` all inherit it and
+    /// cannot drift apart.
+    ///
+    /// The keyword stage and the entity extractor do NOT come through here and
+    /// must not: both match raw text on the reference side too, and folding
+    /// `outdoors -> outdoor` before entity extraction would stop the `memory`
+    /// entity recognising its own value.
     func tokenize(_ text: String) -> [String] {
+        let normalized = normalizer.isIdentity ? text : normalizer.normalize(text)
         var tokens: [String] = []
         var current = ""
-        for ch in text.lowercased() {
+        for ch in normalized.lowercased() {
             if ch.isLetter || ch.isNumber || ch == "_" {
                 current.append(ch)
             } else if !current.isEmpty {
