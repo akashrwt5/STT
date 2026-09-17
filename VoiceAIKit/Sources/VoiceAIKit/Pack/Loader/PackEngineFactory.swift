@@ -410,9 +410,21 @@ actor PackClassifierAdapter: IntentClassifying {
     ///
     /// Matches RAW text. `classifier.py` is explicit that normalisation is
     /// "applied to the MODEL path only — the keyword stage matches raw text".
-    /// iOS applies no normalisation at all today (VIK-056), so both paths
-    /// currently see the same string; the distinction is written down because it
-    /// becomes load-bearing the day normalisation lands.
+    ///
+    /// THAT DISTINCTION IS NOW LIVE. It used to read "iOS applies no
+    /// normalisation at all today (VIK-056), so both paths currently see the
+    /// same string" — true until `PackTextNormalizer` landed. `classifyAsync`
+    /// calls this function and `classifier.classify` on the same argument, and
+    /// they no longer see the same string:
+    ///
+    ///     input                      keyword stage        model path
+    ///     "don't mute it"            don't mute it        do not mute it
+    ///     "change my memories"       change my memories   change my memory
+    ///
+    /// Keeping the keyword stage on raw text is deliberate and matches the
+    /// reference. The patterns are authored against what a user says, so
+    /// folding `memories -> memory` under them would silently retarget every
+    /// rule that names a plural.
     ///
     /// Lowercased and trimmed before matching, exactly as the Stage 0 this
     /// replaces did, and the patterns are case-insensitive as well.
