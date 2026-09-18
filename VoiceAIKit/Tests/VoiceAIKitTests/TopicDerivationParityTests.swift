@@ -135,7 +135,7 @@ final class TopicDerivationParityTests: XCTestCase {
         switch response {
         case .prompt(_, _, let filled):
             return filled["name"]
-        case .fulfill(_, _, let parameters, _, _, _, _):
+        case .fulfill(_, _, let parameters, _, _, _, _, _):
             return parameters["name"]
         default:
             return nil

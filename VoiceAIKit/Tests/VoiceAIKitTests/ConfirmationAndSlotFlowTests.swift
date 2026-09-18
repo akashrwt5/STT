@@ -383,7 +383,7 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
 
         let afterYes = await engine.handle("yes")
 
-        if case .fulfill(_, _, let parameters, _, _, _, _) = afterYes {
+        if case .fulfill(_, _, let parameters, _, _, _, _, _) = afterYes {
             XCTFail("""
                 fulfilled straight from the confirmation with parameters \(parameters) — \
                 this is VIK-021: a reminder created with no name and no time
@@ -406,7 +406,7 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
         _ = await engine.handle("yes")
         let done = await engine.handle("tomorrow at 5pm")
 
-        guard case .fulfill(let intent, let action, let parameters, let message, _, _, _) = done else {
+        guard case .fulfill(let intent, let action, let parameters, let message, _, _, _, _) = done else {
             return XCTFail("expected fulfilment, got \(done)")
         }
         XCTAssertEqual(intent, reminder)
@@ -427,7 +427,7 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
         _ = await engine.handle(classifierRouted)
         let declined = await engine.handle("no")
 
-        guard case .fulfill(_, _, _, let message, _, _, _) = declined else {
+        guard case .fulfill(_, _, _, let message, _, _, _, _) = declined else {
             return XCTFail("expected the cancellation, got \(declined)")
         }
         XCTAssertEqual(message, pack.responses["sys.confirm.cancelled"])
@@ -447,7 +447,7 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
             _ = await engine.handle(classifierRouted)
             let response = await engine.handle(word)
 
-            guard case .fulfill(_, _, _, let message, _, _, _) = response else {
+            guard case .fulfill(_, _, _, let message, _, _, _, _) = response else {
                 return XCTFail("'\(word)' did not decline — got \(response)")
             }
             XCTAssertEqual(message, pack.responses["sys.confirm.cancelled"], word)
@@ -486,7 +486,7 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
         
         // 3. Fulfill the slots -> Returns fulfill
         let fulfillResponse = await engine.handle("tomorrow at 5pm")
-        guard case .fulfill(let intent3, _, let params, _, _, _, _) = fulfillResponse else {
+        guard case .fulfill(let intent3, _, let params, _, _, _, _, _) = fulfillResponse else {
             return XCTFail("Expected fulfill, got \(fulfillResponse)")
         }
         XCTAssertEqual(intent3, reminder)
@@ -621,7 +621,7 @@ final class ConfirmationBranchTests: XCTestCase {
             }
 
             let resolved = await engine.handle(reply)
-            guard case .fulfill(let intent, let action, _, let message, _, _, _) = resolved else {
+            guard case .fulfill(let intent, let action, _, let message, _, _, _, _) = resolved else {
                 return XCTFail("\(reply) did not resolve the confirmation: \(resolved)")
             }
             XCTAssertEqual(action, branch.action, "\(reply) fired the wrong branch")

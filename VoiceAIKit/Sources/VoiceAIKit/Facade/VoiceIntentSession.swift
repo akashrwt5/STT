@@ -484,7 +484,7 @@ public final class VoiceIntentSession {
             continuation.yield(.turn(.confirmation(intent: intent, question: question, collected: filled)))
             ask(question)
 
-        case .fulfill(let intent, _, let params, let message, let confidence, let rescue, let bd):
+        case .fulfill(let intent, _, let params, let message, let confidence, let rescue, let bd, _):
             awaitingAnswer = false
             continuation.yield(.turn(.fulfilled(
                 intent: intent, slots: params, message: message,
@@ -512,7 +512,7 @@ public final class VoiceIntentSession {
         switch response {
         case .prompt(let intent, let q, let filled):           return .followUp(intent: intent, question: q, collected: filled)
         case .confirm(let intent, _, let q, let filled):       return .confirmation(intent: intent, question: q, collected: filled)
-        case .fulfill(let i, _, let p, let m, let c, let r, let bd):
+        case .fulfill(let i, _, let p, let m, let c, let r, let bd, _):
             return .fulfilled(intent: i, slots: p, message: m, confidence: c,
                               viaSemanticRescue: r, stages: stages(from: bd))
         case .fallback(let intent, let c, let bd):

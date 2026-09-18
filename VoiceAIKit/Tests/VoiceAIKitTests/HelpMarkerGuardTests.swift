@@ -88,7 +88,7 @@ final class HelpMarkerGuardTests: XCTestCase {
     }
 
     private func fulfilled(_ response: NLUResponse) -> (intent: String, confidence: Double)? {
-        guard case .fulfill(let intent, _, _, _, let conf, _, _) = response else { return nil }
+        guard case .fulfill(let intent, _, _, _, let conf, _, _, _) = response else { return nil }
         return (intent, conf)
     }
 

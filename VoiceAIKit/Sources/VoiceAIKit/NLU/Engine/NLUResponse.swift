@@ -16,7 +16,13 @@ indirect enum NLUResponse: Sendable {
 
     /// All slots collected (or none needed) — ready to execute `action`.
     /// `semanticRescue` is true when Stage 3 (MiniLM) classified this intent.
-    case fulfill(intent: String, action: String?, parameters: [String: String], message: String, confidence: Double, semanticRescue: Bool = false, breakdown: ClassificationBreakdown? = nil)
+    /// `unresolvedSlots` names the slots whose value is what the user SAID
+    /// rather than a value this pack recognised — a memory they named "temp"
+    /// cannot be in a build-time enum, so the engine reports the spoken name
+    /// and says plainly that it did not recognise it. Empty on every turn that
+    /// resolved, and defaulted, so only a caller that cares constructs it.
+    /// Mirrors `NLUResult.unresolved_slots` in the reference.
+    case fulfill(intent: String, action: String?, parameters: [String: String], message: String, confidence: Double, semanticRescue: Bool = false, breakdown: ClassificationBreakdown? = nil, unresolvedSlots: [String] = [])
 
     /// Low confidence or out-of-scope. `intent` is the pack's fallback intent
     /// name — `Default Fallback Intent` — so the host dispatches this like any

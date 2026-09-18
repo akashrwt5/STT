@@ -131,6 +131,10 @@ protocol SlotResolving: Sendable {
     /// outdoors" mentions a memory and IS a request, while "outdoors" mentions
     /// one and is not.
     func isWholeValue(_ entity: String, _ text: String) -> Bool
+
+    /// True when `word` is one of the pack's function words. The engine needs
+    /// it: a passthrough value made only of function words is not a name.
+    func isFunctionWord(_ word: String) -> Bool
 }
 
 extension SlotResolving {
@@ -138,6 +142,10 @@ extension SlotResolving {
     /// suppresses intents. Keeps existing conformers — test doubles included —
     /// compiling unchanged.
     func isWholeValue(_ entity: String, _ text: String) -> Bool { false }
+
+    /// Default false: a resolver with no lexicon must not claim a word is a
+    /// function word and so suppress a perfectly good name.
+    func isFunctionWord(_ word: String) -> Bool { false }
 }
 
 // MARK: - Pack-driven implementation
@@ -247,6 +255,8 @@ struct PackSlotResolver: SlotResolving {
     func extract(_ entity: String, from text: String, isDirectAnswer: Bool) -> String? {
         entities.extract(entity, from: text, allowFuzzy: isDirectAnswer)?.value
     }
+
+    func isFunctionWord(_ word: String) -> Bool { entities.isFunctionWord(word) }
 
     func isWholeValue(_ entity: String, _ text: String) -> Bool {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

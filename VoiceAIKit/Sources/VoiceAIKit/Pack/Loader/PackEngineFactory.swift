@@ -123,6 +123,11 @@ enum PackEngineFactory {
             // always-on mic is the worst failure this pack can produce. Empty
             // for a pack predating the guard, which leaves behaviour unchanged.
             bareValueGuards: pack.guards.bareValue,
+            // A memory the user named themselves cannot be in a build-time
+            // enum, so when the entity cannot match, the spoken name goes to the
+            // host marked unresolved instead of the engine re-prompting until
+            // the slot budget is spent. Empty for a pack predating the key.
+            slotPassthrough: pack.guards.slotPassthrough,
             helpMarkerPattern: pack.guards.helpMarker?.markers,
             helpPairs: pack.guards.helpMarker?.pairs ?? [:])
 

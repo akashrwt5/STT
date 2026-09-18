@@ -216,7 +216,7 @@ final class OpenSlotNameDerivationTests: XCTestCase {
         // resolves with timeExplicit=true, dayExplicit=false.
         let answer = await engine.handle("remind me to call mom at 9am")
 
-        guard case .fulfill(_, _, let params, _, _, _, _) = answer else {
+        guard case .fulfill(_, _, let params, _, _, _, _, _) = answer else {
             return XCTFail("""
                 both required slots should be filled from one utterance — got \(answer)
                 """)
@@ -243,7 +243,7 @@ final class OpenSlotNameDerivationTests: XCTestCase {
         // Opening: `fillOpenTopics` derives the name.
         let opening = makeEngine(routingTo: reminder)
         let openingResult = await opening.handle(sentence)
-        guard case .fulfill(_, _, let openingParams, _, _, _, _) = openingResult else {
+        guard case .fulfill(_, _, let openingParams, _, _, _, _, _) = openingResult else {
             return XCTFail("opening utterance did not complete the flow — got \(openingResult)")
         }
 
@@ -251,7 +251,7 @@ final class OpenSlotNameDerivationTests: XCTestCase {
         let followUp = makeEngine(routingTo: reminder)
         await arriveAtPrompt(followUp, opening: openReminder, intent: reminder, slot: "name")
         let followUpResult = await followUp.handle(sentence)
-        guard case .fulfill(_, _, let followUpParams, _, _, _, _) = followUpResult else {
+        guard case .fulfill(_, _, let followUpParams, _, _, _, _, _) = followUpResult else {
             return XCTFail("follow-up answer did not complete the flow — got \(followUpResult)")
         }
 
@@ -269,7 +269,7 @@ final class OpenSlotNameDerivationTests: XCTestCase {
         await arriveAtPrompt(engine, opening: openMemory, intent: memory, slot: "memory_name")
 
         let answer = await engine.handle("restaurant")
-        guard case .fulfill(let intent, _, let params, _, _, _, _) = answer else {
+        guard case .fulfill(let intent, _, let params, _, _, _, _, _) = answer else {
             return XCTFail("expected the memory flow to complete, got \(answer)")
         }
         XCTAssertEqual(intent, memory)
@@ -287,13 +287,13 @@ final class OpenSlotNameDerivationTests: XCTestCase {
     func testASpelledOutTimeLeavesTheNameJustLikeADigitOne() async throws {
         let digitEngine = makeEngine(routingTo: reminder)
         let digits = await digitEngine.handle("remind me to call Mukesh at 9")
-        guard case .fulfill(_, _, let digitParams, _, _, _, _) = digits else {
+        guard case .fulfill(_, _, let digitParams, _, _, _, _, _) = digits else {
             return XCTFail("the digit form did not complete the flow — got \(digits)")
         }
 
         let wordEngine = makeEngine(routingTo: reminder)
         let words = await wordEngine.handle("remind me to call Mukesh at nine")
-        guard case .fulfill(_, _, let wordParams, _, _, _, _) = words else {
+        guard case .fulfill(_, _, let wordParams, _, _, _, _, _) = words else {
             return XCTFail("the spelled-out form did not complete the flow — got \(words)")
         }
 

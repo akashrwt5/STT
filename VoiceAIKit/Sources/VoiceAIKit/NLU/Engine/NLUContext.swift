@@ -51,6 +51,10 @@ final class NLUSession: @unchecked Sendable {
     /// Mirrors Python NLUEngine.MAX_SLOT_ATTEMPTS = 3: at 3 failures the engine
     /// abandons the flow and falls back to GenAI so the user is never trapped.
     var slotAttempts: Int = 0
+    /// Slots filled by `slot_passthrough` — the value is what the user SAID,
+    /// not a value this pack recognised. Held on the session because the fill
+    /// and the FULFILL that reports it are different turns.
+    var unresolvedSlots: Set<String> = []
     /// The classification breakdown from the first turn of a slot-filling flow.
     /// Preserved across turns so the final `.fulfill` card can show the eye button.
     var pendingBreakdown: ClassificationBreakdown?
@@ -91,6 +95,7 @@ final class NLUSession: @unchecked Sendable {
         awaitingSlot = nil
         partialDateTime = nil
         slotAttempts = 0
+        unresolvedSlots = []
         pendingBreakdown = nil
     }
 

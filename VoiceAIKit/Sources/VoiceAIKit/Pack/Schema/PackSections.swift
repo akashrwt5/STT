@@ -304,11 +304,16 @@ struct PackGuards: Decodable, Sendable {
     let helpMarker: HelpMarker?
     let polarity: [PolarityGuard]
     let bareValue: [BareValueGuard]
+    /// `runtime/guards.json -> slot_passthrough`. Entities whose VALUES this
+    /// pack cannot own. Empty on a pack that predates the key, which leaves the
+    /// engine re-prompting exactly as it does today.
+    let slotPassthrough: [SlotPassthrough]
 
     enum CodingKeys: String, CodingKey {
         case helpMarker = "help_marker"
         case polarity
         case bareValue = "bare_value"
+        case slotPassthrough = "slot_passthrough"
     }
 
     init(from decoder: Decoder) throws {
@@ -316,10 +321,11 @@ struct PackGuards: Decodable, Sendable {
         helpMarker = try c.decodeIfPresent(HelpMarker.self, forKey: .helpMarker)
         polarity = try c.decodeIfPresent([PolarityGuard].self, forKey: .polarity) ?? []
         bareValue = try c.decodeIfPresent([BareValueGuard].self, forKey: .bareValue) ?? []
+        slotPassthrough = try c.decodeIfPresent([SlotPassthrough].self, forKey: .slotPassthrough) ?? []
     }
 
     static let empty = PackGuards()
-    private init() { helpMarker = nil; polarity = []; bareValue = [] }
+    private init() { helpMarker = nil; polarity = []; bareValue = []; slotPassthrough = [] }
 
     /// Suppresses an intent when the WHOLE utterance is nothing but a value of a
     /// closed entity. A memory is named "Outdoors"; someone who says only
@@ -328,6 +334,27 @@ struct PackGuards: Decodable, Sendable {
     ///
     /// The entity is NAMED, never copied: the guard reads the pack's own value
     /// list, so a memory added later is covered with no change here.
+    /// An entity whose values the pack cannot enumerate.
+    ///
+    /// `Custom` is one memory in a list of twelve, but the USER names their own
+    /// custom memory, so that name can never sit in a build-time enum. Without
+    /// this the engine asks for the name, cannot match what it is told, and
+    /// asks again until the slot budget is spent.
+    ///
+    /// `carrier` is what keeps it narrow: on an UNPROMPTED first turn the
+    /// utterance must carry an explicit change verb, because the microphone is
+    /// open for a whole session and "put it on the shelf" must not become a
+    /// request for a memory called "the shelf".
+    struct SlotPassthrough: Decodable, Sendable {
+        /// The entity whose values the pack cannot enumerate.
+        let entity: String
+        /// Anchored pattern matching the request wrapper; what remains after it
+        /// is the candidate name. Consulted only on an unprompted first turn.
+        let carrier: String
+        /// Optional trailing domain noun to strip ("switch to temp memory").
+        let trailing: String?
+    }
+
     struct BareValueGuard: Decodable, Sendable {
         /// Intent to suppress.
         let intent: String

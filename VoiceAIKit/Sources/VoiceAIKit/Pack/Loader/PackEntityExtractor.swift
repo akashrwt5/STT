@@ -75,6 +75,14 @@ struct PackEntityExtractor: Sendable {
     /// initialiser and VIK-017.
     private let openEntities: Set<String>
     private let stopwords: Set<String>
+
+    /// The pack's function-word list, read-only.
+    ///
+    /// Public because the engine needs it too: a passthrough slot value made
+    /// only of function words ("the", left behind by a carrier) is not a name.
+    /// Exposed rather than duplicated, so one language pack cannot disagree
+    /// with itself about what a function word is.
+    func isFunctionWord(_ word: String) -> Bool { stopwords.contains(word.lowercased()) }
     private let log: Logger
 
     // MARK: - Init

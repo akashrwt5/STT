@@ -141,6 +141,9 @@ actor NLUEngine: ConversationEngine {
         /// `runtime/guards.json → bare_value`. Empty when the pack predates the
         /// guard, which leaves the engine's behaviour exactly as it was.
         bareValueGuards: [PackGuards.BareValueGuard] = [],
+        /// `runtime/guards.json -> slot_passthrough`. Defaulted: a pack without
+        /// it keeps today's behaviour rather than acquiring a half-applied rule.
+        slotPassthrough: [PackGuards.SlotPassthrough] = [],
         helpMarkerPattern: String? = nil,
         helpPairs: [String: String] = [:],
         sessionID: String = "default"
@@ -166,6 +169,8 @@ actor NLUEngine: ConversationEngine {
         // the guard rather than failing the load: the pack is otherwise fine,
         // and NSRegularExpression's dialect is not identical to Python's `re`.
         self.bareValueGuards = bareValueGuards
+        self.slotPassthrough = Dictionary(slotPassthrough.map { ($0.entity, $0) },
+                                          uniquingKeysWith: { first, _ in first })
         if let pattern = helpMarkerPattern, !pattern.isEmpty {
             self.helpMarkers = try? NSRegularExpression(pattern: pattern,
                                                         options: [.caseInsensitive])
@@ -361,6 +366,10 @@ actor NLUEngine: ConversationEngine {
     /// to the pack is covered without touching the guard.
     private let bareValueGuards: [PackGuards.BareValueGuard]
 
+    /// `runtime/guards.json -> slot_passthrough`. Empty on a pack that predates
+    /// the key, which leaves the engine re-prompting exactly as it does today.
+    private let slotPassthrough: [String: PackGuards.SlotPassthrough]
+
     /// `runtime/guards.json → help_marker.markers`, compiled. Nil when the pack
     /// ships no guard, or its pattern does not compile here.
     private let helpMarkers: NSRegularExpression?
@@ -551,6 +560,14 @@ actor NLUEngine: ConversationEngine {
                 // should still fill. Unchanged.
                 if let value = entities.extract(slot.entity, from: text, isDirectAnswer: true) {
                     session.pendingSlots[slot.name] = value
+                    session.unresolvedSlots.remove(slot.name)
+                } else if let spoken = passthroughName(slot.entity, text, prompted: true) {
+                    // WE ASKED. The user answered with a name this pack does not
+                    // carry — their own custom memory, most likely. The host owns
+                    // the real list, so hand the spoken name over and mark it
+                    // unresolved rather than asking twice more and abandoning.
+                    session.pendingSlots[slot.name] = spoken
+                    session.unresolvedSlots.insert(slot.name)
                 }
             }
         }
@@ -578,6 +595,80 @@ actor NLUEngine: ConversationEngine {
         return advanceSlots(intent, cfg, breakdown: session.pendingBreakdown)
     }
 
+    /// The name the user spoke for a slot this pack cannot resolve, or nil.
+    ///
+    /// TWO CASES, and the difference is who raised the subject.
+    ///
+    /// `prompted` — the engine asked "What is the name of the memory?" and this
+    /// turn is the answer. The user has already committed to changing a memory,
+    /// so whatever they say IS the name; there is no carrier to strip. Same
+    /// reasoning the OPEN-entity branch uses.
+    ///
+    /// Not prompted — first turn. A name arrived unasked, so it only counts
+    /// when the utterance carries an explicit change verb. "switch to temp" has
+    /// no second reading; "put it on the shelf" has nothing BUT a second
+    /// reading, and the microphone is open all session. The carrier that
+    /// decides this is pack data, derived from the corpus, not written here.
+    ///
+    /// Mirrors `engine.py::_passthrough_name`.
+    private func passthroughName(_ entity: String, _ text: String,
+                                 prompted: Bool) -> String? {
+        guard let spec = slotPassthrough[entity] else { return nil }
+        var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !prompted {
+            guard let carrier = try? NSRegularExpression(pattern: spec.carrier,
+                                                         options: [.caseInsensitive]),
+                  let m = carrier.firstMatch(in: t, options: [.anchored],
+                                             range: NSRange(t.startIndex..., in: t)),
+                  let r = Range(m.range, in: t), r.lowerBound == t.startIndex,
+                  r.upperBound < t.endIndex
+            else { return nil }
+            t = String(t[r.upperBound...])
+        }
+        t = t.trimmingCharacters(in: CharacterSet(charactersIn: " .,!?")
+                                     .union(.whitespacesAndNewlines))
+        if let trailing = spec.trailing,
+           let re = try? NSRegularExpression(pattern: trailing, options: [.caseInsensitive]) {
+            let range = NSRange(t.startIndex..., in: t)
+            t = re.stringByReplacingMatches(in: t, options: [], range: range, withTemplate: "")
+                  .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // A refusal is not a name. Mid-flow these already reach `isCancel`;
+        // this is the belt for the turn where they somehow do not.
+        if t.isEmpty || yesNo(t) != nil { return nil }
+        let low = t.lowercased()
+        // Nor is a non-answer. `yesNo` returns nil for BOTH "uncertain" and
+        // "neither yes nor no", so it cannot tell them apart — the uncertainty
+        // vocabulary is consulted directly, or "i don't know" becomes a memory
+        // called "i don't know".
+        if uncertain.contains(where: { low.contains($0) }) { return nil }
+        if Self.fillers.contains(low) { return nil }
+        let words = low.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        // A name made only of function words is not a name: "switch to the"
+        // leaves "the" behind, which is the carrier's own tail.
+        if !words.isEmpty, words.allSatisfy({ entities.isFunctionWord($0) }) { return nil }
+        // A NAME IS NOT A SENTENCE. Answer the prompt with "who is the prime
+        // minister of india" and without this the engine files that as the
+        // memory's name. Same <= 2 token bound `isCancel` already uses for the
+        // same question, rather than a second invented number; the reference
+        // measured all 600 corpus memory spans and all 22 shipped surfaces at
+        // ONE word, and two leaves room for a custom memory called "tv time".
+        // Too strict costs a re-prompt; too loose turns an overheard question
+        // into a device action.
+        if words.count > 2 { return nil }
+        if low.hasSuffix("?") { return nil }
+        if let first = words.first, Self.questionWords.contains(first) { return nil }
+        return t
+    }
+
+    /// Sounds a user makes while thinking. Not a name, and not covered by the
+    /// uncertainty list, which carries phrases rather than fillers.
+    private static let fillers: Set<String> = ["um", "umm", "uh", "uhh", "hmm", "hm", "er", "erm", "eh"]
+    /// Openers that make an utterance a question rather than an answer.
+    private static let questionWords: Set<String> = [
+        "who", "what", "where", "when", "why", "how", "which", "whose",
+        "is", "are", "do", "does", "can", "could", "should", "would"]
+
     private func advanceSlots(_ intent: String, _ cfg: IntentDef,
                                breakdown: ClassificationBreakdown? = nil) -> NLUResponse {
         for slot in cfg.slots where slot.required && session.pendingSlots[slot.name] == nil {
@@ -586,10 +677,11 @@ actor NLUEngine: ConversationEngine {
             return .prompt(intent: intent, question: slot.prompt, filled: session.pendingSlots)
         }
         let params = session.pendingSlots
+        let unresolved = session.unresolvedSlots.filter { params[$0] != nil }.sorted()
         session.resetSlotFilling()
         return .fulfill(intent: intent, action: cfg.action,
                         parameters: params, message: cfg.fulfillment ?? "", confidence: 1.0,
-                        breakdown: breakdown)
+                        breakdown: breakdown, unresolvedSlots: unresolved)
     }
 
     // MARK: - New intent (priority 3)
@@ -833,6 +925,13 @@ actor NLUEngine: ConversationEngine {
             // matches only — a fuzzy hit here fills a slot the user never spoke.
             if let value = entities.extract(slot.entity, from: text, isDirectAnswer: false) {
                 slots[slot.name] = value
+            } else if let spoken = passthroughName(slot.entity, text, prompted: false) {
+                // FIRST TURN. Nobody asked, so a name only counts when the
+                // utterance carries an explicit change verb — see
+                // `passthroughName`. "switch to temp" qualifies; "put it on the
+                // shelf" does not, and must not.
+                slots[slot.name] = spoken
+                session.unresolvedSlots.insert(slot.name)
             }
         }
     }

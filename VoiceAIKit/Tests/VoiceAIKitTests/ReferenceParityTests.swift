@@ -259,7 +259,7 @@ final class ReferenceParityTests: XCTestCase {
             // a different fix, so the message has to say which.
             let actualIntent: String
             switch response {
-            case .fulfill(let i, _, _, _, _, _, _): actualIntent = i
+            case .fulfill(let i, _, _, _, _, _, _, _): actualIntent = i
             case .fallback(let i, _, _):            actualIntent = i
             case .confirm(let i, _, _, _):          actualIntent = i
             case .prompt(let i, _, _):              actualIntent = i

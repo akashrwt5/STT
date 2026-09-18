@@ -335,7 +335,7 @@ final class PhraseReport: XCTestCase {
         let finalIntent: String
         var finalConfidence: Double?
         switch response {
-        case .fulfill(let i, _, _, _, let c, _, _): kind = "FULFILL";  finalIntent = i; finalConfidence = c
+        case .fulfill(let i, _, _, _, let c, _, _, _): kind = "FULFILL";  finalIntent = i; finalConfidence = c
         case .fallback(let i, let c, _):            kind = "FALLBACK"; finalIntent = i; finalConfidence = c
         case .prompt(let i, _, _):                  kind = "PROMPT";   finalIntent = i
         case .confirm(let i, _, _, _):              kind = "CONFIRM";  finalIntent = i
