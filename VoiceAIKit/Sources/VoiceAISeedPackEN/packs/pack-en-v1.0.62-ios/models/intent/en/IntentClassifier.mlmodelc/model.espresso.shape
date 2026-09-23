@@ -1,7 +1,7 @@
 {
   "layer_shapes" : {
     "tfidf_vector" : {
-      "k" : 1599,
+      "k" : 1581,
       "w" : 1,
       "n" : 1,
       "h" : 1

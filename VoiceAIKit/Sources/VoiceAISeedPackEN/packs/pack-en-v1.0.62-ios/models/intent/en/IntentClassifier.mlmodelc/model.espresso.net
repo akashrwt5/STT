@@ -30,7 +30,7 @@
       "has_tanh" : 0,
       "blob_biases" : 1,
       "name" : "logistic_regression",
-      "nB" : 1599
+      "nB" : 1581
     },
     {
       "bottom" : "logits",
