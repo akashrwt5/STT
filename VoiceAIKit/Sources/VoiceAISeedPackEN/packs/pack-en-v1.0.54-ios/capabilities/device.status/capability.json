@@ -1,1 +1,0 @@
-{"actions":[{"descriptor":"Cmd.BatteryLevel — Checking battery level.","key":"battery.level","params":[]}],"id":"device.status","languages":["en"],"owner":"platform-team","platforms":["ios","android","server"],"status":"active","version":"1.0"}

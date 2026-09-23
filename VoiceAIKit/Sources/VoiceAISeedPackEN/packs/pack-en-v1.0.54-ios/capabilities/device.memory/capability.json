@@ -1,1 +1,0 @@
-{"actions":[{"descriptor":"Cmd.MemoryChange — Memory changed.","key":"memory.change","params":[{"entity":"memory","name":"memory_name","required":true,"type":"entity_ref"}]}],"id":"device.memory","languages":["en"],"owner":"platform-team","platforms":["ios","android","server"],"status":"active","version":"1.0"}

@@ -1,0 +1,1 @@
+{"actions":[{"descriptor":"Cmd.TranscribeStart","key":"transcribe.open","params":[]}],"id":"transcription","languages":["en"],"owner":"platform-team","platforms":["ios","android","server"],"status":"active","version":"1.0"}

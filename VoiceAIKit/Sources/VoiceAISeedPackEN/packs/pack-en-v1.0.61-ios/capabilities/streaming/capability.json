@@ -1,0 +1,1 @@
+{"actions":[{"descriptor":"Cmd.StreamingStart","key":"streaming.start","params":[]},{"descriptor":"Cmd.StreamingStop","key":"streaming.stop","params":[]}],"id":"streaming","languages":["en"],"owner":"platform-team","platforms":["ios","android","server"],"status":"active","version":"1.0"}
