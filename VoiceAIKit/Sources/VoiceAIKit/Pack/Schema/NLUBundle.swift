@@ -203,6 +203,10 @@ struct NLUBundle: Decodable, Sendable, Equatable {
         let tfliteArtifact: String?
         let tfliteInt8Artifact: String?
         let embedderID: String?
+        /// Native-scorer weights (`slot_tagger_weights.json`) that Swift and
+        /// Kotlin score with no ML runtime. Declared by `models.slot_tagger`;
+        /// nil for every other family.
+        let deviceWeightsArtifact: String?
 
         enum CodingKeys: String, CodingKey {
             case artifact, format
@@ -214,12 +218,14 @@ struct NLUBundle: Decodable, Sendable, Equatable {
             case tfliteArtifact = "tflite_artifact"
             case tfliteInt8Artifact = "tflite_int8_artifact"
             case embedderID = "embedder_id"
+            case deviceWeightsArtifact = "device_weights_artifact"
         }
 
         /// Every artifact path this spec declares, for existence checking.
         var declaredPaths: [String] {
             [artifact, coremlArtifact, coremlCompiledArtifact, coremlFullArtifact,
-             coremlFullCompiledArtifact, tfliteArtifact, tfliteInt8Artifact].compactMap { $0 }
+             coremlFullCompiledArtifact, tfliteArtifact, tfliteInt8Artifact,
+             deviceWeightsArtifact].compactMap { $0 }
         }
 
         /// The artifact iOS should load for a variant, and whether it is

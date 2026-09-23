@@ -379,6 +379,9 @@ enum BundleDataLoader {
                 missingFromLabels: intentIDs.subtracting(labelSet).sorted())
         }
 
+        // -- slot tagger -----------------------------------------------------
+        let slotTagger = try resolveSlotTagger(root: root, language: language, manifest: manifest)
+
         return ResolvedPack(
             manifest: manifest,
             language: language,
@@ -397,7 +400,80 @@ enum BundleDataLoader {
             cascade: sections.cascade,
             guards: sections.guards,
             telemetry: sections.telemetry,
-            classifier: classifier)
+            classifier: classifier,
+            slotTagger: slotTagger)
+    }
+
+    // MARK: - Slot tagger
+
+    /// Bind the BIO title tagger, through the manifest.
+    ///
+    /// The path is read from `models.slot_tagger.<language>` rather than
+    /// hardcoded: the pack decides where its files live. `device_weights_artifact`
+    /// is the key the compiler writes; a phone slice built by `assemble_pack`
+    /// also points `artifact` at the same file with `format: "json"`, which is
+    /// accepted when the dedicated key is absent.
+    ///
+    /// Three outcomes, deliberately different:
+    ///
+    ///   not declared         -> nil. Every pack before the tagger shipped; the
+    ///                           engine derives titles with `deriveTopic`.
+    ///   unsupported
+    ///   feature_spec         -> nil, logged as an error. The file is well formed
+    ///                           but redefines features this build cannot
+    ///                           reproduce; scoring it would be silently wrong,
+    ///                           and refusing the whole pack would take intent
+    ///                           routing down for the sake of a title. The engine
+    ///                           falls back to `deriveTopic`, as for an old pack.
+    ///   malformed            -> throw. The pack promised a model and shipped a
+    ///                           broken one, so nothing else it says can be
+    ///                           trusted either. (A declared file that is MISSING
+    ///                           is refused earlier, by `verifyDeclaredArtifacts`.)
+    static func resolveSlotTagger(root: URL,
+                                  language: String,
+                                  manifest: NLUBundle) throws -> PackSlotTagger? {
+        guard let spec = manifest.models.spec(family: "slot_tagger", scope: language) else {
+            log.notice("Pack declares no slot tagger [\(language, privacy: .public)] — titles come from deriveTopic")
+            return nil
+        }
+        let path: String
+        if let weights = spec.deviceWeightsArtifact {
+            path = weights
+        } else if spec.format == "json" {
+            path = spec.artifact
+        } else {
+            log.error("""
+                slot_tagger.\(language, privacy: .public) declares no device weights \
+                (format '\(spec.format, privacy: .public)') — titles come from deriveTopic
+                """)
+            return nil
+        }
+
+        let url = root.appendingPathComponent(path)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw VoiceIntentError.declaredArtifactMissing(path: path)
+        }
+        guard let data = try? Data(contentsOf: url) else {
+            throw VoiceIntentError.unreadableFile(path: path, reason: "not readable")
+        }
+        do {
+            let tagger = try PackSlotTagger(weightsJSON: data)
+            log.info("""
+                Slot tagger ready [\(language, privacy: .public)] — \
+                feature_spec v\(tagger.featureSpecVersion), \(tagger.classes.count) classes
+                """)
+            return tagger
+        } catch PackSlotTagger.LoadError.unsupportedFeatureSpec(let found, let supported) {
+            log.error("""
+                slot_tagger.\(language, privacy: .public) is feature_spec v\(found); \
+                this build reproduces v\(supported) — tagger disabled, titles come from deriveTopic
+                """)
+            return nil
+        } catch PackSlotTagger.LoadError.malformed(let reason) {
+            throw VoiceIntentError.malformedJSON(path: path, reason: reason)
+        } catch {
+            throw VoiceIntentError.malformedJSON(path: path, reason: String(describing: error))
+        }
     }
 
     // MARK: - Classifier artifacts

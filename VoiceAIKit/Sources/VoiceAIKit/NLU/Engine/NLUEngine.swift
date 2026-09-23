@@ -70,6 +70,14 @@ actor NLUEngine: ConversationEngine {
     /// were supplied. The third and final step of deriving a topic — see
     /// `deriveTopic`.
     private let leadingConnectorPattern: String?
+    /// `lexicon.topic_anchors`: searched anywhere after the carriers, and
+    /// everything up to the end of the match is cut. A step of `deriveTopic`;
+    /// empty for a pack predating the key, which makes it a no-op.
+    private let topicAnchors: [String]
+    /// The pack's BIO title tagger, consulted BEFORE `deriveTopic` for every open
+    /// slot — see `openSlotTitle`. Nil for a pack that ships none, in which case
+    /// titles come from `deriveTopic` exactly as they did before it existed.
+    private let titleExtractor: (any OpenSlotTitleExtracting)?
     /// intent → when it confirms. An intent absent from the map defaults to
     /// `.always`, which is what the pre-pack schema expressed by simply carrying
     /// a `followup`. `PackEngineFactory` supplies a gate for every intent, so
@@ -130,6 +138,12 @@ actor NLUEngine: ConversationEngine {
         // Empty by default, which is a no-op — the pre-pack path never had this
         // step, so leaving it out keeps that path byte-identical.
         leadingConnectors: [String] = [],
+        /// `lexicon.topic_anchors`. Empty by default: a no-op, like
+        /// `leadingConnectors`, so callers that predate it are unchanged.
+        topicAnchors: [String] = [],
+        /// `ResolvedPack.slotTagger`. Nil by default, which keeps titles on
+        /// `deriveTopic` alone — the behaviour before the tagger existed.
+        titleExtractor: (any OpenSlotTitleExtracting)? = nil,
         confirmationGates: [String: ConfirmationGate] = [:],
         /// `runtime/guards.json → help_marker`: the question pattern, and the
         /// command → help pairing (ND-14).
@@ -158,6 +172,8 @@ actor NLUEngine: ConversationEngine {
         self.uncertain = uncertain
         self.noIdioms = noIdioms
         self.carrierPatterns = carriers
+        self.topicAnchors = topicAnchors
+        self.titleExtractor = titleExtractor
         self.interruptThreshold = interruptThreshold
         self.agreementThreshold = agreementThreshold
         self.maxSlotAttempts = maxSlotAttempts
@@ -552,8 +568,16 @@ actor NLUEngine: ConversationEngine {
                 // `remind` is `fuzzy: true`, and its only fuzzy-eligible synonym is
                 // "activity", which "acidity" and "captivity" are both within the
                 // edit-distance limit of.
-                session.pendingSlots[slot.name] =
-                    deriveTopic(text) ?? text.trimmingCharacters(in: .whitespaces)
+                //
+                // Tagger first, then `deriveTopic`, then the raw answer — the same
+                // `openSlotTitle` the opening utterance uses, so the invariant
+                // above still holds with the tagger in the loop. The raw answer is
+                // the last resort only when neither finds a subject.
+                let found = openSlotTitle(text)
+                let title = found?.title ?? text.trimmingCharacters(in: .whitespaces)
+                session.pendingSlots[slot.name] = title
+                logOpenTitle(intent: intent, slot: slot.name, turn: "answer",
+                             source: found?.source ?? "raw", title: title)
             } else {
                 // CLOSED entity. The user was asked for THIS slot and is answering it,
                 // so approximate matching is appropriate — a misheard memory name
@@ -880,7 +904,7 @@ actor NLUEngine: ConversationEngine {
             var staged: [String: String] = [:]
             if !cfg.slots.isEmpty {
                 extractAllSlots(cfg, text, into: &staged)
-                fillOpenTopics(cfg, text, into: &staged)
+                fillOpenTopics(intent, cfg, text, into: &staged)
             }
             session.pendingIntent = cfg.slots.isEmpty ? nil : intent
             session.pendingSlots = staged
@@ -894,7 +918,7 @@ actor NLUEngine: ConversationEngine {
         if !cfg.slots.isEmpty {
             var slots: [String: String] = [:]
             extractAllSlots(cfg, text, into: &slots)
-            fillOpenTopics(cfg, text, into: &slots)
+            fillOpenTopics(intent, cfg, text, into: &slots)
             session.pendingIntent = intent
             session.pendingSlots = slots
             session.awaitingSlot = nil
@@ -1059,13 +1083,61 @@ actor NLUEngine: ConversationEngine {
     ///
     /// Only the opening-utterance paths call this, so the mid-flow opportunistic sweep
     /// is untouched.
-    private func fillOpenTopics(_ cfg: IntentDef, _ text: String, into slots: inout [String: String]) {
+    private func fillOpenTopics(_ intent: String, _ cfg: IntentDef, _ text: String,
+                                into slots: inout [String: String]) {
         for slot in cfg.slots {
             guard slot.required, entities.isOpen(slot.entity) else { continue }
-            if let topic = deriveTopic(text), !topic.isEmpty {
-                slots[slot.name] = topic
+            let found = openSlotTitle(text)
+            logOpenTitle(intent: intent, slot: slot.name, turn: "opening",
+                         source: found?.source ?? "none", title: found?.title)
+            if let found {
+                slots[slot.name] = found.title
             }
         }
+    }
+
+    /// The title of an open free-text slot and where it came from: the BIO
+    /// tagger's span (`"tagger"`), else `deriveTopic` (`"derive"`), else nil.
+    ///
+    /// Mirrors `engine.py::_open_title`. Used for BOTH the opening utterance and
+    /// the answer to the slot's prompt, so the same sentence names the reminder
+    /// the same way wherever it is said. The answer path adds the raw text as a
+    /// last resort (`"raw"`); the opening does not.
+    ///
+    /// The tagger goes first because it FINDS the subject rather than stripping
+    /// around it ("remind me at 9pm for dinner" -> "dinner"). It returns nil when
+    /// it sees no subject — a bare noun answer like "milk" is the common case —
+    /// and `deriveTopic` then keeps what the user said.
+    private func openSlotTitle(_ text: String) -> (title: String, source: String)? {
+        if let tagged = titleExtractor?.title(of: text)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !tagged.isEmpty {
+            return (tagged, "tagger")
+        }
+        if let derived = deriveTopic(text), !derived.isEmpty {
+            return (derived, "derive")
+        }
+        return nil
+    }
+
+    /// One line per open-slot title — for a reminder, where its NAME came from:
+    ///
+    ///   title intent=reminders.add slot=name turn=answer source=tagger tagger=loaded value=call mom
+    ///
+    /// `source` is `tagger` (the BIO tagger found the span), `derive`
+    /// (`deriveTopic` stripped carrier, time and connector), `raw` (answer only:
+    /// neither found a subject, so the user's words stand) or `none` (opening
+    /// only: no title yet, the engine will ask). Same fields as the Python
+    /// engine's `nlu.open_title`.
+    ///
+    /// The intent is the pack's opaque label, logged as data — the engine does
+    /// not know which intent is "the reminder". `value` is the user's own words,
+    /// so it is `.private`: shown in Xcode's console while the debugger is
+    /// attached, redacted in device logs.
+    private func logOpenTitle(intent: String, slot: String, turn: String,
+                              source: String, title: String?) {
+        let tagger: String = titleExtractor == nil ? "none" : "loaded"
+        let value: String = title ?? "-"
+        decisionLog.notice("title intent=\(intent, privacy: .public) slot=\(slot, privacy: .public) turn=\(turn, privacy: .public) source=\(source, privacy: .public) tagger=\(tagger, privacy: .public) value=\(value, privacy: .private)")
     }
 
     private func deriveTopic(_ text: String) -> String? {
@@ -1093,6 +1165,15 @@ actor NLUEngine: ConversationEngine {
         for pattern in carrierPatterns {
             if let range = t.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
                 t.removeSubrange(range)
+            }
+        }
+        // Topic anchors (`lexicon.topic_anchors`): filler BEFORE an explicit
+        // request that no `^`-anchored carrier can reach — "ok so basically set up
+        // a reminder for the meeting" -> "the meeting". Searched anywhere; the
+        // text up to the end of the match goes. Mirrors `engine.py::_derive_topic`.
+        for pattern in topicAnchors {
+            if let range = t.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
+                t = String(t[range.upperBound...])
             }
         }
         var stripped = t

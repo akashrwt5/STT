@@ -85,6 +85,17 @@ struct ResolvedPack: Sendable {
 
     let classifier: ClassifierArtifacts
 
+    // MARK: Slot tagger
+
+    /// The BIO title tagger for open free-text slots, from
+    /// `models.slot_tagger.<language>.device_weights_artifact`.
+    ///
+    /// Nil when the pack declares none (every pack before the tagger shipped),
+    /// or declares a `feature_spec` this build cannot reproduce. Either way the
+    /// engine derives titles with `deriveTopic` alone, which is exactly what it
+    /// did before the tagger existed.
+    let slotTagger: PackSlotTagger?
+
     /// Everything needed to stand up the intent classifier, with paths already
     /// resolved to absolute URLs.
     struct ClassifierArtifacts: Sendable {

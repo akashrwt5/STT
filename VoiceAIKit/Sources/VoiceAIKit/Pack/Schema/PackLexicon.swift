@@ -27,6 +27,16 @@ struct PackLexicon: Decodable, Sendable {
     /// ("remind me to " → ""). Portable-subset patterns only.
     let carriers: [String]
     let leadingConnectors: [String]
+    /// Portable-subset regexes SEARCHED anywhere in the utterance after the
+    /// carriers are stripped; everything up to the end of the first match is
+    /// cut. Handles filler before an explicit request ("ok so basically set up a
+    /// reminder for the meeting" -> "the meeting"), which `^`-anchored carriers
+    /// cannot reach. Mirrors `engine.py::_derive_topic`, which reads the same
+    /// `lexicon.topic_anchors`.
+    ///
+    /// Empty on a pack built before the key existed, which leaves topic
+    /// derivation exactly as it was.
+    let topicAnchors: [String]
     /// VIK-068. Words that ABANDON an open slot-filling flow.
     ///
     /// Empty on a pack built before the key existed. That does NOT disable
@@ -62,6 +72,7 @@ struct PackLexicon: Decodable, Sendable {
         case lang, affirmative, negative, carriers, contractions
         case negationCues = "negation_cues"
         case leadingConnectors = "leading_connectors"
+        case topicAnchors = "topic_anchors"
         case cancelCues = "cancel_cues"
         case lemmas
         case datetime = "datetime_grammar"
@@ -77,6 +88,7 @@ struct PackLexicon: Decodable, Sendable {
         negationCues = try c.decode([String].self, forKey: .negationCues)
         carriers = try c.decode([String].self, forKey: .carriers)
         leadingConnectors = try c.decode([String].self, forKey: .leadingConnectors)
+        topicAnchors = try c.decodeIfPresent([String].self, forKey: .topicAnchors) ?? []
         cancelCues = try c.decodeIfPresent([String].self, forKey: .cancelCues) ?? []
         contractions = try c.decodeIfPresent([String: String].self, forKey: .contractions) ?? [:]
         lemmas = try c.decodeIfPresent([String: String].self, forKey: .lemmas) ?? [:]

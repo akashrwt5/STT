@@ -112,6 +112,12 @@ enum PackEngineFactory {
             agreementThreshold: pack.policies.thresholds.agreement,
             trailingFunctionWords: effectiveTrailingWords,
             leadingConnectors: lexicon.leadingConnectors,
+            // `lexicon.topic_anchors` — one step of `deriveTopic`. Empty for a
+            // pack predating the key, which leaves derivation unchanged.
+            topicAnchors: lexicon.topicAnchors,
+            // The BIO title tagger, consulted before `deriveTopic` for open
+            // slots. Nil for a pack that ships none.
+            titleExtractor: pack.slotTagger,
             confirmationGates: confirmationGates(from: pack),
             // ND-14, from `runtime/guards.json`. Every pack this loader has ever
             // read has shipped it; `PackGuards` was decoded and validated for
@@ -136,7 +142,8 @@ enum PackEngineFactory {
             [\(pack.language, privacy: .public)], \(pack.intents.count) intents, \
             \(pack.classifier.variant.rawValue, privacy: .public) head, \
             keyword stage \(pack.stageEnabled(.keyword) ? "on" : "off", privacy: .public), \
-            agreement bar \(pack.policies.thresholds.agreement.map { String($0) } ?? "off", privacy: .public)
+            agreement bar \(pack.policies.thresholds.agreement.map { String($0) } ?? "off", privacy: .public), \
+            slot tagger \(pack.slotTagger == nil ? "off" : "on", privacy: .public)
             """)
         return engine
     }

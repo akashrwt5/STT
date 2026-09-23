@@ -1,0 +1,6584 @@
+{
+  "version": "1.0.0",
+  "lang": "en",
+  "generated_from": {
+    "weights": "language_packs/en/models/slot/slot_tagger_weights.json",
+    "feature_spec_version": 2,
+    "classes": [
+      "B-TITLE",
+      "I-TITLE",
+      "O"
+    ],
+    "intercept": [
+      -1.8236,
+      -2.2261,
+      4.0497
+    ]
+  },
+  "cases": [
+    {
+      "text": "",
+      "tokens": [],
+      "tags": [],
+      "title": null,
+      "min_margin": null
+    },
+    {
+      "text": ".",
+      "tokens": [
+        "."
+      ],
+      "tags": [
+        "O"
+      ],
+      "title": null,
+      "min_margin": 17.8295
+    },
+    {
+      "text": "remind",
+      "tokens": [
+        "remind"
+      ],
+      "tags": [
+        "O"
+      ],
+      "title": null,
+      "min_margin": 16.5292
+    },
+    {
+      "text": "set a reminder",
+      "tokens": [
+        "set",
+        "a",
+        "reminder"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 13.17185
+    },
+    {
+      "text": "bro set reminder to take medicine tomorrow 5 pm",
+      "tokens": [
+        "bro",
+        "set",
+        "reminder",
+        "to",
+        "take",
+        "medicine",
+        "tomorrow",
+        "5",
+        "pm"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "take medicine",
+      "min_margin": 2.77482
+    },
+    {
+      "text": "set a remind her to call the doctor",
+      "tokens": [
+        "set",
+        "a",
+        "reminder",
+        "to",
+        "call",
+        "the",
+        "doctor"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "call the doctor",
+      "min_margin": 8.88472
+    },
+    {
+      "text": "remind me two buy milk",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "buy",
+        "milk"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "buy milk",
+      "min_margin": 8.7171
+    },
+    {
+      "text": "wake me up at for pm",
+      "tokens": [
+        "wake",
+        "me",
+        "up",
+        "at",
+        "4",
+        "pm"
+      ],
+      "tags": [
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "me",
+      "min_margin": 0.1129
+    },
+    {
+      "text": "gimme a ping to water the plants",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "water",
+        "the",
+        "plants"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "water the plants",
+      "min_margin": 4.99235
+    },
+    {
+      "text": "um like remind me to take out the trash",
+      "tokens": [
+        "like",
+        "remind",
+        "me",
+        "to",
+        "take",
+        "out",
+        "the",
+        "trash"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "take out the trash",
+      "min_margin": 7.71508
+    },
+    {
+      "text": "dont forget to feed the dog",
+      "tokens": [
+        "do",
+        "not",
+        "forget",
+        "to",
+        "feed",
+        "the",
+        "dog"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "feed the dog",
+      "min_margin": 4.20988
+    },
+    {
+      "text": "i've gotta call mom tomorrow",
+      "tokens": [
+        "i",
+        "have",
+        "to",
+        "call",
+        "mom",
+        "tomorrow"
+      ],
+      "tags": [
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "call mom",
+      "min_margin": 1.14974
+    },
+    {
+      "text": "remind me to take my medcine tomorow",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "take",
+        "my",
+        "medcine",
+        "tomorow"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "take my medcine",
+      "min_margin": 9.09155
+    },
+    {
+      "text": "remind me to turn the lights on at 8 p.m.",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "turn",
+        "the",
+        "lights",
+        "on",
+        "at",
+        "8",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "turn the lights on",
+      "min_margin": 0.8905
+    },
+    {
+      "text": "remind me to call mom on christmas",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "call",
+        "mom",
+        "on",
+        "christmas"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "call mom on christmas",
+      "min_margin": 5.58294
+    },
+    {
+      "text": "please remind me to book a parking spot for my carnival cruise",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "book",
+        "a",
+        "parking",
+        "spot",
+        "for",
+        "my",
+        "carnival",
+        "cruise"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "book a parking spot for my carnival cruise",
+      "min_margin": 3.92059
+    },
+    {
+      "text": "help me remember an appointment",
+      "tokens": [
+        "help",
+        "me",
+        "remember",
+        "an",
+        "appointment"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "an appointment",
+      "min_margin": 0.0425
+    },
+    {
+      "text": "remember to work out",
+      "tokens": [
+        "remember",
+        "to",
+        "work",
+        "out"
+      ],
+      "tags": [
+        "O",
+        "I-TITLE",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "work out",
+      "min_margin": 0.04454
+    },
+    {
+      "text": "i could use a reminder later",
+      "tokens": [
+        "i",
+        "could",
+        "use",
+        "a",
+        "reminder",
+        "later"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 0.0891
+    },
+    {
+      "text": "remember to turn the lights on at 8 p.m.",
+      "tokens": [
+        "remember",
+        "to",
+        "turn",
+        "the",
+        "lights",
+        "on",
+        "at",
+        "8",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "turn the lights",
+      "min_margin": 0.09622
+    },
+    {
+      "text": "i need to schedule a reminder",
+      "tokens": [
+        "i",
+        "need",
+        "to",
+        "schedule",
+        "a",
+        "reminder"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 0.22845
+    },
+    {
+      "text": "i don't want to forget this",
+      "tokens": [
+        "i",
+        "do",
+        "not",
+        "want",
+        "to",
+        "forget",
+        "this"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 0.34886
+    },
+    {
+      "text": "help me remember this evening",
+      "tokens": [
+        "help",
+        "me",
+        "remember",
+        "this",
+        "evening"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 0.4205
+    },
+    {
+      "text": "schedule appointment",
+      "tokens": [
+        "schedule",
+        "appointment"
+      ],
+      "tags": [
+        "B-TITLE",
+        "B-TITLE"
+      ],
+      "title": "appointment",
+      "min_margin": 0.53465
+    },
+    {
+      "text": "i need a nudge later about this",
+      "tokens": [
+        "i",
+        "need",
+        "a",
+        "nudge",
+        "later",
+        "about",
+        "this"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 0.57775
+    },
+    {
+      "text": "reminder me every year to go to the doctor at 8 a.m.",
+      "tokens": [
+        "reminder",
+        "me",
+        "every",
+        "year",
+        "to",
+        "go",
+        "to",
+        "the",
+        "doctor",
+        "at",
+        "8",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "go to the doctor",
+      "min_margin": 0.67695
+    },
+    {
+      "text": "save this for me please",
+      "tokens": [
+        "save",
+        "this",
+        "for",
+        "me",
+        "please"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 0.7092
+    },
+    {
+      "text": "set a reminder for me please",
+      "tokens": [
+        "set",
+        "a",
+        "reminder",
+        "for",
+        "me",
+        "please"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 0.7092
+    },
+    {
+      "text": "please remind me to work out",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "work",
+        "out"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "work out",
+      "min_margin": 0.76271
+    },
+    {
+      "text": "note this down for me",
+      "tokens": [
+        "note",
+        "this",
+        "down",
+        "for",
+        "me"
+      ],
+      "tags": [
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "me",
+      "min_margin": 0.779
+    },
+    {
+      "text": "make sure i remember this tonight",
+      "tokens": [
+        "make",
+        "sure",
+        "i",
+        "remember",
+        "this",
+        "tonight"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 0.80065
+    },
+    {
+      "text": "can you remind me to turn the lights on at 8 p.m.",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "to",
+        "turn",
+        "the",
+        "lights",
+        "on",
+        "at",
+        "8",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "turn the lights on",
+      "min_margin": 0.8905
+    },
+    {
+      "text": "please remind me to turn the lights on at 8 p.m.",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "turn",
+        "the",
+        "lights",
+        "on",
+        "at",
+        "8",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "turn the lights on",
+      "min_margin": 0.8905
+    },
+    {
+      "text": "can you remember to turn the lights on at 8 p.m.",
+      "tokens": [
+        "can",
+        "you",
+        "remember",
+        "to",
+        "turn",
+        "the",
+        "lights",
+        "on",
+        "at",
+        "8",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "turn the lights on",
+      "min_margin": 0.8905
+    },
+    {
+      "text": "set an alert so i don't miss it",
+      "tokens": [
+        "set",
+        "an",
+        "alert",
+        "so",
+        "i",
+        "do",
+        "not",
+        "miss",
+        "it"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 0.98352
+    },
+    {
+      "text": "i have an appointment coming up don't let me miss it",
+      "tokens": [
+        "i",
+        "have",
+        "an",
+        "appointment",
+        "coming",
+        "up",
+        "do",
+        "not",
+        "let",
+        "me",
+        "miss",
+        "it"
+      ],
+      "tags": [
+        "B-TITLE",
+        "B-TITLE",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "an appointment coming up",
+      "min_margin": 0.98352
+    },
+    {
+      "text": "i need to remember to water the plants tomorrow",
+      "tokens": [
+        "i",
+        "need",
+        "to",
+        "remember",
+        "to",
+        "water",
+        "the",
+        "plants",
+        "tomorrow"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "water the plants",
+      "min_margin": 0.99535
+    },
+    {
+      "text": "please set up a reminder",
+      "tokens": [
+        "please",
+        "set",
+        "up",
+        "a",
+        "reminder"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 1.0918
+    },
+    {
+      "text": "i better not forget this",
+      "tokens": [
+        "i",
+        "better",
+        "not",
+        "forget",
+        "this"
+      ],
+      "tags": [
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "i better not forget",
+      "min_margin": 1.09582
+    },
+    {
+      "text": "please remember to work out",
+      "tokens": [
+        "please",
+        "remember",
+        "to",
+        "work",
+        "out"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "I-TITLE",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "work out",
+      "min_margin": 1.151
+    },
+    {
+      "text": "please remember to study tomorrow",
+      "tokens": [
+        "please",
+        "remember",
+        "to",
+        "study",
+        "tomorrow"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O"
+      ],
+      "title": "study",
+      "min_margin": 1.151
+    },
+    {
+      "text": "please remember to take medicine",
+      "tokens": [
+        "please",
+        "remember",
+        "to",
+        "take",
+        "medicine"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "take medicine",
+      "min_margin": 1.151
+    },
+    {
+      "text": "please remember to wake up tomorrow",
+      "tokens": [
+        "please",
+        "remember",
+        "to",
+        "wake",
+        "up",
+        "tomorrow"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "wake up",
+      "min_margin": 1.151
+    },
+    {
+      "text": "please remember to wash my car",
+      "tokens": [
+        "please",
+        "remember",
+        "to",
+        "wash",
+        "my",
+        "car"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "wash my car",
+      "min_margin": 1.151
+    },
+    {
+      "text": "please remember to watch",
+      "tokens": [
+        "please",
+        "remember",
+        "to",
+        "watch"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "watch",
+      "min_margin": 1.151
+    },
+    {
+      "text": "can you set an alarm for 15 minutes",
+      "tokens": [
+        "can",
+        "you",
+        "set",
+        "an",
+        "alarm",
+        "for",
+        "15",
+        "minutes"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 1.1982
+    },
+    {
+      "text": "can you reminder to play with my cat everyday at 7 p.m.",
+      "tokens": [
+        "can",
+        "you",
+        "reminder",
+        "to",
+        "play",
+        "with",
+        "my",
+        "cat",
+        "everyday",
+        "at",
+        "7",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "play with my cat",
+      "min_margin": 1.2245
+    },
+    {
+      "text": "please reminder to play with my cat everyday at 7 p.m.",
+      "tokens": [
+        "please",
+        "reminder",
+        "to",
+        "play",
+        "with",
+        "my",
+        "cat",
+        "everyday",
+        "at",
+        "7",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "play with my cat",
+      "min_margin": 1.2245
+    },
+    {
+      "text": "reminder to play with my cat everyday at 7 p.m.",
+      "tokens": [
+        "reminder",
+        "to",
+        "play",
+        "with",
+        "my",
+        "cat",
+        "everyday",
+        "at",
+        "7",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "play with my cat",
+      "min_margin": 1.2245
+    },
+    {
+      "text": "remind me from monday till wednesday",
+      "tokens": [
+        "remind",
+        "me",
+        "from",
+        "monday",
+        "till",
+        "wednesday"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "I-TITLE",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 1.23634
+    },
+    {
+      "text": "reminder me to take medicine in 2 minutes",
+      "tokens": [
+        "reminder",
+        "me",
+        "to",
+        "take",
+        "medicine",
+        "in",
+        "2",
+        "minutes"
+      ],
+      "tags": [
+        "O",
+        "B-TITLE",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "take medicine",
+      "min_margin": 1.24855
+    },
+    {
+      "text": "can you schedule appointment",
+      "tokens": [
+        "can",
+        "you",
+        "schedule",
+        "appointment"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "schedule appointment",
+      "min_margin": 1.30216
+    },
+    {
+      "text": "alert me when it's time to leave",
+      "tokens": [
+        "alert",
+        "me",
+        "when",
+        "it's",
+        "time",
+        "to",
+        "leave"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "it's time to leave",
+      "min_margin": 1.33173
+    },
+    {
+      "text": "keep this on my radar",
+      "tokens": [
+        "keep",
+        "this",
+        "on",
+        "my",
+        "radar"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 1.3321
+    },
+    {
+      "text": "remind me to work out",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "work",
+        "out"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "work out",
+      "min_margin": 1.37498
+    },
+    {
+      "text": "i need to set up a reminder",
+      "tokens": [
+        "i",
+        "need",
+        "to",
+        "set",
+        "up",
+        "a",
+        "reminder"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "set",
+      "min_margin": 1.429
+    },
+    {
+      "text": "new reminder please",
+      "tokens": [
+        "new",
+        "reminder",
+        "please"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "please",
+      "min_margin": 1.45875
+    },
+    {
+      "text": "everyday",
+      "tokens": [
+        "everyday"
+      ],
+      "tags": [
+        "O"
+      ],
+      "title": null,
+      "min_margin": 1.4737
+    },
+    {
+      "text": "please remember to take medication today at 5 p.m.",
+      "tokens": [
+        "please",
+        "remember",
+        "to",
+        "take",
+        "medication",
+        "today",
+        "at",
+        "5",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "take medication",
+      "min_margin": 1.52545
+    },
+    {
+      "text": "please remember to take medicine next thursday at 4 p.m.",
+      "tokens": [
+        "please",
+        "remember",
+        "to",
+        "take",
+        "medicine",
+        "next",
+        "thursday",
+        "at",
+        "4",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "take medicine",
+      "min_margin": 1.52545
+    },
+    {
+      "text": "please remember to take medicine today at 5 p.m.",
+      "tokens": [
+        "please",
+        "remember",
+        "to",
+        "take",
+        "medicine",
+        "today",
+        "at",
+        "5",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "take medicine",
+      "min_margin": 1.52545
+    },
+    {
+      "text": "please remember to take my medicine tuesday morning at 10 a.m.",
+      "tokens": [
+        "please",
+        "remember",
+        "to",
+        "take",
+        "my",
+        "medicine",
+        "tuesday",
+        "morning",
+        "at",
+        "10",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "take my medicine",
+      "min_margin": 1.52545
+    },
+    {
+      "text": "please remember to turn off my phone everyday at 11 p.m.",
+      "tokens": [
+        "please",
+        "remember",
+        "to",
+        "turn",
+        "off",
+        "my",
+        "phone",
+        "everyday",
+        "at",
+        "11",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "turn off my phone everyday",
+      "min_margin": 1.52545
+    },
+    {
+      "text": "please remember to visit my family on thanksgiving day",
+      "tokens": [
+        "please",
+        "remember",
+        "to",
+        "visit",
+        "my",
+        "family",
+        "on",
+        "thanksgiving",
+        "day"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "visit my family on thanksgiving day",
+      "min_margin": 1.52545
+    },
+    {
+      "text": "please remember to wake up at 6 a.m.",
+      "tokens": [
+        "please",
+        "remember",
+        "to",
+        "wake",
+        "up",
+        "at",
+        "6",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "wake up",
+      "min_margin": 1.52545
+    },
+    {
+      "text": "please remember to wake up at 7 a.m.",
+      "tokens": [
+        "please",
+        "remember",
+        "to",
+        "wake",
+        "up",
+        "at",
+        "7",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "wake up",
+      "min_margin": 1.52545
+    },
+    {
+      "text": "please remember to wash the car in 4 hours",
+      "tokens": [
+        "please",
+        "remember",
+        "to",
+        "wash",
+        "the",
+        "car",
+        "in",
+        "4",
+        "hours"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "wash the car",
+      "min_margin": 1.52545
+    },
+    {
+      "text": "can you remind me about dinner in 1 hour",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "about",
+        "dinner",
+        "in",
+        "1",
+        "hour"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "dinner",
+      "min_margin": 1.5684
+    },
+    {
+      "text": "can you remind me about dinner in 1 minute",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "about",
+        "dinner",
+        "in",
+        "1",
+        "minute"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "dinner",
+      "min_margin": 1.5684
+    },
+    {
+      "text": "please remind me about dinner at 1523",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "about",
+        "dinner",
+        "at",
+        "1523"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O"
+      ],
+      "title": "dinner",
+      "min_margin": 1.5684
+    },
+    {
+      "text": "please remind me about dinner in 1 hour",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "about",
+        "dinner",
+        "in",
+        "1",
+        "hour"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "dinner",
+      "min_margin": 1.5684
+    },
+    {
+      "text": "please remind me about dinner in 1 minute",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "about",
+        "dinner",
+        "in",
+        "1",
+        "minute"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "dinner",
+      "min_margin": 1.5684
+    },
+    {
+      "text": "remind me i need to do this",
+      "tokens": [
+        "remind",
+        "me",
+        "i",
+        "need",
+        "to",
+        "do",
+        "this"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O"
+      ],
+      "title": "do",
+      "min_margin": 1.77528
+    },
+    {
+      "text": "i would like to set up a reminder",
+      "tokens": [
+        "i",
+        "would",
+        "like",
+        "to",
+        "set",
+        "up",
+        "a",
+        "reminder"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "set",
+      "min_margin": 1.80345
+    },
+    {
+      "text": "please remind me once about running",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "once",
+        "about",
+        "running"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "once about running",
+      "min_margin": 1.82626
+    },
+    {
+      "text": "remind me once about running",
+      "tokens": [
+        "remind",
+        "me",
+        "once",
+        "about",
+        "running"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "once about running",
+      "min_margin": 1.82626
+    },
+    {
+      "text": "set a reminder please",
+      "tokens": [
+        "set",
+        "a",
+        "reminder",
+        "please"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "please",
+      "min_margin": 1.8332
+    },
+    {
+      "text": "can you remind me that i have a doctor's appointment",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "that",
+        "i",
+        "have",
+        "a",
+        "doctor's",
+        "appointment"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "i have a doctor's appointment",
+      "min_margin": 1.8382
+    },
+    {
+      "text": "remind about running every day at 6 a.m.",
+      "tokens": [
+        "remind",
+        "about",
+        "running",
+        "every",
+        "day",
+        "at",
+        "6",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "running",
+      "min_margin": 1.84466
+    },
+    {
+      "text": "please remind me about dinner at 15 p.m.",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "about",
+        "dinner",
+        "at",
+        "15",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "dinner",
+      "min_margin": 1.94285
+    },
+    {
+      "text": "remind me about dinner at 1523",
+      "tokens": [
+        "remind",
+        "me",
+        "about",
+        "dinner",
+        "at",
+        "1523"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O"
+      ],
+      "title": "dinner",
+      "min_margin": 1.94285
+    },
+    {
+      "text": "remind me about dinner at six",
+      "tokens": [
+        "remind",
+        "me",
+        "about",
+        "dinner",
+        "at",
+        "six"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O"
+      ],
+      "title": "dinner",
+      "min_margin": 1.94285
+    },
+    {
+      "text": "remind me about dinner in 1 hour",
+      "tokens": [
+        "remind",
+        "me",
+        "about",
+        "dinner",
+        "in",
+        "1",
+        "hour"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "dinner",
+      "min_margin": 1.94285
+    },
+    {
+      "text": "can you remind me about this later",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "about",
+        "this",
+        "later"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "later",
+      "min_margin": 1.94475
+    },
+    {
+      "text": "please remind me everyday to read a book at 6 p.m.",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "everyday",
+        "to",
+        "read",
+        "a",
+        "book",
+        "at",
+        "6",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "everyday to read a book",
+      "min_margin": 2.0003
+    },
+    {
+      "text": "nudge me about this later",
+      "tokens": [
+        "nudge",
+        "me",
+        "about",
+        "this",
+        "later"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "later",
+      "min_margin": 2.0425
+    },
+    {
+      "text": "can you remember to vitamin d at 7 p.m. everyday",
+      "tokens": [
+        "can",
+        "you",
+        "remember",
+        "to",
+        "vitamin",
+        "d",
+        "at",
+        "7",
+        "p",
+        ".",
+        "m",
+        ".",
+        "everyday"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "vitamin d",
+      "min_margin": 2.04505
+    },
+    {
+      "text": "can you remind me to vitamin d at 7 p.m. everyday",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "to",
+        "vitamin",
+        "d",
+        "at",
+        "7",
+        "p",
+        ".",
+        "m",
+        ".",
+        "everyday"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "vitamin d",
+      "min_margin": 2.04505
+    },
+    {
+      "text": "please remind me to vitamin d at 7 p.m. everyday",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "vitamin",
+        "d",
+        "at",
+        "7",
+        "p",
+        ".",
+        "m",
+        ".",
+        "everyday"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "vitamin d",
+      "min_margin": 2.04505
+    },
+    {
+      "text": "remind me to vitamin d at 7 p.m. everyday",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "vitamin",
+        "d",
+        "at",
+        "7",
+        "p",
+        ".",
+        "m",
+        ".",
+        "everyday"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "vitamin d",
+      "min_margin": 2.04505
+    },
+    {
+      "text": "can you remind me tomorrow",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "tomorrow"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.0641
+    },
+    {
+      "text": "can you set an alarm for doctors appointment tomorrow morning",
+      "tokens": [
+        "can",
+        "you",
+        "set",
+        "an",
+        "alarm",
+        "for",
+        "doctors",
+        "appointment",
+        "tomorrow",
+        "morning"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O"
+      ],
+      "title": "doctors appointment",
+      "min_margin": 2.09335
+    },
+    {
+      "text": "can you set an alarm for 8 a.m.",
+      "tokens": [
+        "can",
+        "you",
+        "set",
+        "an",
+        "alarm",
+        "for",
+        "8",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.09335
+    },
+    {
+      "text": "please set an alarm for 15 minutes",
+      "tokens": [
+        "please",
+        "set",
+        "an",
+        "alarm",
+        "for",
+        "15",
+        "minutes"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.09335
+    },
+    {
+      "text": "please remind me to charge my phone everyday at 11:00 p.m.",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "charge",
+        "my",
+        "phone",
+        "everyday",
+        "at",
+        "11",
+        ":",
+        "00",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "charge my phone everyday",
+      "min_margin": 2.15558
+    },
+    {
+      "text": "remind me to charge my phone everyday at 11:00 p.m.",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "charge",
+        "my",
+        "phone",
+        "everyday",
+        "at",
+        "11",
+        ":",
+        "00",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "charge my phone everyday",
+      "min_margin": 2.15558
+    },
+    {
+      "text": "please remind me that i have a doctor's appointment",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "that",
+        "i",
+        "have",
+        "a",
+        "doctor's",
+        "appointment"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "i have a doctor's appointment",
+      "min_margin": 2.21265
+    },
+    {
+      "text": "schedule appointment tomorrow",
+      "tokens": [
+        "schedule",
+        "appointment",
+        "tomorrow"
+      ],
+      "tags": [
+        "B-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "schedule appointment",
+      "min_margin": 2.22971
+    },
+    {
+      "text": "this is important, remind me later",
+      "tokens": [
+        "this",
+        "is",
+        "important",
+        ",",
+        "remind",
+        "me",
+        "later"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.25705
+    },
+    {
+      "text": "remind me about dinner at 15 p.m.",
+      "tokens": [
+        "remind",
+        "me",
+        "about",
+        "dinner",
+        "at",
+        "15",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "dinner",
+      "min_margin": 2.3173
+    },
+    {
+      "text": "give me a reminder later today",
+      "tokens": [
+        "give",
+        "me",
+        "a",
+        "reminder",
+        "later",
+        "today"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.31755
+    },
+    {
+      "text": "please remind me to feed my cat please",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "feed",
+        "my",
+        "cat",
+        "please"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "feed my cat please",
+      "min_margin": 2.32158
+    },
+    {
+      "text": "remind me to feed my cat please",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "feed",
+        "my",
+        "cat",
+        "please"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "feed my cat please",
+      "min_margin": 2.32158
+    },
+    {
+      "text": "remind me when the time comes",
+      "tokens": [
+        "remind",
+        "me",
+        "when",
+        "the",
+        "time",
+        "comes"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.3554
+    },
+    {
+      "text": "i might forget this",
+      "tokens": [
+        "i",
+        "might",
+        "forget",
+        "this"
+      ],
+      "tags": [
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "i might forget",
+      "min_margin": 2.3558
+    },
+    {
+      "text": "schedule an appointment tomorrow",
+      "tokens": [
+        "schedule",
+        "an",
+        "appointment",
+        "tomorrow"
+      ],
+      "tags": [
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "schedule an appointment",
+      "min_margin": 2.36794
+    },
+    {
+      "text": "can you remind me everyday to read a book at 6 p.m.",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "everyday",
+        "to",
+        "read",
+        "a",
+        "book",
+        "at",
+        "6",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "everyday to read a book",
+      "min_margin": 2.37475
+    },
+    {
+      "text": "can you remind me once about running",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "once",
+        "about",
+        "running"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "once about running",
+      "min_margin": 2.43853
+    },
+    {
+      "text": "can you remind me tomorrow to",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "tomorrow",
+        "to"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.43855
+    },
+    {
+      "text": "please remind me tomorrow",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "tomorrow"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.43855
+    },
+    {
+      "text": "can you everyday",
+      "tokens": [
+        "can",
+        "you",
+        "everyday"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "everyday",
+      "min_margin": 2.43965
+    },
+    {
+      "text": "help me keep track of this",
+      "tokens": [
+        "help",
+        "me",
+        "keep",
+        "track",
+        "of",
+        "this"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.45016
+    },
+    {
+      "text": "please set an alarm for doctors appointment tomorrow morning",
+      "tokens": [
+        "please",
+        "set",
+        "an",
+        "alarm",
+        "for",
+        "doctors",
+        "appointment",
+        "tomorrow",
+        "morning"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O"
+      ],
+      "title": "doctors appointment",
+      "min_margin": 2.4678
+    },
+    {
+      "text": "please set an alarm for 8 a.m.",
+      "tokens": [
+        "please",
+        "set",
+        "an",
+        "alarm",
+        "for",
+        "8",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.4678
+    },
+    {
+      "text": "reminder for me",
+      "tokens": [
+        "reminder",
+        "for",
+        "me"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "me",
+      "min_margin": 2.51025
+    },
+    {
+      "text": "can you remind about running everyday at 6 a.m.",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "about",
+        "running",
+        "everyday",
+        "at",
+        "6",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "running",
+      "min_margin": 2.5478
+    },
+    {
+      "text": "please remind about running everyday at 6 a.m.",
+      "tokens": [
+        "please",
+        "remind",
+        "about",
+        "running",
+        "everyday",
+        "at",
+        "6",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "running",
+      "min_margin": 2.5478
+    },
+    {
+      "text": "remind me everyday",
+      "tokens": [
+        "remind",
+        "me",
+        "everyday"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "everyday",
+      "min_margin": 2.56965
+    },
+    {
+      "text": "nudge me to stretch in an hour",
+      "tokens": [
+        "nudge",
+        "me",
+        "to",
+        "stretch",
+        "in",
+        "an",
+        "hour"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "stretch",
+      "min_margin": 2.59686
+    },
+    {
+      "text": "can you remind me to call someone everyday at 4 p.m.",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "to",
+        "call",
+        "someone",
+        "everyday",
+        "at",
+        "4",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "call someone everyday",
+      "min_margin": 2.6145
+    },
+    {
+      "text": "please remind me to call someone everyday at 4 p.m.",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "call",
+        "someone",
+        "everyday",
+        "at",
+        "4",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "call someone everyday",
+      "min_margin": 2.6145
+    },
+    {
+      "text": "write this down so i remember",
+      "tokens": [
+        "write",
+        "this",
+        "down",
+        "so",
+        "i",
+        "remember"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.6475
+    },
+    {
+      "text": "remind me to run at 2 p.m. on halloween",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "run",
+        "at",
+        "2",
+        "p",
+        ".",
+        "m",
+        ".",
+        "on",
+        "halloween"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "on halloween",
+      "min_margin": 2.6502
+    },
+    {
+      "text": "please set an doctors appointment for tomorrow at 10 am",
+      "tokens": [
+        "please",
+        "set",
+        "an",
+        "doctors",
+        "appointment",
+        "for",
+        "tomorrow",
+        "at",
+        "10",
+        "am"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "an doctors appointment",
+      "min_margin": 2.68185
+    },
+    {
+      "text": "set a reminder so i don't forget",
+      "tokens": [
+        "set",
+        "a",
+        "reminder",
+        "so",
+        "i",
+        "do",
+        "not",
+        "forget"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.68282
+    },
+    {
+      "text": "can you send me a reminder to leave for work in 10 minutes",
+      "tokens": [
+        "can",
+        "you",
+        "send",
+        "me",
+        "a",
+        "reminder",
+        "to",
+        "leave",
+        "for",
+        "work",
+        "in",
+        "10",
+        "minutes"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "leave for work",
+      "min_margin": 2.6905
+    },
+    {
+      "text": "can you set reminder for 7 a.m. tomorrow about dinner please",
+      "tokens": [
+        "can",
+        "you",
+        "set",
+        "reminder",
+        "for",
+        "7",
+        "a",
+        ".",
+        "m",
+        ".",
+        "tomorrow",
+        "about",
+        "dinner",
+        "please"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "about dinner please",
+      "min_margin": 2.69498
+    },
+    {
+      "text": "please set reminder for 7 a.m. tomorrow about dinner please",
+      "tokens": [
+        "please",
+        "set",
+        "reminder",
+        "for",
+        "7",
+        "a",
+        ".",
+        "m",
+        ".",
+        "tomorrow",
+        "about",
+        "dinner",
+        "please"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "about dinner please",
+      "min_margin": 2.69498
+    },
+    {
+      "text": "set reminder for 7 a.m. tomorrow about dinner please",
+      "tokens": [
+        "set",
+        "reminder",
+        "for",
+        "7",
+        "a",
+        ".",
+        "m",
+        ".",
+        "tomorrow",
+        "about",
+        "dinner",
+        "please"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "about dinner please",
+      "min_margin": 2.69498
+    },
+    {
+      "text": "can you remember to watch",
+      "tokens": [
+        "can",
+        "you",
+        "remember",
+        "to",
+        "watch"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "watch",
+      "min_margin": 2.7155
+    },
+    {
+      "text": "make sure i remember tomorrow",
+      "tokens": [
+        "make",
+        "sure",
+        "i",
+        "remember",
+        "tomorrow"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O"
+      ],
+      "title": "remember",
+      "min_margin": 2.7406
+    },
+    {
+      "text": "can you remind me to go to work the 19th of august",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "to",
+        "go",
+        "to",
+        "work",
+        "the",
+        "19th",
+        "of",
+        "august"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "go to work",
+      "min_margin": 2.77466
+    },
+    {
+      "text": "help me remember to buy milk",
+      "tokens": [
+        "help",
+        "me",
+        "remember",
+        "to",
+        "buy",
+        "milk"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "buy milk",
+      "min_margin": 2.78335
+    },
+    {
+      "text": "help me remember to do that",
+      "tokens": [
+        "help",
+        "me",
+        "remember",
+        "to",
+        "do",
+        "that"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.78335
+    },
+    {
+      "text": "please remind me tomorrow to",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "tomorrow",
+        "to"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.813
+    },
+    {
+      "text": "set an alarm for doctor's appointment tomorrow morning",
+      "tokens": [
+        "set",
+        "an",
+        "alarm",
+        "for",
+        "doctor's",
+        "appointment",
+        "tomorrow",
+        "morning"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O"
+      ],
+      "title": "doctor's appointment",
+      "min_margin": 2.84225
+    },
+    {
+      "text": "set an alarm for doctors appointment tomorrow morning",
+      "tokens": [
+        "set",
+        "an",
+        "alarm",
+        "for",
+        "doctors",
+        "appointment",
+        "tomorrow",
+        "morning"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O"
+      ],
+      "title": "doctors appointment",
+      "min_margin": 2.84225
+    },
+    {
+      "text": "set an alarm for 8 a.m.",
+      "tokens": [
+        "set",
+        "an",
+        "alarm",
+        "for",
+        "8",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.84225
+    },
+    {
+      "text": "i need a prompt later",
+      "tokens": [
+        "i",
+        "need",
+        "a",
+        "prompt",
+        "later"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.84718
+    },
+    {
+      "text": "can you remind me on weekend",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "on",
+        "weekend"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "weekend",
+      "min_margin": 2.85715
+    },
+    {
+      "text": "add reminder for me",
+      "tokens": [
+        "add",
+        "reminder",
+        "for",
+        "me"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "me",
+      "min_margin": 2.8847
+    },
+    {
+      "text": "create a reminder for me",
+      "tokens": [
+        "create",
+        "a",
+        "reminder",
+        "for",
+        "me"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "me",
+      "min_margin": 2.8847
+    },
+    {
+      "text": "make a reminder for me",
+      "tokens": [
+        "make",
+        "a",
+        "reminder",
+        "for",
+        "me"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "me",
+      "min_margin": 2.8847
+    },
+    {
+      "text": "remember this for me",
+      "tokens": [
+        "remember",
+        "this",
+        "for",
+        "me"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "me",
+      "min_margin": 2.8847
+    },
+    {
+      "text": "can you set reminders for me",
+      "tokens": [
+        "can",
+        "you",
+        "set",
+        "reminders",
+        "for",
+        "me"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "me",
+      "min_margin": 2.8847
+    },
+    {
+      "text": "keep this in mind for me",
+      "tokens": [
+        "keep",
+        "this",
+        "in",
+        "mind",
+        "for",
+        "me"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "me",
+      "min_margin": 2.8847
+    },
+    {
+      "text": "set an alert for me",
+      "tokens": [
+        "set",
+        "an",
+        "alert",
+        "for",
+        "me"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "me",
+      "min_margin": 2.8847
+    },
+    {
+      "text": "remind me every day except sundays",
+      "tokens": [
+        "remind",
+        "me",
+        "every",
+        "day",
+        "except",
+        "sundays"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O"
+      ],
+      "title": "except",
+      "min_margin": 2.89164
+    },
+    {
+      "text": "i want you to remind me something",
+      "tokens": [
+        "i",
+        "want",
+        "you",
+        "to",
+        "remind",
+        "me",
+        "something"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "something",
+      "min_margin": 2.93665
+    },
+    {
+      "text": "i need you to remind me something",
+      "tokens": [
+        "i",
+        "need",
+        "you",
+        "to",
+        "remind",
+        "me",
+        "something"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "something",
+      "min_margin": 2.93665
+    },
+    {
+      "text": "please set a reminder for thursday",
+      "tokens": [
+        "please",
+        "set",
+        "a",
+        "reminder",
+        "for",
+        "thursday"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.9428
+    },
+    {
+      "text": "can you remind me everyday",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "everyday"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "everyday",
+      "min_margin": 2.9441
+    },
+    {
+      "text": "please remind me everyday",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "everyday"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "everyday",
+      "min_margin": 2.9441
+    },
+    {
+      "text": "jot this down so i remember",
+      "tokens": [
+        "jot",
+        "this",
+        "down",
+        "so",
+        "i",
+        "remember"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.9686
+    },
+    {
+      "text": "poke me when the time arrives",
+      "tokens": [
+        "poke",
+        "me",
+        "when",
+        "the",
+        "time",
+        "arrives"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 2.97956
+    },
+    {
+      "text": "i need a nudge tomorrow morning",
+      "tokens": [
+        "i",
+        "need",
+        "a",
+        "nudge",
+        "tomorrow",
+        "morning"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.0219
+    },
+    {
+      "text": "can you set up a reminder",
+      "tokens": [
+        "can",
+        "you",
+        "set",
+        "up",
+        "a",
+        "reminder"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.03075
+    },
+    {
+      "text": "can you remind me to drink water in 10 minutes",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "to",
+        "drink",
+        "water",
+        "in",
+        "10",
+        "minutes"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "drink water",
+      "min_margin": 3.06346
+    },
+    {
+      "text": "please remind me to drink water in 10 minutes",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "drink",
+        "water",
+        "in",
+        "10",
+        "minutes"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "drink water",
+      "min_margin": 3.06346
+    },
+    {
+      "text": "remind me about the doctor on friday",
+      "tokens": [
+        "remind",
+        "me",
+        "about",
+        "the",
+        "doctor",
+        "on",
+        "friday"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O"
+      ],
+      "title": "the doctor",
+      "min_margin": 3.06472
+    },
+    {
+      "text": "can you remind me to drink water today",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "to",
+        "drink",
+        "water",
+        "today"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "drink water",
+      "min_margin": 3.06792
+    },
+    {
+      "text": "can you set a reminder to drink water today",
+      "tokens": [
+        "can",
+        "you",
+        "set",
+        "a",
+        "reminder",
+        "to",
+        "drink",
+        "water",
+        "today"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "drink water",
+      "min_margin": 3.06792
+    },
+    {
+      "text": "please remind me to drink water today",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "drink",
+        "water",
+        "today"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "drink water",
+      "min_margin": 3.06792
+    },
+    {
+      "text": "please set a reminder to drink water today",
+      "tokens": [
+        "please",
+        "set",
+        "a",
+        "reminder",
+        "to",
+        "drink",
+        "water",
+        "today"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "drink water",
+      "min_margin": 3.06792
+    },
+    {
+      "text": "set a reminder to drink water today",
+      "tokens": [
+        "set",
+        "a",
+        "reminder",
+        "to",
+        "drink",
+        "water",
+        "today"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "drink water",
+      "min_margin": 3.06792
+    },
+    {
+      "text": "remind me to call someone every day at 4 p.m.",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "call",
+        "someone",
+        "every",
+        "day",
+        "at",
+        "4",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "call someone",
+      "min_margin": 3.07206
+    },
+    {
+      "text": "can you remember to take medicine",
+      "tokens": [
+        "can",
+        "you",
+        "remember",
+        "to",
+        "take",
+        "medicine"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "take medicine",
+      "min_margin": 3.08995
+    },
+    {
+      "text": "can you remember to wake up tomorrow",
+      "tokens": [
+        "can",
+        "you",
+        "remember",
+        "to",
+        "wake",
+        "up",
+        "tomorrow"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "wake up",
+      "min_margin": 3.08995
+    },
+    {
+      "text": "can you remember to wash my car",
+      "tokens": [
+        "can",
+        "you",
+        "remember",
+        "to",
+        "wash",
+        "my",
+        "car"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "wash my car",
+      "min_margin": 3.08995
+    },
+    {
+      "text": "jot that down as a reminder",
+      "tokens": [
+        "jot",
+        "that",
+        "down",
+        "as",
+        "a",
+        "reminder"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.1063
+    },
+    {
+      "text": "can you remind me to charge my phone everyday at 11:00 p.m.",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "to",
+        "charge",
+        "my",
+        "phone",
+        "everyday",
+        "at",
+        "11",
+        ":",
+        "00",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "charge my phone everyday",
+      "min_margin": 3.1423
+    },
+    {
+      "text": "please remind me to turn off my phone everyday at 11 p.m.",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "turn",
+        "off",
+        "my",
+        "phone",
+        "everyday",
+        "at",
+        "11",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "turn off my phone everyday",
+      "min_margin": 3.1423
+    },
+    {
+      "text": "remind me to turn off my phone everyday at 11 p.m.",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "turn",
+        "off",
+        "my",
+        "phone",
+        "everyday",
+        "at",
+        "11",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "turn off my phone everyday",
+      "min_margin": 3.1423
+    },
+    {
+      "text": "can you remember to turn off my phone everyday at 11 p.m.",
+      "tokens": [
+        "can",
+        "you",
+        "remember",
+        "to",
+        "turn",
+        "off",
+        "my",
+        "phone",
+        "everyday",
+        "at",
+        "11",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "turn off my phone everyday",
+      "min_margin": 3.1423
+    },
+    {
+      "text": "help me remember to call grandma this evening",
+      "tokens": [
+        "help",
+        "me",
+        "remember",
+        "to",
+        "call",
+        "grandma",
+        "this",
+        "evening"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O"
+      ],
+      "title": "call grandma",
+      "min_margin": 3.1578
+    },
+    {
+      "text": "help me remember to take medication at 9 am",
+      "tokens": [
+        "help",
+        "me",
+        "remember",
+        "to",
+        "take",
+        "medication",
+        "at",
+        "9",
+        "am"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "take medication",
+      "min_margin": 3.1578
+    },
+    {
+      "text": "make sure i remember to take my meds",
+      "tokens": [
+        "make",
+        "sure",
+        "i",
+        "remember",
+        "to",
+        "take",
+        "my",
+        "meds"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "take my meds",
+      "min_margin": 3.1635
+    },
+    {
+      "text": "schedule reminders",
+      "tokens": [
+        "schedule",
+        "reminders"
+      ],
+      "tags": [
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.1669
+    },
+    {
+      "text": "can you remind me to drink some water in 5 minutes",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "to",
+        "drink",
+        "some",
+        "water",
+        "in",
+        "5",
+        "minutes"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "drink some water",
+      "min_margin": 3.17866
+    },
+    {
+      "text": "please remind me to drink some water in 5 minutes",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "drink",
+        "some",
+        "water",
+        "in",
+        "5",
+        "minutes"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "drink some water",
+      "min_margin": 3.17866
+    },
+    {
+      "text": "remind me to drink some water in 5 minutes",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "drink",
+        "some",
+        "water",
+        "in",
+        "5",
+        "minutes"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "drink some water",
+      "min_margin": 3.17866
+    },
+    {
+      "text": "can you remind me tomorrow at 9 a.m.",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "tomorrow",
+        "at",
+        "9",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.18745
+    },
+    {
+      "text": "remind me tomorrow",
+      "tokens": [
+        "remind",
+        "me",
+        "tomorrow"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.18745
+    },
+    {
+      "text": "please don't let me forget to pick up milk today",
+      "tokens": [
+        "please",
+        "do",
+        "not",
+        "let",
+        "me",
+        "forget",
+        "to",
+        "pick",
+        "up",
+        "milk",
+        "today"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "pick up milk",
+      "min_margin": 3.2119
+    },
+    {
+      "text": "remind me to have a dinner every sunday at 8 a.m.",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "have",
+        "a",
+        "dinner",
+        "every",
+        "sunday",
+        "at",
+        "8",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "have a dinner",
+      "min_margin": 3.2214
+    },
+    {
+      "text": "please remind me on weekend",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "on",
+        "weekend"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "weekend",
+      "min_margin": 3.2316
+    },
+    {
+      "text": "please remind me on thursday",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "on",
+        "thursday"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.2316
+    },
+    {
+      "text": "can you set up a reminder for me",
+      "tokens": [
+        "can",
+        "you",
+        "set",
+        "up",
+        "a",
+        "reminder",
+        "for",
+        "me"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "me",
+      "min_margin": 3.25915
+    },
+    {
+      "text": "i need you to set a reminder for me",
+      "tokens": [
+        "i",
+        "need",
+        "you",
+        "to",
+        "set",
+        "a",
+        "reminder",
+        "for",
+        "me"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "me",
+      "min_margin": 3.25915
+    },
+    {
+      "text": "will you set a reminder for me",
+      "tokens": [
+        "will",
+        "you",
+        "set",
+        "a",
+        "reminder",
+        "for",
+        "me"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "me",
+      "min_margin": 3.25915
+    },
+    {
+      "text": "can you do a reminder for me",
+      "tokens": [
+        "can",
+        "you",
+        "do",
+        "a",
+        "reminder",
+        "for",
+        "me"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "me",
+      "min_margin": 3.25915
+    },
+    {
+      "text": "i can't miss this appointment remind me",
+      "tokens": [
+        "i",
+        "cannot",
+        "miss",
+        "this",
+        "appointment",
+        "remind",
+        "me"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O"
+      ],
+      "title": "this appointment",
+      "min_margin": 3.30292
+    },
+    {
+      "text": "remind me in a while",
+      "tokens": [
+        "remind",
+        "me",
+        "in",
+        "a",
+        "while"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.30854
+    },
+    {
+      "text": "set my reminders",
+      "tokens": [
+        "set",
+        "my",
+        "reminders"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.31656
+    },
+    {
+      "text": "can you remind me at 12 o'clock",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "at",
+        "12",
+        "o'clock"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.36352
+    },
+    {
+      "text": "i need a reminder set",
+      "tokens": [
+        "i",
+        "need",
+        "a",
+        "reminder",
+        "set"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.371
+    },
+    {
+      "text": "can you remind me of a meeting on the 27th of august",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "of",
+        "a",
+        "meeting",
+        "on",
+        "the",
+        "27th",
+        "of",
+        "august"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "meeting",
+      "min_margin": 3.37558
+    },
+    {
+      "text": "remind me every day",
+      "tokens": [
+        "remind",
+        "me",
+        "every",
+        "day"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.43424
+    },
+    {
+      "text": "set reminder for every day",
+      "tokens": [
+        "set",
+        "reminder",
+        "for",
+        "every",
+        "day"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.43424
+    },
+    {
+      "text": "new reminder for every day",
+      "tokens": [
+        "new",
+        "reminder",
+        "for",
+        "every",
+        "day"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.43424
+    },
+    {
+      "text": "can you remember to take medication today at 5 p.m.",
+      "tokens": [
+        "can",
+        "you",
+        "remember",
+        "to",
+        "take",
+        "medication",
+        "today",
+        "at",
+        "5",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "take medication",
+      "min_margin": 3.4644
+    },
+    {
+      "text": "can you remember to take medicine today at 5 p.m.",
+      "tokens": [
+        "can",
+        "you",
+        "remember",
+        "to",
+        "take",
+        "medicine",
+        "today",
+        "at",
+        "5",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "take medicine",
+      "min_margin": 3.4644
+    },
+    {
+      "text": "can you remember to take medicine tomorrow morning",
+      "tokens": [
+        "can",
+        "you",
+        "remember",
+        "to",
+        "take",
+        "medicine",
+        "tomorrow",
+        "morning"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O"
+      ],
+      "title": "take medicine",
+      "min_margin": 3.4644
+    },
+    {
+      "text": "can you remember to wake up at 7 a.m.",
+      "tokens": [
+        "can",
+        "you",
+        "remember",
+        "to",
+        "wake",
+        "up",
+        "at",
+        "7",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "wake up",
+      "min_margin": 3.4644
+    },
+    {
+      "text": "can you remember to wash the car in 4 hours",
+      "tokens": [
+        "can",
+        "you",
+        "remember",
+        "to",
+        "wash",
+        "the",
+        "car",
+        "in",
+        "4",
+        "hours"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "wash the car",
+      "min_margin": 3.4644
+    },
+    {
+      "text": "set an doctor's appointment for tomorrow at 10 am",
+      "tokens": [
+        "set",
+        "an",
+        "doctor's",
+        "appointment",
+        "for",
+        "tomorrow",
+        "at",
+        "10",
+        "am"
+      ],
+      "tags": [
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "an doctor's appointment",
+      "min_margin": 3.48195
+    },
+    {
+      "text": "remind me to wear green on st. patrick's day",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "wear",
+        "green",
+        "on",
+        "st",
+        ".",
+        "patrick's",
+        "day"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "wear green on st . patrick's day",
+      "min_margin": 3.49002
+    },
+    {
+      "text": "please remind me of a meeting on the 27th of august",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "of",
+        "a",
+        "meeting",
+        "on",
+        "the",
+        "27th",
+        "of",
+        "august"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "meeting",
+      "min_margin": 3.50815
+    },
+    {
+      "text": "please remind me to deliver to saint barbara catholic church on friday 9 to 9:30",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "deliver",
+        "to",
+        "saint",
+        "barbara",
+        "catholic",
+        "church",
+        "on",
+        "friday",
+        "9",
+        "to",
+        "9",
+        ":",
+        "30"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "deliver to saint barbara catholic church",
+      "min_margin": 3.51602
+    },
+    {
+      "text": "remind me to deliver to saint barbara catholic church on friday 9 to 9:30",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "deliver",
+        "to",
+        "saint",
+        "barbara",
+        "catholic",
+        "church",
+        "on",
+        "friday",
+        "9",
+        "to",
+        "9",
+        ":",
+        "30"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "deliver to saint barbara catholic church",
+      "min_margin": 3.51602
+    },
+    {
+      "text": "can you new reminder eat an apple everyday at 9 a.m.",
+      "tokens": [
+        "can",
+        "you",
+        "new",
+        "reminder",
+        "eat",
+        "an",
+        "apple",
+        "everyday",
+        "at",
+        "9",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "eat an apple",
+      "min_margin": 3.52315
+    },
+    {
+      "text": "please new reminder eat an apple everyday at 9 a.m.",
+      "tokens": [
+        "please",
+        "new",
+        "reminder",
+        "eat",
+        "an",
+        "apple",
+        "everyday",
+        "at",
+        "9",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "eat an apple",
+      "min_margin": 3.52315
+    },
+    {
+      "text": "can you set reminder about washing car",
+      "tokens": [
+        "can",
+        "you",
+        "set",
+        "reminder",
+        "about",
+        "washing",
+        "car"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "washing car",
+      "min_margin": 3.5308
+    },
+    {
+      "text": "can you new reminder about washing car",
+      "tokens": [
+        "can",
+        "you",
+        "new",
+        "reminder",
+        "about",
+        "washing",
+        "car"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "washing car",
+      "min_margin": 3.5308
+    },
+    {
+      "text": "can you remind me to buy bread at 11 a.m. tomorrow",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "to",
+        "buy",
+        "bread",
+        "at",
+        "11",
+        "a",
+        ".",
+        "m",
+        ".",
+        "tomorrow"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "buy bread",
+      "min_margin": 3.53602
+    },
+    {
+      "text": "remind me tomorrow to call",
+      "tokens": [
+        "remind",
+        "me",
+        "tomorrow",
+        "to",
+        "call"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE"
+      ],
+      "title": "call",
+      "min_margin": 3.5619
+    },
+    {
+      "text": "remind me tomorrow to",
+      "tokens": [
+        "remind",
+        "me",
+        "tomorrow",
+        "to"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.5619
+    },
+    {
+      "text": "can you remind me to buy movie tickets for friday evening",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "to",
+        "buy",
+        "movie",
+        "tickets",
+        "for",
+        "friday",
+        "evening"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "buy movie tickets",
+      "min_margin": 3.5921
+    },
+    {
+      "text": "please remind me to buy movie tickets for friday evening",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "buy",
+        "movie",
+        "tickets",
+        "for",
+        "friday",
+        "evening"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "buy movie tickets",
+      "min_margin": 3.5921
+    },
+    {
+      "text": "remind me to buy movie tickets for friday evening",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "buy",
+        "movie",
+        "tickets",
+        "for",
+        "friday",
+        "evening"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "buy movie tickets",
+      "min_margin": 3.5921
+    },
+    {
+      "text": "can you remind me to have a dinner every sunday at 8 a.m.",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "to",
+        "have",
+        "a",
+        "dinner",
+        "every",
+        "sunday",
+        "at",
+        "8",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "have a dinner",
+      "min_margin": 3.59585
+    },
+    {
+      "text": "please remind me to have a dinner every sunday at 8 a.m.",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "have",
+        "a",
+        "dinner",
+        "every",
+        "sunday",
+        "at",
+        "8",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "have a dinner",
+      "min_margin": 3.59585
+    },
+    {
+      "text": "remind me on",
+      "tokens": [
+        "remind",
+        "me",
+        "on"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O"
+      ],
+      "title": null,
+      "min_margin": 3.60605
+    },
+    {
+      "text": "can you remind me on the 27th of august tomy flight",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "on",
+        "the",
+        "27th",
+        "of",
+        "august",
+        "tomy",
+        "flight"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "tomy flight",
+      "min_margin": 3.60605
+    },
+    {
+      "text": "can you remind me to boil water every morning by 7 a.m.",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "to",
+        "boil",
+        "water",
+        "every",
+        "morning",
+        "by",
+        "7",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "boil water",
+      "min_margin": 3.61378
+    },
+    {
+      "text": "please remind me to boil water every morning by 7 a.m.",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "boil",
+        "water",
+        "every",
+        "morning",
+        "by",
+        "7",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "boil water",
+      "min_margin": 3.61378
+    },
+    {
+      "text": "can you remind me at 7 p.m. on november 11 to do homework",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "at",
+        "7",
+        "p",
+        ".",
+        "m",
+        ".",
+        "on",
+        "november",
+        "11",
+        "to",
+        "do",
+        "homework"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "do homework",
+      "min_margin": 3.64654
+    },
+    {
+      "text": "please remind me at 7 p.m. on november 11 to do homework",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "at",
+        "7",
+        "p",
+        ".",
+        "m",
+        ".",
+        "on",
+        "november",
+        "11",
+        "to",
+        "do",
+        "homework"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "do homework",
+      "min_margin": 3.64654
+    },
+    {
+      "text": "remind me at 7 p.m. on november 11 to do homework",
+      "tokens": [
+        "remind",
+        "me",
+        "at",
+        "7",
+        "p",
+        ".",
+        "m",
+        ".",
+        "on",
+        "november",
+        "11",
+        "to",
+        "do",
+        "homework"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE"
+      ],
+      "title": "do homework",
+      "min_margin": 3.64654
+    },
+    {
+      "text": "please send me a reminder to leave for work in 10 minutes",
+      "tokens": [
+        "please",
+        "send",
+        "me",
+        "a",
+        "reminder",
+        "to",
+        "leave",
+        "for",
+        "work",
+        "in",
+        "10",
+        "minutes"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "leave for work",
+      "min_margin": 3.67722
+    },
+    {
+      "text": "send me a reminder to leave for work in 10 minutes",
+      "tokens": [
+        "send",
+        "me",
+        "a",
+        "reminder",
+        "to",
+        "leave",
+        "for",
+        "work",
+        "in",
+        "10",
+        "minutes"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "leave for work",
+      "min_margin": 3.67722
+    },
+    {
+      "text": "remind me to book a parking spot for my carnival cruise",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "book",
+        "a",
+        "parking",
+        "spot",
+        "for",
+        "my",
+        "carnival",
+        "cruise"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "book a parking spot for my carnival cruise",
+      "min_margin": 3.70642
+    },
+    {
+      "text": "remind me i have a meeting",
+      "tokens": [
+        "remind",
+        "me",
+        "i",
+        "have",
+        "a",
+        "meeting"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "i have a meeting",
+      "min_margin": 3.71296
+    },
+    {
+      "text": "please remind me to send out christmas cards every year on december 1st at 5 p.m.",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "to",
+        "send",
+        "out",
+        "christmas",
+        "cards",
+        "every",
+        "year",
+        "on",
+        "december",
+        "1st",
+        "at",
+        "5",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "send out christmas cards",
+      "min_margin": 3.7359
+    },
+    {
+      "text": "remind me to send out christmas cards every year on december 1st at 5 p.m.",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "send",
+        "out",
+        "christmas",
+        "cards",
+        "every",
+        "year",
+        "on",
+        "december",
+        "1st",
+        "at",
+        "5",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "send out christmas cards",
+      "min_margin": 3.7359
+    },
+    {
+      "text": "please send me a reminder to pay the cable bill on march 3",
+      "tokens": [
+        "please",
+        "send",
+        "me",
+        "a",
+        "reminder",
+        "to",
+        "pay",
+        "the",
+        "cable",
+        "bill",
+        "on",
+        "march",
+        "3"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "pay the cable bill",
+      "min_margin": 3.74145
+    },
+    {
+      "text": "do not let me forget to pick up groceries tonight",
+      "tokens": [
+        "do",
+        "not",
+        "let",
+        "me",
+        "forget",
+        "to",
+        "pick",
+        "up",
+        "groceries",
+        "tonight"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O"
+      ],
+      "title": "pick up groceries",
+      "min_margin": 3.75812
+    },
+    {
+      "text": "remind me to go to work the 19th of august",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "go",
+        "to",
+        "work",
+        "the",
+        "19th",
+        "of",
+        "august"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "go to work",
+      "min_margin": 3.76138
+    },
+    {
+      "text": "i need to remember something later",
+      "tokens": [
+        "i",
+        "need",
+        "to",
+        "remember",
+        "something",
+        "later"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "remember something later",
+      "min_margin": 3.77679
+    },
+    {
+      "text": "set reminder buy milk for every monday and wednesday at 5 p.m.",
+      "tokens": [
+        "set",
+        "reminder",
+        "buy",
+        "milk",
+        "for",
+        "every",
+        "monday",
+        "and",
+        "wednesday",
+        "at",
+        "5",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "buy milk",
+      "min_margin": 3.79775
+    },
+    {
+      "text": "remind me to leave at noon",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "leave",
+        "at",
+        "noon"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O",
+        "O"
+      ],
+      "title": "leave",
+      "min_margin": 3.81145
+    },
+    {
+      "text": "can you send me a reminder to pay the cable bill on march 3",
+      "tokens": [
+        "can",
+        "you",
+        "send",
+        "me",
+        "a",
+        "reminder",
+        "to",
+        "pay",
+        "the",
+        "cable",
+        "bill",
+        "on",
+        "march",
+        "3"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "pay the cable bill",
+      "min_margin": 3.81344
+    },
+    {
+      "text": "send me a reminder to pay the cable bill on march 3",
+      "tokens": [
+        "send",
+        "me",
+        "a",
+        "reminder",
+        "to",
+        "pay",
+        "the",
+        "cable",
+        "bill",
+        "on",
+        "march",
+        "3"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "pay the cable bill",
+      "min_margin": 3.81344
+    },
+    {
+      "text": "can you remind me to exercise tonight",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "to",
+        "exercise",
+        "tonight"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "O"
+      ],
+      "title": "exercise",
+      "min_margin": 3.82132
+    },
+    {
+      "text": "can you remember to take my medicine tuesday morning at 10 a.m.",
+      "tokens": [
+        "can",
+        "you",
+        "remember",
+        "to",
+        "take",
+        "my",
+        "medicine",
+        "tuesday",
+        "morning",
+        "at",
+        "10",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "take my medicine",
+      "min_margin": 3.83885
+    },
+    {
+      "text": "remind me to go to the grocery story every sunday at noon",
+      "tokens": [
+        "remind",
+        "me",
+        "to",
+        "go",
+        "to",
+        "the",
+        "grocery",
+        "story",
+        "every",
+        "sunday",
+        "at",
+        "noon"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "go to the grocery story",
+      "min_margin": 3.85358
+    },
+    {
+      "text": "please setup reminder to take medicine at 1 p.m.",
+      "tokens": [
+        "please",
+        "setup",
+        "reminder",
+        "to",
+        "take",
+        "medicine",
+        "at",
+        "1",
+        "p",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "take medicine",
+      "min_margin": 3.8629
+    },
+    {
+      "text": "set reminder about dog walking repeat it every day at 9 a.m.",
+      "tokens": [
+        "set",
+        "reminder",
+        "about",
+        "dog",
+        "walking",
+        "repeat",
+        "it",
+        "every",
+        "day",
+        "at",
+        "9",
+        "a",
+        ".",
+        "m",
+        "."
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O"
+      ],
+      "title": "dog walking repeat it",
+      "min_margin": 3.8686
+    },
+    {
+      "text": "can you remind me at 1 p.m. that i have to eat",
+      "tokens": [
+        "can",
+        "you",
+        "remind",
+        "me",
+        "at",
+        "1",
+        "p",
+        ".",
+        "m",
+        ".",
+        "that",
+        "i",
+        "have",
+        "to",
+        "eat"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "i have to eat",
+      "min_margin": 3.88133
+    },
+    {
+      "text": "please remind me at 1 p.m. that i have to eat",
+      "tokens": [
+        "please",
+        "remind",
+        "me",
+        "at",
+        "1",
+        "p",
+        ".",
+        "m",
+        ".",
+        "that",
+        "i",
+        "have",
+        "to",
+        "eat"
+      ],
+      "tags": [
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "O",
+        "B-TITLE",
+        "I-TITLE",
+        "I-TITLE",
+        "I-TITLE"
+      ],
+      "title": "i have to eat",
+      "min_margin": 3.88133
+    }
+  ]
+}
