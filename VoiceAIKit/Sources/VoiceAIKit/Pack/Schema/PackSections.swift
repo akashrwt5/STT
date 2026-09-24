@@ -358,7 +358,9 @@ struct PackGuards: Decodable, Sendable {
     struct BareValueGuard: Decodable, Sendable {
         /// Intent to suppress.
         let intent: String
-        /// Closed entity whose values arm the guard.
+        /// Entity whose values arm the guard. A closed entity: the whole
+        /// utterance must be one of its values. A date-time entity: the utterance
+        /// must be a date-time and nothing else ("at 9", "tomorrow").
         let entity: String
         /// Intent to substitute; nil suppresses to the out-of-scope fallback.
         let redirect: String?

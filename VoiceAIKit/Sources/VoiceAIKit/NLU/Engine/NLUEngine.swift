@@ -342,11 +342,36 @@ actor NLUEngine: ConversationEngine {
     /// as `helpRedirect`.
     private func bareValueRedirect(_ text: String, _ intent: String) -> String? {
         for guardSpec in bareValueGuards where guardSpec.intent == intent {
-            guard entities.isWholeValue(guardSpec.entity, text) else { continue }
+            let bare = entities.isDateTime(guardSpec.entity)
+                ? isBareDateTime(text)
+                : entities.isWholeValue(guardSpec.entity, text)
+            guard bare else { continue }
             let redirect = guardSpec.redirect ?? schema.fallbackIntent
             return schema.intents[redirect] != nil ? redirect : nil
         }
         return nil
+    }
+
+    /// True when `text` is a date-time and nothing else — "at 9", "tomorrow".
+    ///
+    /// A date-time has no value table to match the whole string against, so
+    /// "bare" means: the parser finds a date-time, and once it is stripped —
+    /// together with the connective it leaves behind, the same step
+    /// `deriveTopic` takes — nothing is left. "remind me at 9" and "meeting at 5"
+    /// keep words of their own and are not bare. Mirrors
+    /// `engine.py::_is_bare_datetime`.
+    ///
+    /// Reached only from `bareValueRedirect`, i.e. only for a NEW intent, so
+    /// "at 9" answering "When should I remind you?" still fills the slot.
+    private func isBareDateTime(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, entities.dateTime(in: trimmed, now: Date()) != nil else { return false }
+        var rest = entities.strippingDateTime(trimmed)
+        if let pattern = leadingConnectorPattern,
+           let range = rest.range(of: pattern, options: [.regularExpression, .caseInsensitive]) {
+            rest.removeSubrange(range)
+        }
+        return rest.trimmingCharacters(in: CharacterSet(charactersIn: " .,!?")).isEmpty
     }
 
     private func helpRedirect(_ text: String, _ intent: String) -> String? {
