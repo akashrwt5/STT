@@ -504,7 +504,7 @@ actor NLUEngine: ConversationEngine {
         }()
 
         if slotCanRefuseTheAnswer {
-            let probe = await classifier.classifyAsync(text)
+            let probe = await classifier.classifyForTopicSwitch(text)
             let isNewIntent = probe.label != intent
                 && probe.label != schema.fallbackIntent
                 && probe.label != "OUT_OF_SCOPE"

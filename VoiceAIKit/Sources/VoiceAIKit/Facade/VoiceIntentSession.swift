@@ -355,13 +355,24 @@ public final class VoiceIntentSession {
         let configStopwords = config.fuzzyStopwords
         let configTrailing = config.trailingFunctionWords
         let trust = config.trust
+        // A development override never reaches a session that refuses
+        // development packs, which is how a release build is configured.
+        let fmOverride = trust.refusesDevelopmentPacks ? nil : config.foundationModelOverride
+        // The same locale the speech recogniser uses, so the language model is
+        // told the region as well as the language ("de_DE", not "de").
+        let locale = Locale(identifier: config.language.localeIdentifier)
+        if config.foundationModelOverride != nil, fmOverride == nil {
+            logger.notice("foundationModelOverride ignored: the trust policy refuses development packs")
+        }
 
         // Off the main actor: signature verification, sha256 over every file,
         // JSON decode and a CoreML load.
         return try await Task.detached(priority: .userInitiated) {
             let pack = try BundleDataLoader.load(packAt: url, language: code, trust: trust)
             let engine = try PackEngineFactory.makeEngine(
-                pack: pack, stopwords: configStopwords, trailingFunctionWords: configTrailing
+                pack: pack, stopwords: configStopwords, trailingFunctionWords: configTrailing,
+                foundationModelOverride: fmOverride,
+                locale: locale
             )
             // Identity is captured from the pack that was just VERIFIED and LOADED,
             // inside the same closure. Reading `bundle.json` again afterwards would

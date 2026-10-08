@@ -25,6 +25,10 @@ import Foundation
 protocol IntentClassifying: Actor {
     /// Full 3-stage async classification — stage, confidence, and breakdown.
     func classifyAsync(_ text: String) async -> ClassificationResult
+    /// Classification for the topic-switch probe that runs while a slot answer
+    /// is awaited. Defaults to `classifyAsync`; a classifier with a stage that
+    /// should not run on slot answers overrides it.
+    func classifyForTopicSwitch(_ text: String) async -> ClassificationResult
     /// Pre-warms the CoreML graphs (ANE specialisation) in the background.
     func warmUp() async
     /// Loads Stage 3 (MiniLM embedder + semantic head) and triggers ANE compile.
@@ -51,6 +55,10 @@ protocol IntentClassifying: Actor {
 
 extension IntentClassifying {
     func calibratedConfidence(for intent: String) async -> Double? { nil }
+
+    func classifyForTopicSwitch(_ text: String) async -> ClassificationResult {
+        await classifyAsync(text)
+    }
 }
 
 extension IntentClassifying {

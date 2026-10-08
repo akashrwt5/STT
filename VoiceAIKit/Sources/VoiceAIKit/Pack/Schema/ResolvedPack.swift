@@ -80,6 +80,8 @@ struct ResolvedPack: Sendable {
     let cascade: PackCascade
     let guards: PackGuards
     let telemetry: PackTelemetrySchema
+    /// `llm/<language>.json`. Nil when the pack does not ship one.
+    let llm: PackLLM?
 
     // MARK: Classifier
 
@@ -153,6 +155,19 @@ extension ResolvedPack {
 
     enum Stage: String, Sendable {
         case keyword, tfidf, semantic, fallback
+        case foundationModel = "foundation_model"
+    }
+
+    /// Which classifier chooses the intent, from the `foundation_model` stage.
+    ///
+    /// `.packOnly` when the stage is absent or disabled, omits `mode`, or names
+    /// a mode this build does not know. An unknown mode falls back to the pack
+    /// rather than guessing, because the pack's accuracy numbers were measured
+    /// under a specific mode.
+    var classifierMode: IntentClassifierMode {
+        guard stageEnabled(.foundationModel) else { return .packOnly }
+        return cascade.mode(of: Stage.foundationModel.rawValue)
+            .flatMap(IntentClassifierMode.init(rawValue:)) ?? .packOnly
     }
 
     /// Keyword rules ordered tier 1 (exact anchors) before tier 2.

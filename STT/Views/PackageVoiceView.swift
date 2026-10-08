@@ -146,11 +146,23 @@ private struct PackageVoiceSessionView: View {
     init(language: VoiceLanguage, provider: PackProviderForApp) {
         self.language = language
         self.provider = provider
-        _session = State(wrappedValue: VoiceIntentSession(configuration: .init(
+        var configuration = VoiceIntentConfiguration(
             language: language,
             packProvider: provider,
             trust: .unverifiedForTesting,
-            autoStopOnSilence: true)))
+            autoStopOnSilence: true)
+        #if DEBUG
+        // The pack decides the classifier mode (runtime/cascade.json) and the
+        // language model's text (llm/<lang>.json); both are written by the
+        // IntentClassifier pack compiler. This only turns on `logsModelIO`, which
+        // logs what Apple's model receives and returns, in Xcode's console under
+        // category "FoundationModelClassifier". To try a mode before a pack
+        // carries it, pass `mode:` (.packOnly, .packWithFoundationModelFallback,
+        // .foundationModel). Ignored by a trust policy that refuses development
+        // packs (release).
+        configuration.foundationModelOverride = FoundationModelOverride(logsModelIO: true)
+        #endif
+        _session = State(wrappedValue: VoiceIntentSession(configuration: configuration))
     }
 
     var body: some View {
@@ -271,7 +283,7 @@ private struct PackageVoiceSessionView: View {
         switch s.winningStage {
         case 1: winner = "S1 keyword"
         case 2: winner = "S2 TF-IDF/CoreML"
-        case 3: winner = "S3 MiniLM rescue"
+        case 3: winner = "S3 Foundation Model"
         default: winner = "GenAI fallback"
         }
         var parts: [String] = ["stage: \(winner)"]

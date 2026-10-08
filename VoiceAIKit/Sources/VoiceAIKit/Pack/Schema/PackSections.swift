@@ -229,8 +229,25 @@ struct PackCascade: Decodable, Sendable {
     struct Stage: Decodable, Sendable {
         let id: String
         let enabled: Bool
+        /// How the stage runs, for a stage that can run more than one way.
+        /// Only `foundation_model` reads it; see `IntentClassifierMode` for the values.
+        let mode: String?
         let input: IO?
         let output: IO?
+
+        enum CodingKeys: String, CodingKey { case id, enabled, mode, input, output }
+
+        /// `mode` is decoded leniently: a value of the wrong type reads as absent
+        /// (so the stage is `pack_only`) instead of failing the whole cascade and
+        /// with it the pack. The other keys decode exactly as before.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            enabled = try c.decode(Bool.self, forKey: .enabled)
+            mode = try? c.decodeIfPresent(String.self, forKey: .mode)
+            input = try c.decodeIfPresent(IO.self, forKey: .input)
+            output = try c.decodeIfPresent(IO.self, forKey: .output)
+        }
 
         struct IO: Decodable, Sendable {
             let dtype: String?
@@ -251,6 +268,42 @@ struct PackCascade: Decodable, Sendable {
     /// a dense float32 vector. Do not validate the device model against it.
     var tfidfOutputDim: Int? {
         stages.first { $0.id == "tfidf" }?.output?.dim
+    }
+
+    /// The `mode` of the stage with this id, or nil when the stage or the key is absent.
+    func mode(of id: String) -> String? {
+        stages.first { $0.id == id }?.mode
+    }
+}
+
+// MARK: - llm/<language>.json
+
+/// Text the on-device language model needs, in the pack's language.
+///
+/// Optional. A pack that enables the `foundation_model` stage without this file
+/// still works: the model then sees the intent labels by name only.
+struct PackLLM: Decodable, Sendable, Equatable {
+    /// Instructions given to the language model before the user's utterance.
+    let instructions: String?
+    /// Intent label to a one-line description of what the intent does. A label
+    /// missing here is offered to the model by name only.
+    let intentDescriptions: [String: String]
+
+    enum CodingKeys: String, CodingKey {
+        case instructions
+        case intentDescriptions = "intent_descriptions"
+    }
+
+    init(instructions: String?, intentDescriptions: [String: String]) {
+        self.instructions = instructions
+        self.intentDescriptions = intentDescriptions
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        instructions = try c.decodeIfPresent(String.self, forKey: .instructions)
+        intentDescriptions = try c.decodeIfPresent([String: String].self,
+                                                   forKey: .intentDescriptions) ?? [:]
     }
 }
 

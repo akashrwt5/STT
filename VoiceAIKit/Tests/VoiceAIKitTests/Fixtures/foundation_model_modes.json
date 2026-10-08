@@ -1,0 +1,9 @@
+{
+  "_generated_by": "scripts/ci/emit_contract_fixtures.py from spec/bundle/3.0/cascade.schema.json; do not edit",
+  "foundation_model_modes": [
+    "pack_only",
+    "pack_with_fm_fallback",
+    "foundation_model"
+  ],
+  "foundation_model_default_mode": "pack_only"
+}

@@ -190,6 +190,7 @@ enum BundleDataLoader {
         var cascade: PackCascade
         var guards: PackGuards
         var telemetry: PackTelemetrySchema
+        var llm: PackLLM? = nil
     }
 
     static func loadSections(root: URL,
@@ -237,6 +238,8 @@ enum BundleDataLoader {
             responses.merge(strings) { current, _ in current }
         }
 
+        let llm = loadLLM(root: root, language: language)
+
         return Sections(
             capabilities: capabilities,
             workflows: workflows,
@@ -266,6 +269,7 @@ enum BundleDataLoader {
             telemetry: try decode(PackTelemetrySchema.self,
                                   at: root.appendingPathComponent("telemetry/schema.json"),
                                   relative: "telemetry/schema.json"),
+            llm: llm,
             // No confirmation-label section any more. The host's name for a
             // resolved confirmation now arrives on the confirmation BRANCH in
             // `capabilities/<id>/workflows.json`, beside that branch's action
@@ -397,6 +401,7 @@ enum BundleDataLoader {
             cascade: sections.cascade,
             guards: sections.guards,
             telemetry: sections.telemetry,
+            llm: sections.llm,
             classifier: classifier)
     }
 
@@ -488,6 +493,28 @@ enum BundleDataLoader {
     }
 
     // MARK: - Decoding helpers
+
+    /// `llm/<language>.json`, or nil.
+    ///
+    /// Never throws. The file only feeds the optional on-device language model
+    /// stage, so an absent file means "no text for the model", and an unreadable
+    /// or malformed one is logged and treated the same way. Failing the pack over
+    /// it would take the whole language down for a stage the pack classifier
+    /// does not need.
+    static func loadLLM(root: URL, language: String) -> PackLLM? {
+        let relative = "llm/\(language).json"
+        let url = root.appendingPathComponent(relative)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        do {
+            return try decode(PackLLM.self, at: url, relative: relative)
+        } catch {
+            log.error("""
+                \(relative, privacy: .public) unusable (\(String(describing: error), privacy: .public)) \
+                — the language model stage gets no pack text
+                """)
+            return nil
+        }
+    }
 
     static func decode<T: Decodable>(_ type: T.Type, at url: URL, relative: String) throws -> T {
         guard let data = try? Data(contentsOf: url) else {

@@ -10,8 +10,9 @@ import Foundation
 /// It is used for debugging.
 struct ClassificationBreakdown: Sendable {
     struct StageResult: Sendable {
-        /// 1 = keyword rule, 2 = TF-IDF/CoreML model, 3 = MiniLM semantic model.
-        /// Stage 3 does not run currently.
+        /// 1 = keyword rule, 2 = TF-IDF/CoreML model, 3 = second-opinion stage:
+        /// the MiniLM semantic model (not run currently) or the on-device
+        /// language model when the pack or a development override enables it.
         let stage: Int
         let intent: String
         let confidence: Double
@@ -30,7 +31,8 @@ struct ClassificationBreakdown: Sendable {
     /// The Stage 2 (model) result. It is set even when a keyword rule wins.
     /// `nil` only when the utterance has no words the model knows.
     let stage2: StageResult?
-    /// The Stage 3 (MiniLM) result. Currently always `nil`, because Stage 3 does not run.
+    /// The Stage 3 result: the on-device language model's answer when it ran
+    /// this turn, otherwise `nil`.
     let stage3: StageResult?
 
     init(winningStage: Int?, stage2: StageResult?, stage3: StageResult?) {

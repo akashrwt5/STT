@@ -56,10 +56,20 @@ enum PackEngineFactory {
     /// and cannot be built from a pack; the engine now depends on
     /// `SlotResolving`, so the pack-driven implementation is built here where the
     /// pack is.
+    ///   - foundationModelOverride: development-only replacement for the pack's
+    ///     `foundation_model` stage. The caller has already checked it is allowed.
+    ///   - locale: the user's locale, for the on-device language model. Nil uses
+    ///     the pack's language code, which carries no region.
     static func makeEngine(pack: ResolvedPack,
                                   stopwords: Set<String>? = nil,
-                                  trailingFunctionWords: Set<String>? = nil) throws -> any ConversationEngine {
-        let classifier = try PackClassifierAdapter(pack: pack)
+                                  trailingFunctionWords: Set<String>? = nil,
+                                  foundationModelOverride: FoundationModelOverride? = nil,
+                                  locale: Locale? = nil) throws -> any ConversationEngine {
+        let settings = FoundationModelSettings.resolve(pack: pack, override: foundationModelOverride)
+        let classifier = makeClassifier(base: try PackClassifierAdapter(pack: pack),
+                                        pack: pack,
+                                        settings: settings,
+                                        locale: locale ?? Locale(identifier: pack.language))
         let lexicon = pack.lexicon
 
         // Fuzzy stopwords and trailing function words are DATA — they come from the
@@ -136,6 +146,8 @@ enum PackEngineFactory {
             [\(pack.language, privacy: .public)], \(pack.intents.count) intents, \
             \(pack.classifier.variant.rawValue, privacy: .public) head, \
             keyword stage \(pack.stageEnabled(.keyword) ? "on" : "off", privacy: .public), \
+            classifier mode \(settings?.mode.rawValue ?? IntentClassifierMode.packOnly.rawValue, privacy: .public)\
+            \(foundationModelOverride?.mode != nil ? " (from development override)" : " (from pack)", privacy: .public), \
             agreement bar \(pack.policies.thresholds.agreement.map { String($0) } ?? "off", privacy: .public)
             """)
         return engine
@@ -189,6 +201,53 @@ enum PackEngineFactory {
     /// v3 surface separates them: the engine wants strings, the pack stores
     /// structure plus a per-language catalog, and the join happens once, after
     /// the language is known.
+    /// The pack classifier, wrapped in the language model stage when `settings`
+    /// turns it on and this SDK has `FoundationModels`.
+    ///
+    /// Any reason the stage cannot be built leaves the pack classifier alone and
+    /// says so in the log; it never fails the engine.
+    static func makeClassifier(base: PackClassifierAdapter,
+                               pack: ResolvedPack,
+                               settings: FoundationModelSettings?,
+                               locale: Locale) -> any IntentClassifying {
+        guard let settings else { return base }
+        if settings.instructions == nil && settings.intentDescriptions.isEmpty {
+            log.notice("""
+                Language model stage on, but neither the pack (llm/\(pack.language, privacy: .public).json) \
+                nor an override supplies its text — the model sees the labels by name only
+                """)
+        }
+        #if canImport(FoundationModels)
+        let labels = pack.classifier.labels
+        let outOfScopeIntent = pack.outOfScopeIntent ?? NLUSchema.defaultFallbackIntent
+        let generative: FoundationModelIntentClassifier
+        do {
+            generative = try FoundationModelIntentClassifier(
+                labels: labels,
+                outOfScopeIntent: outOfScopeIntent,
+                locale: locale,
+                instructions: settings.composedInstructions(labels: labels, locale: locale),
+                logsModelIO: settings.logsModelIO)
+        } catch {
+            log.error("Language model stage not built (\(String(describing: error), privacy: .public)) — pack classifier only")
+            return base
+        }
+        let thresholds = pack.policies.thresholds
+        return FoundationModelCascade(
+            base: base,
+            generative: generative,
+            mode: settings.mode,
+            outOfScopeIntent: outOfScopeIntent,
+            bars: .init(confidence: thresholds.confidence,
+                        agreement: thresholds.agreement,
+                        oovReject: thresholds.oovReject,
+                        oovBypass: thresholds.oovBypass))
+        #else
+        log.notice("Language model stage requested, but this SDK has no FoundationModels — pack classifier only")
+        return base
+        #endif
+    }
+
     static func schema(from pack: ResolvedPack) throws -> NLUSchema {
         var intents: [String: IntentDef] = [:]
 

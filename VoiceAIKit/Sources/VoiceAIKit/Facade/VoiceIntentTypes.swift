@@ -126,6 +126,13 @@ public struct VoiceIntentConfiguration: Sendable {
     /// When true, the MiniLM semantic-rescue stage (Stage 3) is loaded so
     /// low-confidence utterances get a second opinion.
     public var loadsSemanticRescue: Bool
+    /// Development only. Chooses the classifier mode instead of the pack, so
+    /// the on-device language model can be tried (or turned off) before a pack
+    /// says so. `nil` (the normal case) follows the pack.
+    ///
+    /// Ignored when `trust.refusesDevelopmentPacks` is true, so a release build
+    /// always follows the pack. See `FoundationModelOverride`.
+    public var foundationModelOverride: FoundationModelOverride?
 
     public init(
         language: VoiceLanguage = .english,
@@ -138,7 +145,8 @@ public struct VoiceIntentConfiguration: Sendable {
         audioSource: AudioSource = .microphone,
         trailingFunctionWords: Set<String>? = nil,
         commandSilence: SilenceDetectionConfiguration? = nil,
-        slotAnswerSilence: SilenceDetectionConfiguration? = nil
+        slotAnswerSilence: SilenceDetectionConfiguration? = nil,
+        foundationModelOverride: FoundationModelOverride? = nil
     ) {
         self.language = language
         self.packProvider = packProvider
@@ -151,6 +159,56 @@ public struct VoiceIntentConfiguration: Sendable {
         self.trailingFunctionWords = trailingFunctionWords
         self.commandSilence = commandSilence
         self.slotAnswerSilence = slotAnswerSilence
+        self.foundationModelOverride = foundationModelOverride
+    }
+}
+
+// MARK: - On-device language model
+
+/// Which classifier chooses the intent. The raw values are the strings a pack
+/// writes in `runtime/cascade.json`.
+public enum IntentClassifierMode: String, Sendable, Equatable, CaseIterable {
+    /// The pack's classifier only. The on-device language model is not used.
+    case packOnly = "pack_only"
+    /// The pack's classifier chooses the intent. The language model is asked
+    /// only when that answer would end in the fallback intent.
+    case packWithFoundationModelFallback = "pack_with_fm_fallback"
+    /// The language model chooses the intent on every turn. The pack's
+    /// classifier still runs, for comparison, and its answer is used when the
+    /// language model is unavailable on the device or gives no answer.
+    case foundationModel = "foundation_model"
+}
+
+/// Development-only choice of classifier mode, and optionally the language
+/// model's text.
+///
+/// `mode`, when set, replaces the pack's mode, so `.packOnly` turns the language
+/// model off even when the pack turns it on. Left `nil`, the pack decides, and
+/// the override can still turn on `logsModelIO`. The text comes from the pack's
+/// `llm/<language>.json` unless `instructions` or `intentDescriptions` is set
+/// here, which replaces that part of the pack's text for trying a prompt
+/// change before a pack carries it. The model's answer still goes through the
+/// engine's guards and confidence bar like any other classification.
+public struct FoundationModelOverride: Sendable, Equatable {
+    /// Replaces the pack's mode. `nil` uses the pack's `runtime/cascade.json`.
+    public var mode: IntentClassifierMode?
+    /// Replaces the pack's instructions. `nil` (the normal case) uses the pack's.
+    public var instructions: String?
+    /// Replaces the pack's intent descriptions. Empty (the normal case) uses the pack's.
+    public var intentDescriptions: [String: String]
+    /// When true, logs what is sent to the language model and what it returns,
+    /// including the user's utterance, under category `FoundationModelClassifier`.
+    /// For debugging only: everywhere else the package never logs a transcript.
+    public var logsModelIO: Bool
+
+    public init(mode: IntentClassifierMode? = nil,
+                instructions: String? = nil,
+                intentDescriptions: [String: String] = [:],
+                logsModelIO: Bool = false) {
+        self.mode = mode
+        self.instructions = instructions
+        self.intentDescriptions = intentDescriptions
+        self.logsModelIO = logsModelIO
     }
 }
 
