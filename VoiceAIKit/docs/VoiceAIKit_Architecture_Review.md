@@ -388,33 +388,4 @@ This allows Data Scientists to tweak and optimize the engine’s behavior direct
 ### 7. Meta (`/meta/`)
 - **`meta/report_card.json`**: CI/CD build metrics. Contains the F1 scores, precision, and recall of the models against the test set when this pack was compiled. (Not used at runtime; purely for traceability).
 
----
 
-## 6. Principal Engineer Review: Critical System Questions
-During an architecture review, expect a Principal Engineer or Systems Architect to probe deeply into thread-safety, memory limits, and edge cases. Below are the rigorous questions they will ask:
-
-> [!CAUTION]
-> **1. Actor Reentrancy & Priority Inversion**
-> *"The `NLUEngine` is an `actor`. CoreML classification can be a synchronous, CPU-heavy operation. If we execute inference directly on the actor's executor, do we risk priority inversion? What happens if a high-priority UI task needs to query the engine's `state` while a 300ms CoreML pass is blocking the actor? Are we utilizing `Task.detached` or yielding `await` appropriately?"*
-
-> [!WARNING]
-> **2. Atomic File Swaps vs. Active File Handles**
-> *"I see `PackStorageController` manages atomic swaps for the `Current` active pack. What is the exact behavior if the installer executes a symlink swap on the file system at the exact microsecond `BundleDataLoader` is parsing `bundle.json` or memory-mapping a CoreML model on a background thread? Do we rely on POSIX file-handle safety, or is there a reader-writer lock bridging the OTA and NLU domains?"*
-
-> [!IMPORTANT]
-> **3. Audio Tap Real-Time Constraints (Glitching)**
-> *"`AudioCaptureService` pipes `AVAudioPCMBuffer`s into an `AsyncStream.Continuation`. The `AVAudioEngine` tap block executes in a real-time audio context. If our downstream consumer (`SpeechRecognitionService`) yields or suspends, does the continuation lock block the audio thread? This is a classic source of audio glitching on iOS."*
-
-> [!TIP]
-> **4. Strict Memory Footprint (Jetsam Limits)**
-> *"If this SDK runs in a background Siri extension or a tight memory environment, the jetsam limit might be 50MB. Does `PackEngineFactory` aggressively memory-map the models, or does it load the entire TF-IDF vocabulary into the heap? How does `MemoryProbe` monitor and forcefully evict idle models when `isEngineIdle` becomes true?"*
-
-> [!NOTE]
-> **5. Forward/Backward Schema Compatibility**
-> *"If a user's app isn't updated for 6 months, their SDK's `currentRuntimeContract` stays at `v1`. The backend pushes a `v2` OTA pack. According to `PackValidator`, it will reject it. What is our telemetry strategy for tracking these 'orphaned' clients? Does the SDK silently swallow the update failure, or is the host app explicitly notified so it can force a mandatory App Store update?"*
-
-> [!CAUTION]
-> **6. The Smoke-Test Boot Loop**
-> *"In `NLUPackInstaller.swift`, you run a 'smoke test' via `NLUEngineProvider` before committing a pack. If the smoke test crashes (e.g., a fatal error inside CoreML due to an invalid tensor shape), the whole host app crashes. Upon reboot, the app will try to install the same staged pack again, causing an infinite crash loop. How does `PackStorageController` isolate or quarantine staged packs that cause fatal process terminations?"*
-
----
