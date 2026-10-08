@@ -1,0 +1,1 @@
+{"compiler_version":"nlu-compiler 1.0.0-content","dataset_hashes":{"en/train.csv":"4e3cb6abcd33a15c3066a6942896bee1dc25a156ec4b2fbfddebc402b1b0d8b7"},"env_lock_hash":"301844a622b7d5414e55f409683d0888c0f1849c57c6b73180e016e60e12581a","git_commit":"c9c254b1","training_run_ids":["en-c9c254b1"]}
