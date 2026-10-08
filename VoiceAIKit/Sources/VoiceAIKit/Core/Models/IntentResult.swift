@@ -1,22 +1,21 @@
 // IntentResult.swift
-// STT
+// VoiceAIKit
+//
+// Types that describe one classification: `ClassificationBreakdown`,
+// `ClassificationResult` and `IntentResult`.
 
 import Foundation
 
-/// Per-stage debug breakdown produced by the 3-stage classification pipeline.
-/// Attached to cards so the eye button can show exactly which stage answered and why.
+/// Shows how the 3-stage classification pipeline reached its answer.
+/// It is used for debugging.
 struct ClassificationBreakdown: Sendable {
     struct StageResult: Sendable {
-        /// 1 = keyword rule, 2 = TF-IDF CoreML, 3 = MiniLM semantic
+        /// 1 = keyword rule, 2 = TF-IDF/CoreML model, 3 = MiniLM semantic model.
+        /// Stage 3 does not run currently.
         let stage: Int
         let intent: String
         let confidence: Double
 
-        // Written in the type body, NOT an extension. A memberwise initialiser
-        // added in an extension does not suppress the synthesised one — it
-        // collides with it. In the body it replaces it, which is also what makes
-        // it `public`: the synthesised memberwise init of a public struct is
-        // internal, so a consumer outside the module could never build one.
         init(stage: Int, intent: String, confidence: Double) {
             self.stage = stage
             self.intent = intent
@@ -24,12 +23,14 @@ struct ClassificationBreakdown: Sendable {
         }
     }
 
-    /// Stage that produced the winning answer (1–3).
-    /// `nil` when no stage met the confidence threshold → GENAI fallback.
+    /// The stage that decided the result: 1, 2 or 3.
+    /// `nil` when no stage was confident enough, or when the utterance had no words
+    /// the model knows.
     let winningStage: Int?
-    /// Stage 2 (TF-IDF) result. `nil` only for pure keyword (stage 1) hits.
+    /// The Stage 2 (model) result. It is set even when a keyword rule wins.
+    /// `nil` only when the utterance has no words the model knows.
     let stage2: StageResult?
-    /// Stage 3 (MiniLM) result. `nil` if Stage 3 not loaded or not triggered.
+    /// The Stage 3 (MiniLM) result. Currently always `nil`, because Stage 3 does not run.
     let stage3: StageResult?
 
     init(winningStage: Int?, stage2: StageResult?, stage3: StageResult?) {
@@ -40,65 +41,39 @@ struct ClassificationBreakdown: Sendable {
 }
 
 /// What a classifier returns for one utterance.
-///
-/// Moved here from `IntentClassifierService`, which was deleted with the rest of
-/// the bundle-loading stack. It belongs next to `ClassificationBreakdown`: both
-/// are the shape of a classification, not the implementation of one, and
-/// `IntentClassifying` — the protocol every classifier satisfies — is written in
-/// terms of them.
 struct ClassificationResult: Sendable {
+    /// The label of the intent the classifier chose.
     let label: String
+    /// Confidence from 0 to 1. Normally the model's probability. When a keyword rule
+    /// decided the label against the model, it is a fixed value instead.
     let confidence: Double
-    /// True when the semantic stage produced this result.
-    ///
-    /// Always false under a pack that disables the semantic stage, which
-    /// `pack-en` does — its report card was measured that way.
+    /// True when the semantic stage produced this result. Currently always false.
     let semanticRescue: Bool
-    /// Per-stage detail, for the debug panel.
+    /// Per-stage detail, for debugging.
     let breakdown: ClassificationBreakdown
-    /// How a keyword rule and the model were reconciled on this turn, or nil
-    /// when no rule fired (VIK-055).
-    ///
-    /// The ENGINE reads this to pick the bar `confidence` must clear:
-    /// `policies.thresholds.agreement` for a corroborated turn, the ordinary
-    /// `confidence` threshold otherwise. It is EVIDENCE STRENGTH, not a second
-    /// confidence — the reported number stays the model's calibrated
-    /// probability and only the bar it must clear moves. Inventing a higher
-    /// number for a corroborated turn would put a second scale back in the
-    /// confidence field, which is the defect this ladder exists to remove.
-    ///
-    /// Mirrors `classifier.py`'s `last_arbitration`.
+    /// How a keyword rule and the model compared on this turn. `nil` when no keyword
+    /// rule fired. `NLUEngine` uses it to choose the confidence bar to clear:
+    /// `policies.thresholds.agreement` when `corroborated`, the normal `confidence`
+    /// threshold otherwise. `confidence` itself is not changed.
     let arbitration: Arbitration?
 
-    /// The outcome of reconciling a keyword rule with the model.
+    /// The result of comparing a keyword rule with the model.
     enum Arbitration: String, Sendable {
-        /// The rule and the model named the same intent. Measured at 99.2%
-        /// correct on the honest holdout (n=118), which is what justifies the
-        /// lower bar.
+        /// The rule and the model chose the same intent.
         case corroborated
-        /// The model says the utterance is OUT OF SCOPE and a rule claims it
-        /// anyway. The rule keeps the LABEL, but a model that recognises nothing
-        /// is the one disagreement that must not be overridden: it is what
-        /// separates "create reminder" inside a real request from the same two
-        /// words inside "who is the prime minister of create reminder".
+        /// The model says the utterance is out of scope, but a rule matched. The rule's
+        /// label is kept, with a low fixed confidence, so the turn ends in the fallback.
+        /// This stops "who is the prime minister of create reminder" from firing
+        /// "create reminder".
         case contested
-        /// A rule fired and the model named a DIFFERENT in-scope intent.
-        ///
-        /// The rule wins, and the confidence that comes with it is not a
-        /// probability — see `PackClassifierAdapter.ruleOnlyConfidence`. This
-        /// case exists so that fact is visible to the log, the debug panel and
-        /// the confirmation gate instead of being hidden inside a number.
-        ///
-        /// Measured on `holdout_honest.csv` (n=1470): these are the turns where
-        /// the hand-authored rule is RIGHT and the model is wrong — "dim the
-        /// audio", "load my normal configuration", "voices seem distant to me".
-        /// Treating them as contested cost 9 correct turns and bought nothing.
+        /// A rule matched and the model chose a different in-scope intent. The rule's
+        /// label is used, and `confidence` is a fixed value, not a probability (see
+        /// `PackClassifierAdapter.ruleOnlyConfidence`).
         case ruleOnly
     }
 
-    /// `arbitration` is defaulted so a classifier that has no keyword stage —
-    /// every stub in the test suite — needs no change. Nil means the ordinary
-    /// bar applies, which is the behaviour that predates VIK-055.
+    /// `arbitration` defaults to `nil`, so a classifier without a keyword stage
+    /// needs no change.
     init(label: String,
                 confidence: Double,
                 semanticRescue: Bool,
@@ -112,14 +87,15 @@ struct ClassificationResult: Sendable {
     }
 }
 
-/// The outcome of running intent classification on a transcription result.
+/// The outcome of classifying one transcription.
+/// VoiceAIKit does not create it. A host app can use it to hold and show a result.
 enum IntentResult: Sendable {
-    /// A recognised intent with its label and model confidence (0–1).
-    /// `semanticRescue` is true when Stage 3 (MiniLM) produced this result.
+    /// A recognised intent, with its label and the model's confidence (0 to 1).
+    /// `semanticRescue` is true when Stage 3 produced the result.
     case intent(label: String, confidence: Double, semanticRescue: Bool = false)
-    /// Confidence below threshold — includes a GenAI fallback URL for the query.
+    /// Confidence was too low. Holds a URL for searching the query, and the confidence.
     case genai(url: URL, confidence: Double)
-    /// User switched topics mid slot-filling — shows the abandoned intent name.
+    /// The user changed topic during slot filling. Holds the name of the abandoned intent.
     case interrupted(cancelledIntent: String)
 
     var confidence: Double {
@@ -130,7 +106,7 @@ enum IntentResult: Sendable {
         }
     }
 
-    /// Human-readable display label.
+    /// Title to show in the UI, e.g. "Volume Increase".
     var displayLabel: String {
         switch self {
         case .intent(let label, _, _):          return Self.humanize(label)
@@ -139,7 +115,7 @@ enum IntentResult: Sendable {
         }
     }
 
-    /// SF Symbol name for this intent.
+    /// SF Symbol name for the intent, for the host app's UI.
     var systemImage: String {
         switch self {
         case .genai:                  return "questionmark.circle"
@@ -238,7 +214,6 @@ enum IntentResult: Sendable {
             if char.isUppercase && prev.isLowercase {
                 result.append(" ")
             }
-            // Handle separator like " - " in "SendMessage - no"
             result.append(char)
             prev = char
         }

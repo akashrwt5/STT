@@ -1,21 +1,8 @@
 // PackIdentity.swift
 // VoiceAIKit
 //
-// WHICH pack is this, exactly.
-//
-// A session used to be unable to answer that. The data was there — `ResolvedPack`
-// holds the decoded `bundle.json` — but nothing on the facade exposed it, so a host
-// asking "what was running when the user said it misheard them?" had two options,
-// both wrong: reach into `ResolvedPack` (an internal type it should never name), or
-// call `VoiceIntentClient.activePackVersion(for:)`, which re-reads `bundle.json`
-// from disk and therefore answers a DIFFERENT question.
-//
-// That difference is not hypothetical. Activation is apply-on-next-build: an OTA
-// pack becomes `Current` on disk while the running session keeps the pack it bound
-// at `start()`. Between activation and the next session the two disagree, and the
-// disk copy is the one that lies about what just happened.
-//
-// So identity comes from the loaded pack, and only from the loaded pack.
+// Describes the pack a session is running: its version, signer, channel and
+// checksum. Read it from `VoiceIntentSession.loadedPack`.
 
 import Foundation
 
@@ -26,12 +13,7 @@ public struct PackIdentity: Sendable, Equatable {
     /// The compiler's bundle id, e.g. `pack-en-v1.0.36`.
     public let bundleID: String
 
-    /// Semantic version, e.g. `1.0.36`.
-    ///
-    /// Read from the pack, never derived from `bundleID`. The compiler emits both
-    /// from one variable so they agree by construction; deriving one from the other
-    /// in client code would be a second source of truth that diverges only in the
-    /// field, where nobody is looking.
+    /// Pack version, e.g. `1.0.36`. Copied from the pack's `version` field.
     public let version: String
 
     /// SHA-256 root the signature covers — the strongest single identifier this

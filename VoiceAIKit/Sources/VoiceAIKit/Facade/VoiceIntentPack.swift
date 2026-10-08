@@ -1,44 +1,43 @@
 // VoiceIntentPack.swift
 // VoiceAIKit
 //
-// The two things a host does to a pack that are not "run a session with it":
-// check whether it is safe to serve, and rehearse loading it before making it live.
-//
-// Both already existed — as instructions to copy. `PackProviderForApp` calls
-// `PackIntegrity.verify` directly; `STTNLUEngineProvider.smokeTest` strings together
-// `BundleDataLoader.load` + `PackEngineFactory.makeEngine` + `engine.handle("hello")`.
-// That is four internal types named in host code to perform two operations the SDK
-// should simply offer, and every future host copies the same four lines from the last
-// one. Copy them with a different `PackTrustPolicy` than the session uses — easy, the
-// argument is right there — and the OTA activation gate silently checks something
-// other than what will actually run.
-//
-// Offering them here is what lets `Pack/` stop being public.
+// Checks a host app can run on a pack without starting a session:
+//  - `verify`: is the pack trusted and compatible?
+//  - `smokeTest`: can the pack load and classify on this device?
 
 import Foundation
 
 /// Pack-level operations that do not need a live session.
 public enum VoiceIntentPack {
 
-    /// Verify a pack on disk and return what it says it is.
+    /// Checks that a pack on disk is trusted and compatible, and returns its identity.
     ///
-    /// Runs the same checks a real load runs — ed25519 signature over
-    /// `manifest ‖ bundle.json`, `checksums_root` binding, every file's digest,
-    /// `min_runtime_contract`, the development-pack refusal, report-card gates, and
-    /// language availability — and stops before reading the pack's content. So it
-    /// answers "would this load?", not "does its sha256 add up?", while costing a
-    /// fraction of a load.
+    /// It runs the checks a session runs before it reads the pack's content:
+    /// - the pack directory exists,
+    /// - the signature is valid (skipped if `trust.skipsSignatureVerification` is true),
+    /// - `checksums_root` matches, and every file's sha256 matches the manifest,
+    /// - the pack has no file that the manifest does not list,
+    /// - this SDK supports the pack's format and runtime requirements,
+    /// - the pack is not a development pack, if `trust` refuses those,
+    /// - the report-card gates passed, if `policy` requires it,
+    /// - the pack has the requested language.
     ///
-    /// Intended for the read side of an OTA setup: a `PackProvider` deciding whether
-    /// the activated pack is fit to serve, and falling back to the seed when it is not.
+    /// It does not load the model or the pack's sections, so a pack that passes can
+    /// still fail to load. Use `smokeTest` to check that.
+    ///
+    /// Use it to decide whether an installed pack can be served, and to fall back to
+    /// the seed pack when it cannot.
     ///
     /// - Parameters:
-    ///   - packRoot: the pack directory (the one holding `bundle.json`).
-    ///   - language: if given, verification fails unless the pack carries it. Pass the
-    ///     language you are about to serve — a pack that verifies perfectly and does
-    ///     not speak your language is not a pack you can use.
-    ///   - trust: who is allowed to have signed it.
-    /// - Throws: `VoiceIntentError` describing which step failed.
+    ///   - packRoot: The pack directory (the one that contains `bundle.json`).
+    ///   - language: The language you want to serve. Verification fails if the pack
+    ///     does not have it. If `nil`, the pack must contain exactly one language,
+    ///     otherwise this throws `VoiceIntentError.languageAmbiguous`.
+    ///   - trust: Which signing keys are trusted, and whether development packs are
+    ///     refused.
+    ///   - policy: Extra strictness settings (ignored file names, report-card gates).
+    /// - Returns: The identity of the verified pack.
+    /// - Throws: `VoiceIntentError` for the first check that failed.
     public static func verify(at packRoot: URL,
                               language: String? = nil,
                               trust: PackTrustPolicy,
@@ -48,20 +47,26 @@ public enum VoiceIntentPack {
         return PackIdentity(manifest)
     }
 
-    /// Load a pack exactly as a live session would and run one classification through it.
+    /// Loads a pack the way a session does and classifies one utterance with it.
     ///
-    /// This is the dress rehearsal an OTA installer needs before making a staged pack
-    /// `Current`: a pack can pass every cryptographic check and still be unloadable on
-    /// this device — a CoreML model the OS refuses, a section the compiler emitted
-    /// wrongly, an artifact the manifest promised and did not ship. Signature checks
-    /// cannot see any of that; only loading it can.
+    /// It runs everything `verify` runs, then loads the pack's content and model.
+    /// Use it before making a new pack current. A pack can pass every signature check
+    /// and still not load on this device, for example when its model fails to load or
+    /// a file the manifest lists is missing.
     ///
-    /// Throwing from here is the signal to abort activation, so the previous pack stays
-    /// `Current` and the user keeps a working assistant.
+    /// If this throws, do not activate the pack. Keep the previous one.
     ///
-    /// - Parameter probe: the utterance to classify. The result is discarded — what is
-    ///   being tested is that classification completes at all, not what it returns.
-    /// - Returns: the identity of the pack that was successfully exercised.
+    /// It uses the default engine settings, not any overrides set on a session.
+    ///
+    /// - Parameters:
+    ///   - packRoot: The pack directory (the one that contains `bundle.json`).
+    ///   - language: The language to load. It must be in the pack.
+    ///   - trust: Which signing keys are trusted, and whether development packs are
+    ///     refused.
+    ///   - policy: Extra strictness settings, as in `verify`.
+    ///   - probe: The text to classify. The result is thrown away. The test only
+    ///     checks that classification completes.
+    /// - Returns: The identity of the pack that was tested.
     public static func smokeTest(packRoot: URL,
                                  language: String,
                                  trust: PackTrustPolicy,

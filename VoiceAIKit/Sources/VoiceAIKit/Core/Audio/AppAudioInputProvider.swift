@@ -1,28 +1,31 @@
 // AppAudioInputProvider.swift
 // VoiceAIKit
 //
-// Single responsibility: a push-based `AudioInputProvider` for host apps that own
-// the microphone and audio session themselves and feed us raw PCM.
+// An `AudioInputProvider` for host apps that own the microphone and audio session.
+// The host pushes raw PCM into it with `enqueue(_:)`.
 
 @preconcurrency import AVFoundation
 import os
 import os.log
 
-/// An `AudioInputProvider` the host app pushes audio into, instead of the package
-/// opening the microphone.
+/// An `AudioInputProvider` that receives audio from the host app, instead of the
+/// package opening the microphone.
 ///
-/// Used when a session is created with `audioSource == .appProvided`. The host owns
-/// the `AVAudioSession`, the microphone (or hearing-aid route), permissions, and
-/// interruptions; it simply calls `enqueue(_:)` with chunks of raw PCM as they arrive.
+/// It is used when a session is created with `audioSource == .appProvided`. The host
+/// owns the `AVAudioSession`, the microphone, permissions and interruptions. It calls
+/// `enqueue(_:)` with chunks of raw PCM as they arrive.
 ///
-/// Audio contract (fixed for this provider): **Int16, mono, interleaved** at the
-/// sample rate given at construction. This matches the host's converter
-/// (`buffer.int16ChannelData`, single channel). `SpeechRecognitionService` converts
-/// these buffers to whatever format the `SpeechAnalyzer` requires downstream.
+/// Audio format: **Int16, mono, interleaved**, at the sample rate passed to `init`.
+/// `SpeechRecognitionService` converts the buffers to the format `SpeechAnalyzer`
+/// needs.
 ///
-/// Lifecycle mirrors the live mic: the coordinator calls `start()` when a turn opens
-/// and `stop()` when it endpoints. Audio pushed between turns (no active stream) is
-/// dropped, so trailing audio from one turn can't bleed into the next.
+/// `SpeechRecognitionService` calls `start()` when a turn opens, and
+/// `TranscriptionCoordinator` calls `stop()` when the turn ends. Audio pushed while no
+/// turn is active is dropped, so audio from one turn does not appear in the next.
+///
+/// `@unchecked Sendable`: `state` changes only in `start()` and `stop()`, which are
+/// called from `@MainActor` code. `enqueue(_:)` touches only the continuation, which
+/// is protected by a lock.
 final class AppAudioInputProvider: AudioInputProvider, @unchecked Sendable {
 
     // MARK: - AudioInputProvider
@@ -33,13 +36,13 @@ final class AppAudioInputProvider: AudioInputProvider, @unchecked Sendable {
 
     // MARK: - Private
 
-    /// Int16 / mono / interleaved at the host's sample rate. Always constructible for
-    /// these parameters, so the force-unwrap cannot fail in practice.
+    /// Int16, mono, interleaved. Built once in `init`, which force-unwraps it, so the
+    /// format must be valid for the sample rate used.
     private let format: AVAudioFormat
-    /// Bytes per audio frame — 2 for Int16 mono. Used to validate/align incoming Data.
+    /// Bytes per frame: 2 for Int16 mono. Used to check the size of incoming data.
     private let bytesPerFrame: Int
-    /// Guards the active continuation so `enqueue(_:)` (called from the host's
-    /// real-time audio thread) and `start()`/`stop()` never race on it.
+    /// Protects the current stream continuation. `enqueue(_:)` (any thread) and
+    /// `start()`/`stop()` both use it.
     private let continuationLock = OSAllocatedUnfairLock<
         AsyncStream<AVAudioPCMBuffer>.Continuation?
     >(initialState: nil)
@@ -47,8 +50,8 @@ final class AppAudioInputProvider: AudioInputProvider, @unchecked Sendable {
 
     // MARK: - Init
 
-    /// - Parameter sampleRate: sample rate of the Int16 mono PCM the host will push
-    ///   (e.g. 16_000 for a BLE / hearing-aid stream).
+    /// - Parameter sampleRate: sample rate of the Int16 mono PCM the host will push,
+    ///   e.g. `16_000`. If it is not greater than 0, `16_000` is used.
     init(sampleRate: Double) {
         let rate = sampleRate > 0 ? sampleRate : 16_000
         // Int16 / mono / interleaved is a universally valid PCM format description.
@@ -63,9 +66,8 @@ final class AppAudioInputProvider: AudioInputProvider, @unchecked Sendable {
 
     // MARK: - AudioInputProvider
 
-    /// Opens a fresh buffer stream for one recognition turn. Bounded so a slow
-    /// consumer can never grow memory without limit — the newest audio wins, which
-    /// is the correct policy for live speech (stale backlog is worthless).
+    /// Opens a new buffer stream for one turn. It keeps only the newest 32 buffers;
+    /// if the consumer is slow, the oldest buffers are dropped.
     func start() -> AsyncStream<AVAudioPCMBuffer> {
         state = .preparing
         let (stream, continuation) = AsyncStream<AVAudioPCMBuffer>.makeStream(
@@ -80,8 +82,8 @@ final class AppAudioInputProvider: AudioInputProvider, @unchecked Sendable {
         return stream
     }
 
-    /// Ends the current turn's stream. Audio pushed after this (until the next
-    /// `start()`) is dropped.
+    /// Ends the current turn's stream. Audio pushed after this, until the next
+    /// `start()`, is dropped.
     func stop() {
         continuationLock.withLock { c in
             c?.finish()
@@ -95,20 +97,22 @@ final class AppAudioInputProvider: AudioInputProvider, @unchecked Sendable {
 
     /// Pushes one chunk of raw **Int16 mono** PCM at the configured sample rate.
     ///
-    /// Safe to call from any thread, including a real-time audio callback. The bytes
-    /// are deep-copied into an owned buffer before being handed off, so the caller may
-    /// reuse its own storage immediately.
+    /// Thread-safe. The bytes are copied, so the caller can reuse its storage
+    /// immediately. It allocates memory for every chunk, so do not call it directly from
+    /// a real-time audio callback. Hand the data to a normal thread or queue first.
     ///
-    /// Dropped (no-op) when:
-    ///   - no turn is active (between turns / before `start()`), or
-    ///   - the chunk is empty.
-    /// A non-frame-aligned byte count (odd, for Int16) is truncated to whole frames
-    /// and the remainder logged — it never crashes or builds a malformed buffer.
+    /// The chunk is dropped when:
+    ///   - no turn is active (between turns, or before `start()`),
+    ///   - the chunk is empty or smaller than one frame, or
+    ///   - the buffer cannot be allocated.
+    ///
+    /// Send whole frames (an even number of bytes). If the byte count is odd, the last
+    /// byte is dropped and a debug message is logged. It is not kept for the next chunk.
     func enqueue(_ data: Data) {
         guard !data.isEmpty else { return }
 
-        // Only build/yield if a turn is active. Snapshot under the lock; yielding to a
-        // continuation that stop() finishes right after is a safe no-op.
+        // Check for an active turn under the lock. If `stop()` finishes the stream right
+        // after this, `yield` on the finished stream does nothing.
         let continuation = continuationLock.withLock { $0 }
         guard let continuation else { return }   // dropped between turns
 

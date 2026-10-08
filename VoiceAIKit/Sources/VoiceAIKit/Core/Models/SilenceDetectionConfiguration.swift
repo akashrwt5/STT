@@ -1,97 +1,92 @@
 // SilenceDetectionConfiguration.swift
-// STT
+// VoiceAIKit
 //
-// Tunable parameters for automatic silence-based session termination.
+// Settings that decide when a listening turn ends on its own.
 
 import Foundation
 
-/// Configuration for energy-based Voice Activity Detection (VAD).
+/// Settings for ending a turn automatically after the user stops speaking.
 ///
-/// When enabled, the recognition pipeline measures the audio energy of incoming
-/// buffers and automatically ends the session after a configurable period of
-/// silence — mirroring the platform-managed endpointing of cloud services such
-/// as Dialogflow's `single_utterance` mode.
+/// Three parts use these settings:
+///   - The transcript check (`EndpointDecider`) ends the turn when the transcript has
+///     not changed for a set time. This decides when the user has finished speaking.
+///     How long it waits depends on the answer: `speechEndTimeout`,
+///     `freeformAnswerTimeout` or `incompleteAnswerTimeout`.
+///   - The no-speech check (`SilenceDetector`) measures how loud each audio buffer is.
+///     It ends the turn after `noSpeechTimeout` if nobody speaks.
+///   - `maxUtteranceDuration` is an upper limit on one turn.
 ///
-/// Two independent timeouts model the two real-world cases:
-///   - **`speechEndTimeout`**: silence *after* the user has spoken (they finished
-///     their utterance and trailed off).
-///   - **`noSpeechTimeout`**: silence from the very start (the session opened but
-///     nobody ever spoke).
+/// `VoiceIntentSession` uses `.singleUtterance` for a new command and `.slotAnswer`
+/// when it waits for the answer to a follow-up question. To change them, set
+/// `VoiceIntentConfiguration.commandSilence` or `slotAnswerSilence`.
 public struct SilenceDetectionConfiguration: Sendable, Equatable {
 
-    /// Whether automatic silence detection is active. When `false`, the session
-    /// runs until stopped manually (suitable for continuous live captioning).
+    /// Whether automatic ending is on. When `false`, the turn runs until it is
+    /// stopped manually (for example, continuous captioning).
     public var isEnabled: Bool
 
-    /// Energy threshold in dBFS below which a buffer is considered silent.
-    ///
-    /// Typical speech sits well above −40 dBFS; ambient room noise usually falls
-    /// below −50 dBFS. The default of −45 dBFS is a conservative middle ground.
-    /// Acts as the *floor* of the effective threshold — the adaptive noise-floor
-    /// estimate can raise the effective threshold above this in a loud room, but
-    /// never below it.
+    /// A buffer quieter than this level (dBFS) counts as silent. This is the lowest
+    /// level the detector uses. In a noisy room the detector raises the level above
+    /// this (see `noiseFloorMarginDB`), but never below it.
     public var thresholdDBFS: Float
 
-    /// Margin in dB above the learned ambient noise floor that a buffer must exceed
-    /// to count as speech (effective threshold = max(thresholdDBFS, noiseFloor +
-    /// this)). Higher = stricter (louder speech needed to reset the silence timer);
-    /// lower = more sensitive but more prone to counting ambient noise as speech.
+    /// How many dB a buffer must be above the measured background noise to count as
+    /// speech. The level used is `max(thresholdDBFS, noise level + noiseFloorMarginDB)`.
+    /// A higher value needs louder speech. A lower value reacts to quieter sounds, but
+    /// background noise is more likely to count as speech.
     public var noiseFloorMarginDB: Float
 
-    /// Seed for the adaptive noise-floor estimate (dBFS) at session start, before
-    /// any ambient audio has been observed. A quiet-room default; it adapts upward
-    /// on its own in a louder environment.
+    /// The background noise level (dBFS) assumed at the start of a turn, before any
+    /// audio is measured. The detector then adjusts it up or down from the audio.
     public var initialNoiseFloorDBFS: Float
 
-    /// Duration of continuous silence *after detected speech* that ends the session.
+    /// The base wait of the transcript check: seconds the transcript must stay unchanged
+    /// before the turn ends, when the answer looks complete.
     public var speechEndTimeout: TimeInterval
 
-    /// Medium window applied when the endpoint arbiter reports FREEFORM — free
-    /// text whose completeness cannot be verified ("drink" vs "drink water").
-    /// Long enough to survive a mid-topic thinking pause, short enough to stay
-    /// responsive. Only consulted when an arbiter is installed.
+    /// Wait for a free-text answer whose end is unclear ("drink" vs "drink water").
+    /// The transcript check uses the larger of this and `speechEndTimeout`. It is used
+    /// only when the session has an endpoint arbiter, which `VoiceIntentSession` sets.
     public var freeformAnswerTimeout: TimeInterval
 
-    /// Extended window applied when the endpoint arbiter judges the stable
-    /// transcript verifiably INCOMPLETE (e.g. bare "tomorrow" for a date-time
-    /// slot, a trailing function word). Gives the user room to finish the
-    /// thought ("…5 AM") before the turn is committed.
+    /// Wait for an answer that looks unfinished (for example "tomorrow" when a time is
+    /// needed, or a trailing function word). It gives the user time to finish
+    /// ("... at 5 AM"). Used only when the session has an endpoint arbiter.
     public var incompleteAnswerTimeout: TimeInterval
 
-    /// Duration of silence *with no speech ever detected* that ends the session.
+    /// Seconds after the turn starts with no speech detected that end the turn.
+    /// The turn ends only if the recogniser has produced no text.
     public var noSpeechTimeout: TimeInterval
 
-    /// Runaway guard — the absolute ceiling on a single turn, measured from the FIRST
-    /// detected speech. This is NOT the lever for "how long the mic can hang": that is
-    /// already bounded by the trailing-silence windows above (≤ `incompleteAnswerTimeout`
-    /// after the user goes quiet). This cap only ever bites when speech never stops
-    /// (background TV, dictating an essay into a command mic), so it is set high on
-    /// purpose. The endpoint applies it word-boundary-aware — it commits at the next
-    /// micro-gap rather than mid-word, with a small hard ceiling beyond this value as a
-    /// final backstop. Set to `0` to disable.
+    /// Upper limit for one turn, counted from the first speech. It only matters when
+    /// speech never stops (for example a TV in the background). After this time, the
+    /// turn ends once the transcript has not changed for `maxUtteranceWordBoundaryGrace`.
+    /// If it keeps changing, the turn ends after `maxUtteranceHardCeiling` more seconds.
+    /// `0` turns the limit off.
     public var maxUtteranceDuration: TimeInterval
 
-    /// Inter-word micro-gap (seconds) that counts as a safe word boundary for the
-    /// `maxUtteranceDuration` cap to commit at, so the cap never cuts mid-word.
+    /// After `maxUtteranceDuration`, seconds the transcript must stay unchanged before
+    /// the turn ends. This makes the turn end between words, not in the middle of one.
     public var maxUtteranceWordBoundaryGrace: TimeInterval
 
-    /// Extra time (seconds) beyond `maxUtteranceDuration` after which the cap commits
-    /// unconditionally — even mid-word. Absolute backstop for input that never pauses
-    /// between words (a continuous stream that offers no word boundary to cut at).
+    /// After `maxUtteranceDuration`, the number of extra seconds after which the turn
+    /// ends even if the transcript is still changing.
     public var maxUtteranceHardCeiling: TimeInterval
 
-    /// When true, the trailing-silence window GROWS with how long the user has already
-    /// been speaking: a short command commits fast (the base window), a long continuous
-    /// utterance gets a longer window so sentence-boundary pauses don't cut it off. A
-    /// lightweight heuristic stand-in for a neural end-of-query model. Default off.
+    /// When true, the wait grows the longer the user has been speaking, so a short
+    /// command ends quickly and a long sentence is not cut at a pause.
+    /// The wait is `min(adaptiveMaxWindow, base + max(0, spokenFor - adaptiveGraceStart) * adaptiveSlope)`,
+    /// where `base` is `speechEndTimeout`, `freeformAnswerTimeout` or `incompleteAnswerTimeout`.
     public var adaptiveEndpointing: Bool
-    /// No adaptive extension until the user has been speaking at least this long (s).
+    /// The wait does not grow until the user has spoken this many seconds.
     public var adaptiveGraceStart: TimeInterval
-    /// Extra window (seconds) added per second spoken beyond `adaptiveGraceStart`.
+    /// Seconds added to the wait for each second spoken after `adaptiveGraceStart`.
     public var adaptiveSlope: Double
-    /// Absolute ceiling (seconds) on the adaptive trailing-silence window.
+    /// The longest wait when `adaptiveEndpointing` is on, in seconds. It also applies
+    /// to `incompleteAnswerTimeout`, so a value below it shortens that wait.
     public var adaptiveMaxWindow: TimeInterval
 
+    /// All settings except `isEnabled` have defaults.
     public init(
         isEnabled: Bool,
         thresholdDBFS: Float = -45.0,
@@ -126,29 +121,24 @@ public struct SilenceDetectionConfiguration: Sendable, Equatable {
         self.adaptiveMaxWindow = adaptiveMaxWindow
     }
 
-    /// Silence detection off — the session runs until stopped manually.
-    /// Use for continuous captioning of an ongoing conversation.
+    /// Automatic ending is off. The turn runs until it is stopped manually.
     public static let disabled = SilenceDetectionConfiguration(isEnabled: false)
 
-    /// Silence detection on — command + natural-language capture. Short utterances
-    /// commit at the **1.0s** base window (industry command norm — Alexa/Google sit at
-    /// ~0.5–1.0s); a long continuous utterance grows the window via `adaptiveEndpointing`
-    /// (up to `adaptiveMaxWindow` = 2.5s) so sentence-boundary pauses don't cut it, and
-    /// clearly-unfinished input still extends via `incompleteAnswerTimeout` (2.5s). For
-    /// consistently slower speakers (e.g. hearing-aid users) raise `speechEndTimeout` to
-    /// ~1.2s via a custom `SilenceDetectionConfiguration`.
+    /// Automatic ending for a new command. A short command ends after 1.0 s of quiet.
+    /// With `adaptiveEndpointing`, the wait grows for a long sentence (up to
+    /// `adaptiveMaxWindow`, 2.5 s). An unfinished answer waits `incompleteAnswerTimeout`
+    /// (2.5 s). For slower speakers, use your own configuration with a longer
+    /// `speechEndTimeout` (for example 1.2 s).
     public static let singleUtterance = SilenceDetectionConfiguration(
         isEnabled: true,
         speechEndTimeout: 1.0,
         adaptiveEndpointing: true
     )
 
-    /// Endpointing for slot answers (replies to a follow-up question). Uses a
-    /// uniform, deliberately unhurried 1.5s confirmation window — the original
-    /// pre-tuning value. Field testing showed people routinely pause ~1s
-    /// mid-answer ("drink… water", "tomorrow… five"), so a fast-commit window
-    /// here clips answers more often than it saves time. Verifiably unfinished
-    /// answers still extend further via `incompleteAnswerTimeout`.
+    /// Automatic ending for the answer to a follow-up question. It waits 1.5 s
+    /// (`speechEndTimeout` and `freeformAnswerTimeout`), because people often pause
+    /// in the middle of an answer. An unfinished answer still waits
+    /// `incompleteAnswerTimeout`. `adaptiveEndpointing` is off.
     public static let slotAnswer = SilenceDetectionConfiguration(
         isEnabled: true,
         speechEndTimeout: 1.5,

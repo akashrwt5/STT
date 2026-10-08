@@ -10,16 +10,18 @@ import Foundation
 
 // MARK: - Language
 
-/// The single language the session operates in. Whichever language you pick must
-/// have its models/overlays bundled in the package. English is fully self-contained;
-/// `fr`, `de`, `da` ship with overlays and use the multilingual classifier.
+/// The single language the session operates in. A compatible language pack for the
+/// selected language must be available from the configured `PackProvider`. Language-
+/// specific classifier artifacts and dialogue data are supplied by that pack; the
+/// runtime builds its classifier from the selected pack rather than switching between
+/// language-specific classifier implementations here.
 ///
 /// This mirrors the design constraint "one model, one language": a session speaks
 /// exactly one language, chosen here at construction time.
 public enum VoiceLanguage: Sendable, Equatable {
     /// English — uses the dedicated English classifier + English word-lists.
     case english
-    /// Any other bundled language. `code` is the NLU language tag ("fr", "de", "da");
+    /// A non-English language supported by the supplied pack. `code` is the NLU language tag;
     /// `locale` is the BCP-47 identifier the speech recognizer uses ("fr-FR", "de-DE").
     case language(code: String, locale: String)
 
@@ -84,32 +86,22 @@ public enum VoiceIntentConfigurationError: Error, Equatable, Sendable, CustomStr
 
 // MARK: - Configuration
 
-/// Everything needed to stand up a session.
+/// Everything needed to create a `VoiceIntentSession`.
 ///
-/// `packProvider` and `trust` have no defaults, and that is the point. Both used
-/// to be implicit — the pack came from `Bundle.module` and nothing was verified
-/// — and an implicit default for either is a session that runs on data nobody
-/// chose. Everything else defaults sensibly.
+/// `packProvider` and `trust` are required. Every other setting has a default.
 public struct VoiceIntentConfiguration: Sendable {
-    /// The language the session operates in.
+    /// The language the session operates in. Defaults to `.english`.
     public var language: VoiceLanguage
-    /// Where this session's pack comes from. Required — there is no default,
-    /// because every default here is a language, and a wrong default is a
-    /// session that quietly speaks the wrong one.
+    /// Supplies the pack for `language`. Required.
     public var packProvider: any PackProvider
-    /// Who is allowed to have signed this session's pack.
+    /// Which signing keys are trusted, and whether development packs are refused.
     ///
-    /// Required, and deliberately not defaulted. The signing keys are the host's
-    /// — pinning them in the SDK would mean an SDK release to rotate one — and a
-    /// default that skips verification is a default that ships.
+    /// Required, so a session cannot run on an unverified pack by accident. The host
+    /// supplies the keys, so rotating a key does not need an SDK release.
     public var trust: PackTrustPolicy
-    /// Words never treated as typos when fuzzy-matching an enum entity.
-    ///
-    /// English by default and WRONG for any other language: the list is what
-    /// stops "the" matching the memory "three", and a French pack needs
-    /// le/la/de. The pack format has nowhere to carry it (VIK-007), so it is a
-    /// parameter rather than a guess, and the resolver logs an error when a
-    /// non-English pack is loaded without one.
+    /// Words that fuzzy matching of an enum entity must not treat as typos, for example
+    /// "the" versus the memory name "three". `nil` (the normal case) uses the list in
+    /// the pack. Set it only to override the pack's list.
     public var fuzzyStopwords: Set<String>?
     /// When true, follow-up questions and fulfillment messages are spoken aloud and
     /// the microphone auto-restarts to capture the user's answer (hands-free).
@@ -120,11 +112,9 @@ public struct VoiceIntentConfiguration: Sendable {
     /// Where microphone audio comes from — the package's own mic (`.microphone`,
     /// default) or raw PCM the host pushes (`.appProvided`). See `AudioSource`.
     public var audioSource: AudioSource
-    /// Language-specific connective/function words that mark a stable transcript as
-    /// mid-thought (extending the endpoint window). `nil` uses the built-in English
-    /// set. A non-English pack SHOULD supply its own (e.g. Hindi "ke", "ko", "par"),
-    /// mirroring `fuzzyStopwords`; otherwise mid-thought detection for that language
-    /// falls back to the medium window instead of the extended one.
+    /// Connective words (for example Hindi "ke", "ko", "par") that mark a stable
+    /// transcript as mid-thought and extend the endpoint window. `nil` (the normal case)
+    /// uses the list in the pack. Set it only to override the pack's list.
     public var trailingFunctionWords: Set<String>?
     /// Overrides the endpointing windows/thresholds for an initial command turn. `nil`
     /// uses the tuned default (`.singleUtterance`). Only applied when
@@ -134,7 +124,7 @@ public struct VoiceIntentConfiguration: Sendable {
     /// answer. `nil` uses the tuned default (`.slotAnswer`).
     public var slotAnswerSilence: SilenceDetectionConfiguration?
     /// When true, the MiniLM semantic-rescue stage (Stage 3) is loaded so
-    /// low-confidence utterances get a second opinion. Costs ~16 MB of memory.
+    /// low-confidence utterances get a second opinion.
     public var loadsSemanticRescue: Bool
 
     public init(

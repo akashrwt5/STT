@@ -1,30 +1,29 @@
 // EndpointDecider.swift
 // VoiceAIKit
 //
-// The pure, clock-free endpointing math, lifted out of `SpeechRecognitionService`
-// so it can be unit-tested without a live `SpeechAnalyzer`, microphone, or wall
-// clock. Every time value is passed in explicitly; the struct holds no mutable
-// state and never reads the clock itself.
-//
-// `SpeechRecognitionService` keeps the state (flags, timestamps), the clock, and the
-// async content-aware arbiter; it delegates the actual "should we endpoint now?"
-// decisions here. The three methods below mirror, one-for-one, the logic that used
-// to live inline in the recognizer.
+// Decides when a turn should end, from the transcript and the time values passed in.
 
 import Foundation
 
+/// The rules for ending a turn. It holds no state and does not read the clock.
+/// `SpeechRecognitionService` keeps the state and the clock, and passes the times in.
+/// This makes the rules easy to test without a microphone or a `SpeechAnalyzer`.
 struct EndpointDecider {
 
+    /// The silence settings used by the rules.
     let config: SilenceDetectionConfiguration
 
-    /// The trailing-silence window required to endpoint for a given content-aware
-    /// verdict: complete commits fast, freeform gets a medium window, a verifiably
-    /// unfinished answer gets the extended one.
+    /// How long the transcript must stay unchanged before the turn ends, for the
+    /// given verdict:
+    ///   - `.complete`: `speechEndTimeout`
+    ///   - `.freeform`: the larger of `speechEndTimeout` and `freeformAnswerTimeout`
+    ///   - `.incomplete`: `incompleteAnswerTimeout`
     ///
-    /// When `adaptiveEndpointing` is on, the base window GROWS with `spokenFor` (how
-    /// long the user has already been speaking) beyond `adaptiveGraceStart`, capped at
-    /// `adaptiveMaxWindow`: a short command commits at the base window; a long
-    /// continuous utterance earns more time so sentence-boundary pauses don't cut it.
+    /// When `adaptiveEndpointing` is on, the wait is longer for a long utterance:
+    /// `min(adaptiveMaxWindow, wait + max(0, spokenFor - adaptiveGraceStart) * adaptiveSlope)`.
+    /// The result is never more than `adaptiveMaxWindow`.
+    ///
+    /// - Parameter spokenFor: Seconds since the first text arrived. Pass `0` if unknown.
     func requiredStabilityWindow(
         for verdict: SlotAnswerAssessment,
         spokenFor: TimeInterval = 0
@@ -40,9 +39,16 @@ struct EndpointDecider {
         return min(config.adaptiveMaxWindow, base + ext)
     }
 
-    /// Transcript-stability endpoint: true once the running transcript has been
-    /// unchanged for the verdict's window. `lastChangeAt` is when it last changed;
-    /// `firstSpeechAt` (when the user started speaking) drives the adaptive window.
+    /// Returns true when the transcript has not changed for the required window
+    /// (see `requiredStabilityWindow`).
+    ///
+    /// It returns false when there is no text yet, when the final result has already
+    /// arrived, or when `lastChangeAt` is `0` (the transcript has not changed yet).
+    ///
+    /// - Parameters:
+    ///   - lastChangeAt: When the transcript last changed.
+    ///   - firstSpeechAt: When the first text arrived. `0` means no text yet. Used for
+    ///     the adaptive window.
     func shouldEndpointForStableTranscript(
         now: CFAbsoluteTime,
         lastChangeAt: CFAbsoluteTime,
@@ -56,11 +62,14 @@ struct EndpointDecider {
         return now - lastChangeAt >= requiredStabilityWindow(for: verdict, spokenFor: spokenFor)
     }
 
-    /// Runaway guard, word-boundary aware. Fires only once speech has run past
-    /// `maxUtteranceDuration` from `firstSpeechAt`; at the soft cap it waits for a
-    /// micro-gap (so it never cuts mid-word), with a hard ceiling beyond that as the
-    /// absolute backstop for input that never gaps at all. `maxUtteranceDuration == 0`
-    /// disables it.
+    /// Returns true when the turn has lasted too long. This is the upper limit set by
+    /// `maxUtteranceDuration`, counted from `firstSpeechAt` (the first text).
+    ///   - Before `maxUtteranceDuration` seconds: false.
+    ///   - After it: true once the transcript has not changed for
+    ///     `maxUtteranceWordBoundaryGrace`, so the turn ends between words.
+    ///   - After `maxUtteranceDuration + maxUtteranceHardCeiling`: always true.
+    /// It is always false when `maxUtteranceDuration` is `0`, when there is no text,
+    /// or when the final result has arrived.
     func shouldEndpointForMaxDuration(
         now: CFAbsoluteTime,
         firstSpeechAt: CFAbsoluteTime,
@@ -80,13 +89,13 @@ struct EndpointDecider {
         return now - lastChangeAt >= config.maxUtteranceWordBoundaryGrace
     }
 
-    /// Whether an acoustic-VAD outcome should end the session. Config-independent, so
-    /// it is `static`.
-    ///
-    /// `.noSpeech` ends only when the decoder produced no text (nobody spoke); if there
-    /// IS text, a quiet speaker under AGC is likely below the energy threshold — defer
-    /// to the content-aware stability endpoint. `.endOfSpeech` ends once the user has
-    /// produced any text (volatile or final).
+    /// Whether a result from the audio check (`SilenceDetector`) should end the turn.
+    /// It does not depend on the settings, so it is `static`. The session currently passes
+    /// only `.noSpeech`.
+    ///   - `.noSpeech`: ends the turn only if there is no text. If there is text, the
+    ///     microphone level may just be below the threshold, so the transcript check
+    ///     decides instead.
+    ///   - `.endOfSpeech`: ends the turn once there is any text, partial or final.
     static func shouldStop(
         for reason: SilenceDetector.Outcome.Reason,
         hasVolatileText: Bool,

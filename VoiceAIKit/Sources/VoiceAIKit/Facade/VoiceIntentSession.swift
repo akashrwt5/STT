@@ -1,28 +1,22 @@
 // VoiceIntentSession.swift
 // VoiceAIKit
 //
-// THE public API. One object that turns microphone input into classified intents:
+// The main API of VoiceAIKit. One object that turns microphone input into classified
+// intents (speech to text, intent classification, multi-turn dialog, optional spoken
+// prompts) and delivers everything on an event stream.
 //
-//     let seed = Bundle.main.url(forResource: "pack-en-v1.0.30", withExtension: nil)!
 //     let session = VoiceIntentSession(configuration: .init(
 //         language: .english,
-//         packProvider: StaticPackProvider(language: "en", url: seed),
+//         packProvider: StaticPackProvider(language: "en", url: seedPackURL),
 //         trust: myTrustPolicy))
 //     Task { for await event in session.events { … } }
 //     try await session.start()
 //
-// The pack is supplied, never discovered. See `PackProvider` for why the SDK
-// does no networking and no bundle scanning.
+// The host supplies the pack through a `PackProvider`. The SDK does not download packs.
 //
-// It is a headless, packaged version of the app's PVAViewModel + LiveTranscription-
-// ViewModel loop — mic → transcript → 3-stage classifier → multi-turn dialog, with
-// optional spoken prompts — collapsed behind a single event stream. The whole STT +
-// NLU stack (coordinator, classifier, entity extractor, dialog manager, TTS) lives
-// inside; the consumer never touches any of it.
-//
-// @MainActor because it drives AVAudioEngine / AVSpeechSynthesizer, which are main-
-// actor-isolated. The heavy work (classification, embedding) happens inside the
-// NLUEngine actor and Task.detached hops, so the main thread is never blocked.
+// It runs on the main actor because `TranscriptionCoordinator` (audio) and
+// `ConversationSpeaker` (speech) do. Classification runs in the `NLUEngine` actor and
+// in detached tasks, so the main thread is not blocked.
 
 import Foundation
 import os.log
@@ -40,15 +34,12 @@ public final class VoiceIntentSession {
         didSet { if state != oldValue { continuation.yield(.stateChanged(state)) } }
     }
 
-    /// The pack this session actually bound — nil until the engine is built, which
+    /// The pack this session is running. It is `nil` until the engine is built, which
     /// happens on the first `start()` or `classify(text:)`.
     ///
-    /// Read it for telemetry: every session should be attributable to the exact bytes
-    /// that classified for it. Do NOT read it from `VoiceIntentClient.activePackVersion`
-    /// instead — that reports what is `Current` on DISK, and activation is
-    /// apply-on-next-build, so after an OTA install the two deliberately disagree until
-    /// the next session starts. When a user reports a misheard command, the pack that
-    /// misheard it is this one, not the one that has since replaced it.
+    /// Use it to find out which pack handled a request. `VoiceIntentClient.activePackVersion(for:)`
+    /// can report a newer pack after an OTA update, because a session keeps its pack until
+    /// the next session starts.
     public private(set) var loadedPack: PackIdentity?
 
     // MARK: - Private
@@ -60,14 +51,10 @@ public final class VoiceIntentSession {
     private let appAudio: AppAudioInputProvider?
     private let speaker = ConversationSpeaker()
     private var engine: (any ConversationEngine)?
-    /// Whether the HOST wants this session running — set by `start()`, cleared by
-    /// `stop()`. Deliberately separate from `state`, which tracks where inside a turn
-    /// we are: after `stop()` a turn can still be in flight, and `state` will happily
-    /// be driven back to `.speaking`/`.listening` by that turn unless something says
-    /// "the host is done". This flag is that something.
-    ///
-    /// It existed before and was written in exactly two places and read in none, which
-    /// is why `stop()` could not actually stop anything (VIK: mic reopened after stop).
+    /// True while the host wants the session running: set by `start()`, cleared by
+    /// `stop()`. It is separate from `state` because a turn can still be in flight after
+    /// `stop()`. Turn handlers check this flag so a stopped session does not speak or
+    /// reopen the microphone.
     private var started = false
     /// The in-flight classification for the most recent final transcript.
     ///
@@ -88,13 +75,8 @@ public final class VoiceIntentSession {
 
     // MARK: - Init
 
-    /// No default configuration.
-    ///
-    /// `VoiceIntentSession()` used to compile, and produced an English session
-    /// reading `Bundle.module` with nothing verified. There is no longer a
-    /// defensible default: a session needs a pack and a trust policy, and both
-    /// are the host's to choose. Requiring them is the point — the compiler now
-    /// asks the question the old default answered silently.
+    /// Creates a session. The configuration is required: it sets the language, the pack
+    /// provider and the trust policy.
     public init(configuration: VoiceIntentConfiguration) {
         self.config = configuration
         (self.events, self.continuation) = AsyncStream<VoiceIntentEvent>.makeStream()
@@ -103,11 +85,7 @@ public final class VoiceIntentSession {
         // coordinator is told it does NOT own the AVAudioSession, and a push provider
         // is created for `provideAudio(_:)` to feed.
         //
-        // The locale is handed over HERE, at construction. The coordinator used to
-        // build itself from a value persisted in the host's `UserDefaults` and get
-        // corrected a moment later by `switchLocale` in `prepare()` — so between the
-        // two there was a recogniser configured for whatever the last session used.
-        // One language is chosen, in one place, and it is the one in `configuration`.
+        // The locale comes from `configuration` and is set here, when the coordinator is created.
         let locale = Locale(identifier: configuration.language.localeIdentifier)
         switch configuration.audioSource {
         case .microphone:
@@ -123,45 +101,21 @@ public final class VoiceIntentSession {
         speaker.onCancel = { [weak self] in self?.handleSpeechCancelled() }
     }
 
-    /// Releases the microphone and the audio session when the host drops this object
+    /// Releases the microphone and the audio session when the host drops this session
     /// without calling `stop()`.
     ///
-    /// This used to be `continuation.finish()` and nothing else, which made "the screen
-    /// was dismissed" and "the view model was released" into a hot microphone and an
-    /// activated `AVAudioSession` for the rest of the app's life. `AudioSessionManager`
-    /// now has its own `deinit` as the floor; this is the deterministic path, so teardown
-    /// happens when the host lets go rather than whenever ARC finishes unwinding a chain
-    /// of objects that may still be referenced by an in-flight task.
+    /// `stop()` is still the right way to end a session. This is a safety net, and it logs
+    /// a warning when it is needed. It assumes one `VoiceIntentSession` at a time, because
+    /// `AVAudioSession` is shared by the whole process.
     ///
-    /// `coordinator` and `speaker` are captured STRONGLY on purpose: `self` is already
-    /// dying, and the closure has to keep the two objects that own the hardware alive
-    /// long enough to shut it down.
+    /// `coordinator` and `speaker` are captured strongly on purpose: `self` is already
+    /// being destroyed, and they must stay alive until the shutdown finishes.
     ///
-    /// `stopLiveTranscription()` covers the live case (its teardown deactivates the
-    /// session); `releaseAudioSession()` covers the already-idle case, where the first
-    /// call returns early. They are complementary, not duplicated.
-    ///
-    /// NOTE: `AVAudioSession` is shared process-wide, so this assumes the host runs one
-    /// `VoiceIntentSession` at a time — the same assumption `stop()` has always made.
-    ///
-    /// WHAT CAN GO WRONG HERE. None of the three calls throw, so there is no error being
-    /// swallowed. What they can do is no-op behind a guard, and each one is accounted for:
-    ///
-    /// - `speaker.stop()` guards on `synthesizer.isSpeaking` — nothing to stop, nothing
-    ///   to do.
-    /// - `stopLiveTranscription()` guards on `state != .idle, != .stopping`. At `.idle`
-    ///   the next line does the work; at `.stopping` a teardown is already in flight and
-    ///   will finish it.
-    /// - `releaseAudioSession()` guards on `ownsAudioSession, state == .idle`. This is the
-    ///   case the previous line skipped: a session left active across a TTS handoff
-    ///   (`stopLiveTranscription(deactivateSession: false)`) with the mic already off.
-    /// - In `.appProvided` mode both correctly do nothing: the HOST owns the audio
-    ///   session, and `configure()` is never called, so `AudioSessionManager.deinit`
-    ///   stands down too.
-    ///
-    /// And underneath all of it, `AudioSessionManager.deinit` is the floor: anything this
-    /// hop misses is caught when that object finally deallocates. This path exists to make
-    /// teardown deterministic, not to be the only thing that works.
+    /// `stopLiveTranscription()` handles a session that is live. `releaseAudioSession()`
+    /// handles one that is already idle. Each returns early when there is nothing to do,
+    /// so calling both is safe. In `.appProvided` mode the host owns the audio session, so
+    /// `releaseAudioSession()` does nothing there. `AudioSessionManager.deinit` is a last
+    /// safety net for anything these calls miss.
     deinit {
         continuation.finish()
 
@@ -183,13 +137,18 @@ public final class VoiceIntentSession {
 
     // MARK: - Lifecycle
 
-    /// Builds the classifier/dialog engine (first call) and starts listening.
-    /// Safe to call again after a turn completes (`state == .idle`) or after an
-    /// explicit `stop()` — subsequent calls skip the engine build and just
-    /// restart the mic.
+    /// Starts a new conversation and begins listening.
     ///
-    /// - Throws: a transcription error if microphone/speech permissions are denied
-    ///   or the audio session cannot start.
+    /// The first call also builds the engine (loads and verifies the pack). Later calls
+    /// reuse it. `start()` discards any unfinished multi-turn conversation in the engine,
+    /// so it always begins fresh. To resume a conversation, use `startNextListeningTurn()`.
+    ///
+    /// It does nothing unless `state` is `.idle` or `.stopped`.
+    ///
+    /// - Throws: `VoiceIntentConfigurationError` for an invalid configuration,
+    ///   `VoiceIntentError` if the pack cannot be found, verified or loaded, or a
+    ///   transcription error if permissions are denied or the audio session cannot start.
+    ///   If building the engine fails, `state` becomes `.stopped` and an `.error` event is sent.
     public func start() async throws {
         // Fail-fast: app-owned audio owns the AVAudioSession, so the package's internal
         // TTS cannot reliably play. Refuse the combination loudly rather than dropping
@@ -224,23 +183,10 @@ public final class VoiceIntentSession {
         started = true
         awaitingAnswer = false          // fresh start: not mid-conversation
 
-        // ...and the engine has to be told, not just this object.
-        //
-        // `NLUEngine.handle()` mutates its OWN conversation state — `pendingIntent`,
-        // `awaitingSlot`, `pendingSlots` — before it returns the response. Clearing only
-        // `awaitingAnswer` above left the two disagreeing whenever a turn ended without
-        // being applied: the session forgot it had asked a question, the engine did not.
-        // The next utterance then arrived at `handleSlotFilling` and was swallowed as the
-        // answer to an abandoned question — say "set a reminder", stop, start, say "turn
-        // up the volume", and you get a reminder named "turn up the volume".
-        //
-        // This is why the reset belongs HERE and not in `startNextListeningTurn()`: the
-        // two entry points mean different things. `start()` is a fresh conversation — its
-        // own comment above has always said so — while `startNextListeningTurn()` exists
-        // precisely to RESUME one, and must leave the engine's context alone.
-        //
-        // `reset()` only clears dictionaries (its body is synchronous; the `await` is an
-        // actor hop), so this is free on the common path where nothing was pending.
+        // Reset the engine too, not only this object. The engine keeps its own multi-turn
+        // state, and without this the next utterance after `stop()` and `start()` would be
+        // treated as the answer to an old question. `start()` begins a new conversation;
+        // `startNextListeningTurn()` resumes one and leaves the engine alone.
         let wasMidConversation = await engine?.isCollecting ?? false
         await engine?.reset()
         if wasMidConversation {
@@ -270,29 +216,22 @@ public final class VoiceIntentSession {
 
     /// The one-time half of `start()`: locale, delegates, engine, prewarm.
     private func prepare() async throws {
-        // Build the engine FIRST, before any audio setup.
+        // Build the engine first, before any audio setup, so a bad pack fails before the
+        // microphone stack is prepared.
         //
-        // It used to come after `switchLocale`, which re-arms the recogniser's
-        // prewarm internally — so a pack failure left the microphone stack warmed
-        // for a session that could never run, and the only visible symptom was
-        // speech-model logs followed by silence. Fail before touching hardware.
-        //
-        // Throws a `VoiceIntentError` if the pack is missing, unsigned, tampered
-        // with, or for the wrong language — none of which may be answered by
-        // quietly starting a session in a different language.
-        // `engine` stays a non-optional LOCAL: `self.engine` is `(any ConversationEngine)?`,
-        // and the warm-up calls at the end of this function need the unwrapped value.
+        // Throws a `VoiceIntentError` if the pack is missing, unsigned, tampered with, or
+        // for the wrong language. It never falls back to a different language.
+        // `engine` stays a local (non-optional): `self.engine` is optional, and the
+        // warm-up calls at the end of this function need the unwrapped value.
         let built = try await buildEngine()
         let engine = built.engine
         self.engine = engine
         self.loadedPack = built.identity
 
-        // NOT `try?`. This throws `TranscriptionError.localeNotSupported` when the
-        // device has no speech model for the requested locale, and swallowing it left
-        // the session running the pack's language through a recogniser listening in a
-        // different one — a Danish pack transcribed as English, with no error, no event
-        // and a plausible-looking wrong intent at the end of it. A host that asked for
-        // a language the device cannot hear needs to be told, not quietly downgraded.
+        // Not `try?`: this throws `TranscriptionError.localeNotSupported` when the device has
+        // no speech model for the requested locale. The host needs to be told, because
+        // otherwise the pack's language would be heard through a recogniser set to a
+        // different language.
         try await coordinator.switchLocale(to: config.language.localeIdentifier)
 
         coordinator.delegate = self
@@ -319,18 +258,12 @@ public final class VoiceIntentSession {
         state = .stopped
     }
 
-    /// Everything that must become true the moment this session stops running —
-    /// whichever door it leaves through.
+    /// Marks the session as no longer running. It is called from `stop()`,
+    /// `didEncounterError(_:)`, and when the microphone cannot be reopened for the next
+    /// turn. Every path that ends in `.stopped` must call it, so an in-flight turn cannot
+    /// finish later and reopen the microphone.
     ///
-    /// There are TWO doors to `.stopped`: `stop()` and `didEncounterError(_:)`. This
-    /// lives in one place on purpose. The first cut of this fix wired only `stop()`,
-    /// which left a fatal microphone error able to run a whole turn and reopen the mic —
-    /// the exact bug the fix was written to close, walking in through the other door.
-    ///
-    /// It deliberately does NOT touch audio, TTS or `state`: the two callers tear those
-    /// down differently (by the time the error path runs, the coordinator has already
-    /// gone `.failed`, stopped the provider and torn the audio session down), and each
-    /// sets `state` itself.
+    /// It does not touch audio, TTS or `state`. Each caller does that itself.
     private func markNotRunning() {
         started = false
         awaitingAnswer = false
@@ -353,8 +286,11 @@ public final class VoiceIntentSession {
     ///
     /// No-op unless the session was created with `audioSource == .appProvided`. Audio
     /// pushed while the session is not `.listening` is dropped, so trailing audio from
-    /// one turn cannot bleed into the next — feed only while `state == .listening`
-    /// (observe the `.stateChanged` event). Safe to call from a real-time audio thread.
+    /// one turn cannot bleed into the next. Feed audio only while `state == .listening`
+    /// (observe the `.stateChanged` event).
+    ///
+    /// This method is main-actor isolated, like the rest of the session. From other
+    /// threads, call it with `await`.
     public func provideAudio(_ data: Data) {
         appAudio?.enqueue(data)
     }
@@ -369,7 +305,8 @@ public final class VoiceIntentSession {
     /// Required in external-TTS mode — the session deliberately does NOT reopen the mic
     /// after emitting a prompt until you signal here, so your own speech is never
     /// captured as the user's answer and the mic never reopens before the user has heard
-    /// the prompt. Without this call the session waits indefinitely in `.speaking`.
+    /// the prompt. Without this call, VoiceAIKit moves on after 30 seconds instead of
+    /// staying stuck in `.speaking`.
     ///
     /// No-op when the package's internal TTS is active (it advances itself), or when the
     /// session is not currently awaiting host delivery.
@@ -387,7 +324,7 @@ public final class VoiceIntentSession {
     /// Builds the engine on first use if `start()` was never called.
     ///
     /// - Throws: a `VoiceIntentError` when the pack cannot be resolved, verified
-    ///   or bound. Previously this could not fail, because failure meant English.
+    ///   or bound.
     public func classify(text: String) async throws -> VoiceIntentTurn {
         let active: any ConversationEngine
         if let existing = engine {
@@ -404,13 +341,9 @@ public final class VoiceIntentSession {
 
     // MARK: - Engine construction
 
-    /// Resolve, verify and bind this session's pack, then build the engine.
-    ///
-    /// Throws rather than falling back. The predecessor answered a missing or
-    /// broken pack by substituting English — which is indistinguishable from
-    /// success for an English user, and wrong in the user's hands for everyone
-    /// else. A caller that cannot get a pack needs to know, not to be handed a
-    /// session that will confidently misunderstand.
+    /// Loads and verifies the pack for the configured language and builds the engine.
+    /// It throws if the pack cannot be found, verified or loaded. It never falls back to
+    /// a different pack.
     private func buildEngine() async throws -> (engine: any ConversationEngine, identity: PackIdentity) {
         let code = config.language.languageCode
         let url = try await config.packProvider.packURL(for: code)
@@ -438,11 +371,10 @@ public final class VoiceIntentSession {
     // MARK: - Listening
 
     private func beginListening() async throws {
-        // NOT guarded on `started`. `startNextListeningTurn()` is a public entry point
-        // that reaches here directly, and `VoiceIntentSessionSmokeTests`
-        // .testStartNextListeningTurnFromIdleThrowsWithoutMic asserts it does NOT return
-        // early. The mic-reopen paths are closed at `apply()` and `handleTurnAdvance()`
-        // instead, which is where a stopped session's turn actually leaks through.
+        // No `started` check before starting the microphone, because
+        // `startNextListeningTurn()` calls this directly. The mic-reopen paths are closed
+        // at `apply()` and `handleTurnAdvance()` instead, which is where a stopped
+        // session's turn actually leaks through.
         // Slot answers get the unhurried window; first commands the standard one.
         coordinator.silenceConfiguration = awaitingAnswer
             ? (config.slotAnswerSilence ?? .slotAnswer)
@@ -592,24 +524,12 @@ public final class VoiceIntentSession {
         }
     }
 
-    /// Reopens the microphone for the next turn, and — unlike the `Task { try? ... }`
-    /// this replaces — says so out loud when it cannot.
+    /// Reopens the microphone for the next turn. If that fails, the session stops and an
+    /// `.error` event is sent, so the host is not left waiting in `.thinking`.
     ///
-    /// `beginListening()` throws for things the host has to react to: microphone or
-    /// speech-recognition permission revoked mid-conversation, the audio session failing
-    /// to configure, the analyzer refusing to start. `try?` swallowed all of them, and
-    /// because `state` only becomes `.listening` on success, the session was left sitting
-    /// in the `.thinking` that `handleSpeechFinished()` had just set — no error, no state
-    /// change, no way back. The host's UI showed "thinking..." forever and the only cure
-    /// was killing the app. That silence is Recommendation #1.
-    ///
-    /// The task is deliberately NOT stored and NOT cancellable.
-    /// `TranscriptionCoordinator.startLiveTranscription()` has no teardown on its throw
-    /// path and `TranscriptionState.isActive` excludes `.preparingAudio`, so cancelling
-    /// into it strands the coordinator holding a configured audio session and a live
-    /// provider. `started` is what neutralises a stale turn instead — storing a handle
-    /// nobody may safely use is how `started` itself became a flag written twice and read
-    /// never.
+    /// The task is not stored and not cancelled. Cancelling `startLiveTranscription()` while
+    /// it is starting can leave the coordinator in `.preparingAudio`, which `isActive` does
+    /// not count. The `started` flag is what stops an old turn from doing anything.
     private func resumeListening() {
         Task { [weak self] in
             guard let self else { return }
@@ -631,11 +551,8 @@ public final class VoiceIntentSession {
                 // route still taken.
                 self.coordinator.stopLiveTranscription()
 
-                // This is the THIRD door to `.stopped`, after `stop()` and
-                // `didEncounterError(_:)`. It goes through the same helper for the same
-                // reason: a door that sets the state but not the flag leaves a pending
-                // turn free to run and reopen the microphone — which is the bug the
-                // previous commit closed, and which this handler would have reopened.
+                // Same path as `stop()` and `didEncounterError(_:)`: use `markNotRunning()` so a
+                // pending turn cannot reopen the microphone.
                 self.markNotRunning()
                 self.continuation.yield(.error(message: String(describing: error)))
                 self.state = .stopped
@@ -667,11 +584,9 @@ public final class VoiceIntentSession {
         if state == .speaking { state = .idle }
     }
 
-    /// Advance the session after a turn that did NOT go through TTS — this
-    /// path is called for the `.notUnderstood` fallback and for any turn whose
-    /// fulfillment message is empty. Without this, state would stay stuck on
-    /// `.thinking` forever (there's no `didFinishSpeaking` callback to fire)
-    /// and consumers watching `.stateChanged` for `.idle` never see it.
+    /// Advances the session after a turn whose spoken message is empty, so there is no
+    /// `didFinishSpeaking` callback to wait for. Without this, `state` would stay on
+    /// `.thinking` and consumers watching `.stateChanged` for `.idle` would never see it.
     private func finishTurnIfNeeded() {
         handleTurnAdvance()
     }
@@ -679,10 +594,8 @@ public final class VoiceIntentSession {
 
 // MARK: - TranscriptionDelegate
 
-/// Conformance is INTERNAL — `TranscriptionDelegate`, `TranscriptionError` and
-/// `TranscriptionState` are implementation detail as of the public-surface pass, and a
-/// public member cannot expose an internal type. Nothing is lost: the host never called
-/// these; it observes the same information, in its own vocabulary, on `events`.
+/// Internal conformance: `TranscriptionDelegate` is not public, so the session does not
+/// expose these callbacks. The host gets the same information on `events`.
 extension VoiceIntentSession: TranscriptionDelegate {
 
     func didReceivePartialResult(_ text: String) {
@@ -722,9 +635,8 @@ extension VoiceIntentSession: TranscriptionDelegate {
         // provider and torn down the audio session), or the microphone could not be
         // resumed after an interruption. `state = .stopped` below already says the session
         // is over; this makes the flag agree with it, so an in-flight turn cannot finish
-        // and reopen the microphone. A host recovers the same way as before: observe
-        // `.error`, call `start()` again — which is still allowed from `.stopped` and sets
-        // `started` back to true.
+        // and reopen the microphone. To recover, the host observes `.error` and calls
+        // `start()` again, which is allowed from `.stopped` and sets `started` back to true.
         markNotRunning()
         state = .stopped
     }

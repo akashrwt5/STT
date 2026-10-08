@@ -1,93 +1,69 @@
 // PackProvider.swift
 // VoiceAIKit
 //
-// The boundary between "get the bytes" and "trust the bytes".
+// How a host app tells the SDK where a language's pack is.
 //
-// VoiceAIKit never opens a socket. A host hands it a local file URL; the SDK
-// verifies, loads, binds and — later — hot-swaps. That split is not squeamishness
-// about networking, it is where the knowledge actually lives:
+// A provider does one thing: given a language code, it returns the local URL of
+// that language's pack directory. It does not verify, load or cache anything.
+// The SDK verifies the pack itself (signature, checksums, minimum runtime version,
+// language), so a provider cannot weaken those checks.
 //
-//  · Auth, CDN base URLs and certificate pinning are the app's. An SDK that
-//    fetches needs credentials and tenant config it has no business holding, and
-//    every host already has a networking stack with its own retry and telemetry.
-//  · iOS background transfer is app-level by construction — a background
-//    `URLSession` needs `handleEventsForBackgroundURLSession` on the app
-//    delegate. An SDK cannot own that cleanly.
-//  · Download on cellular? Prompt before 5 MB? Evict which pack when storage is
-//    low? Those are product decisions. An SDK that answers them gives every app
-//    the same answer.
-//  · Enterprise and MDM deployments pre-provision or proxy assets. An SDK that
-//    insists on its own URL breaks them.
-//
-// What the SDK does keep is the part no host should reimplement: the ed25519 +
-// sha256 trust chain, the `min_runtime_contract` check, language binding, and
-// refusing a pack rather than degrading to one that happens to be lying around.
-//
-// WHY THIS REPLACES `LanguagePackRegistry`
-//
-// The registry enumerated `Bundle.module` — the languages compiled into the
-// binary. A language released after the app shipped can never appear in that
-// list, which makes it unfit for a product that will add languages over time.
-// The question "which languages exist?" belongs to whoever publishes packs, not
-// to a binary that was built before they were published.
+// The SDK never downloads packs. Where a pack comes from (bundled with the app,
+// downloaded over the air, provisioned by MDM) is up to the host app.
 
 import Foundation
 
-/// Supplies a verified-on-disk pack for a language. Implemented by the host.
+/// Returns the local location of a language's pack. Implemented by the host app.
 public protocol PackProvider: Sendable {
 
-    /// A LOCAL file URL for `language`'s pack directory.
+    /// The pack directory for `language`, as a local file URL.
     ///
-    /// How it got there — bundled, downloaded, pre-provisioned by MDM — is the
-    /// host's business. The SDK will verify it before trusting a byte of it.
+    /// The SDK calls this each time it builds an engine, for example on `start()`.
+    /// Return the pack that should be used now, so an app that installs newer packs
+    /// picks the new one up on the next call.
     ///
-    /// - Throws: anything the host likes. It surfaces to the caller unchanged,
-    ///   so a network error stays a network error rather than being flattened
-    ///   into "pack not found".
+    /// The SDK verifies the returned pack before using it. If verification fails it
+    /// throws; it does not fall back to a different pack.
+    ///
+    /// - Parameter language: The configured language's `languageCode`, e.g. `"en"`.
+    /// - Returns: The directory that contains the pack's `bundle.json`.
+    /// - Throws: Any error. The SDK does not wrap it, so a network failure stays a
+    ///   network failure instead of turning into "pack not found". Throw
+    ///   `VoiceIntentError.languageUnavailable` if you have no pack for `language`.
     func packURL(for language: String) async throws -> URL
 }
 
-/// A provider over URLs the host already has on disk.
+/// A `PackProvider` that returns pack locations you gave it up front.
 ///
-/// The obvious implementation, and deliberately the only one shipped: no
-/// discovery, no directory scanning, no naming convention. The host says which
-/// URL belongs to which language, because the alternative is the SDK guessing
-/// from filenames — which is what the registry did.
-///
-/// Typical use is the seed pack seeded into the app's own bundle:
-///
-/// ```swift
-/// let seed = Bundle.main.url(forResource: "pack-en-v1.0.30", withExtension: nil)!
-/// let provider = StaticPackProvider(["en": seed])
-/// ```
-///
-/// Note `Bundle.main` — the APP's bundle. The SDK still ships no data; the app
-/// chooses to pre-install one pack so the first launch works offline. Crucially
-/// that seed loads through the same path as a downloaded pack. The predecessor's
-/// mistake was a separate code path for the default language, which then became
-/// the fallback everything silently landed on.
+/// Give it a language code and the URL of that language's pack folder (for example
+/// "en" and the English pack folder). When the SDK asks for "en", it returns that URL.
+/// Use it when you already know where the pack is, such as a pack shipped with the app.
 public struct StaticPackProvider: PackProvider {
 
     private let urls: [String: URL]
 
-    /// The languages this provider can serve, sorted.
+    /// The language codes this provider serves, sorted.
     ///
-    /// Exposed so a host can decide BEFORE constructing a session whether the
-    /// language it wants is available — see `VoiceIntentError.languageUnavailable`,
-    /// which carries the same list after the fact. Deciding up front is better:
-    /// the choice of language also decides the speech recogniser's locale, and
-    /// that has to be made once, together.
+    /// Use it before creating a session to check that the language you want is
+    /// available. If a session asks for a language that is not listed here,
+    /// `packURL(for:)` throws `VoiceIntentError.languageUnavailable` with this list.
     public var languages: [String] { urls.keys.sorted() }
 
+    /// - Parameter urls: Language code to pack directory URL.
     public init(_ urls: [String: URL]) {
         self.urls = urls
     }
 
-    /// Convenience for a host that supports exactly one language today.
+    /// Convenience for a host that supports a single language.
     public init(language: String, url: URL) {
         self.urls = [language: url]
     }
 
+    /// Returns the URL registered for `language`. It does not touch the disk; the
+    /// SDK checks the pack when it loads it.
+    ///
+    /// - Throws: `VoiceIntentError.languageUnavailable` if `language` is not in
+    ///   the map.
     public func packURL(for language: String) async throws -> URL {
         guard let url = urls[language] else {
             throw VoiceIntentError.languageUnavailable(
