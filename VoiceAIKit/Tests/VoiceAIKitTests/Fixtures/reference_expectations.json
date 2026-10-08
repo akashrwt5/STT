@@ -217,9 +217,9 @@
     },
     {
       "entity": "memory",
-      "text": "change to the three memory",
-      "value": "three",
-      "span": "three",
+      "text": "change to the music memory",
+      "value": "Music",
+      "span": "music",
       "confidence": 1.0
     },
     {
@@ -231,9 +231,9 @@
     },
     {
       "entity": "memory",
-      "text": "set it to automatic",
-      "value": "Automatic",
-      "span": "automatic",
+      "text": "set it to outdoors",
+      "value": "Outdoors",
+      "span": "outdoors",
       "confidence": 1.0
     },
     {

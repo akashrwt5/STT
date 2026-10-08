@@ -338,7 +338,7 @@ final class ConfirmationAndSlotFlowTests: XCTestCase {
     /// in the subset cannot reach a device, however correct it looks.
     func testTheSetReminderCarrierShipsAndIsPortable() throws {
         let carriers = pack.lexicon.carriers
-        XCTAssertTrue(carriers.contains { $0.contains("reminder|alarm") },
+        XCTAssertTrue(carriers.contains { $0.contains("reminder|remindr|alarm") },
                       "the set-a-reminder carrier must be in the pack, not in host code")
         XCTAssertFalse(carriers.contains { $0.contains("(?!") },
                        "negative lookahead is outside the portable subset and gets silently dropped")
