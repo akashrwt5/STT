@@ -205,13 +205,15 @@ public final class VoiceIntentSession {
     /// calls if the session is already active.
     ///
     /// - Throws: a transcription error if the audio session cannot start.
-    public func startNextListeningTurn() async throws {
+    public func startNextListeningTurn() async throws -> Bool {
         guard state == .idle else {
             logger.warning("startNextListeningTurn() ignored: state is \(String(describing: self.state), privacy: .public), expected .idle")
-            return
+            return false
         }
         logger.info("[Session] startNextListeningTurn(): Resuming listening from idle state.")
         try await beginListening()
+        logger.info("startNextListeningTurn(): listening.")
+        return true
     }
 
     /// The one-time half of `start()`: locale, delegates, engine, prewarm.
